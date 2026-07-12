@@ -110,6 +110,7 @@ def delete_document(
     storage: Storage = Depends(get_storage),
 ) -> None:
     doc = get_doc_or_404(session, document_id)
-    storage.delete_document_file(doc.file_path)
+    rel_path = doc.file_path
     session.delete(doc)  # chunks and document_tags cascade via FK
     session.commit()
+    storage.delete_document_file(rel_path)
