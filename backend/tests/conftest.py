@@ -66,3 +66,14 @@ def auth_client(client, user):
 
     client.headers["Authorization"] = f"Bearer {create_access_token(user.id)}"
     return client
+
+
+@pytest.fixture
+def storage(tmp_path):
+    from app.services.storage import Storage, get_storage as real_get_storage
+    from app.main import app as main_app
+
+    s = Storage(tmp_path)
+    main_app.dependency_overrides[real_get_storage] = lambda: s
+    yield s
+    main_app.dependency_overrides.pop(real_get_storage, None)

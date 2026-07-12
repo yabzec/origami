@@ -1,9 +1,10 @@
 from fastapi import FastAPI
 
-from app.api import auth, folders, tags
+from app.api import auth, documents, folders, tags
 
 app = FastAPI(title="Origami")
 app.include_router(auth.router)
+app.include_router(documents.router)
 app.include_router(folders.router)
 app.include_router(tags.router)
 
