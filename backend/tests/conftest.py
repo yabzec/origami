@@ -46,3 +46,23 @@ def client(session):
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def user(session):
+    from app.models import User
+    from app.services.auth import hash_password
+
+    u = User(username="test", password_hash=hash_password("testpass"))
+    session.add(u)
+    session.commit()
+    session.refresh(u)
+    return u
+
+
+@pytest.fixture
+def auth_client(client, user):
+    from app.services.auth import create_access_token
+
+    client.headers["Authorization"] = f"Bearer {create_access_token(user.id)}"
+    return client
