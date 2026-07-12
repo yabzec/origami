@@ -23,6 +23,15 @@ def test_move_cycle_rejected(auth_client):
     assert resp.json()["detail"]["error"]["code"] == "folder_cycle"
 
 
+def test_move_cycle_rejected_multi_level(auth_client):
+    a = auth_client.post("/api/folders", json={"name": "A"}).json()["id"]
+    b = auth_client.post("/api/folders", json={"name": "B", "parent_id": a}).json()["id"]
+    c = auth_client.post("/api/folders", json={"name": "C", "parent_id": b}).json()["id"]
+    resp = auth_client.patch(f"/api/folders/{a}", json={"parent_id": c})
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["error"]["code"] == "folder_cycle"
+
+
 def test_rename(auth_client):
     a = auth_client.post("/api/folders", json={"name": "A"}).json()["id"]
     resp = auth_client.patch(f"/api/folders/{a}", json={"name": "Archive"})
