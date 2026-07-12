@@ -12,7 +12,7 @@ def test_duplicate_sibling_name_rejected(auth_client):
     auth_client.post("/api/folders", json={"name": "Bills"})
     resp = auth_client.post("/api/folders", json={"name": "Bills"})
     assert resp.status_code == 409
-    assert resp.json()["detail"]["error"]["code"] == "duplicate_folder"
+    assert resp.json()["error"]["code"] == "duplicate_folder"
 
 
 def test_move_cycle_rejected(auth_client):
@@ -20,7 +20,7 @@ def test_move_cycle_rejected(auth_client):
     b = auth_client.post("/api/folders", json={"name": "B", "parent_id": a}).json()["id"]
     resp = auth_client.patch(f"/api/folders/{a}", json={"parent_id": b})
     assert resp.status_code == 409
-    assert resp.json()["detail"]["error"]["code"] == "folder_cycle"
+    assert resp.json()["error"]["code"] == "folder_cycle"
 
 
 def test_move_cycle_rejected_multi_level(auth_client):
@@ -29,7 +29,7 @@ def test_move_cycle_rejected_multi_level(auth_client):
     c = auth_client.post("/api/folders", json={"name": "C", "parent_id": b}).json()["id"]
     resp = auth_client.patch(f"/api/folders/{a}", json={"parent_id": c})
     assert resp.status_code == 409
-    assert resp.json()["detail"]["error"]["code"] == "folder_cycle"
+    assert resp.json()["error"]["code"] == "folder_cycle"
 
 
 def test_rename(auth_client):
@@ -44,7 +44,7 @@ def test_delete_non_empty_rejected(auth_client):
     auth_client.post("/api/folders", json={"name": "B", "parent_id": a})
     resp = auth_client.delete(f"/api/folders/{a}")
     assert resp.status_code == 409
-    assert resp.json()["detail"]["error"]["code"] == "folder_not_empty"
+    assert resp.json()["error"]["code"] == "folder_not_empty"
 
 
 def test_delete_empty(auth_client):

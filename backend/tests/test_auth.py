@@ -22,7 +22,7 @@ def test_login_wrong_password(client, session):
     make_user(session)
     resp = client.post("/api/auth/login", json={"username": "test", "password": "nope"})
     assert resp.status_code == 401
-    assert resp.json()["detail"]["error"]["code"] == "invalid_credentials"
+    assert resp.json()["error"]["code"] == "invalid_credentials"
 
 
 def test_protected_route_requires_token(client):

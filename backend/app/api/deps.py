@@ -11,6 +11,11 @@ bearer = HTTPBearer(auto_error=False)
 
 
 def api_error(status: int, code: str, message: str, detail=None) -> HTTPException:
+    """Build an HTTPException whose body the registered exception handler
+    (see app.api.error_handlers) flattens to a top-level
+    ``{"error": {"code", "message", "detail"}}`` response instead of
+    FastAPI's default ``{"detail": ...}`` wrapping.
+    """
     return HTTPException(
         status_code=status,
         detail={"error": {"code": code, "message": message, "detail": detail}},

@@ -16,4 +16,4 @@ def test_duplicate_name_rejected(auth_client):
     auth_client.post("/api/tags", json={"name": "casa"})
     resp = auth_client.post("/api/tags", json={"name": "casa"})
     assert resp.status_code == 409
-    assert resp.json()["detail"]["error"]["code"] == "duplicate_tag"
+    assert resp.json()["error"]["code"] == "duplicate_tag"
