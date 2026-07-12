@@ -54,6 +54,38 @@ def test_patch_replaces_tags_and_moves_folder(auth_client, session):
     assert [t["id"] for t in body["tags"]] == [t2.id]
 
 
+def test_patch_replaces_existing_tag_set(auth_client, session):
+    doc = make_document(session)
+    t1, t2 = Tag(name="a"), Tag(name="b")
+    session.add(t1); session.add(t2); session.commit()
+    session.add(DocumentTag(document_id=doc.id, tag_id=t1.id))
+    session.commit()
+
+    body = auth_client.patch(
+        f"/api/documents/{doc.id}",
+        json={"tag_ids": [t2.id]},
+    ).json()
+    assert [t["id"] for t in body["tags"]] == [t2.id]
+
+
+def test_patch_missing_folder_id_404(auth_client, session):
+    doc = make_document(session)
+    resp = auth_client.patch(
+        f"/api/documents/{doc.id}",
+        json={"folder_id": 999999},
+    )
+    assert resp.status_code == 404
+
+
+def test_patch_missing_tag_id_404(auth_client, session):
+    doc = make_document(session)
+    resp = auth_client.patch(
+        f"/api/documents/{doc.id}",
+        json={"tag_ids": [999999]},
+    )
+    assert resp.status_code == 404
+
+
 def test_delete_removes_file(auth_client, session, storage):
     doc = make_document(session)
     rel, _ = storage.store_file(doc.id, ".pdf", b"%PDF")
