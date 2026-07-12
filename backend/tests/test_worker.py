@@ -1,4 +1,5 @@
 import pytest
+from sqlalchemy import text
 from sqlmodel import Session
 
 from app.models import Job, JobStatus
@@ -50,6 +51,25 @@ def test_run_once_unknown_type_fails_job(engine, session):
 
 def test_run_once_empty_queue(engine):
     assert runner.run_once(engine) is False
+
+
+def test_run_once_rolls_back_before_fail_on_dirty_session(engine, session):
+    # Simulate a handler that does DB work, leaves the transaction in an
+    # aborted state (a real DBAPI error), then raises. Without a
+    # session.rollback() before fail()'s session.commit(), this would
+    # surface as sqlalchemy.exc.PendingRollbackError instead of cleanly
+    # failing the job.
+    @runner.register("dirty")
+    def handle_dirty(s: Session, payload: dict) -> None:
+        s.execute(text("SELECT 1/0"))  # aborts the current transaction
+
+    enqueue(session, "dirty", {})
+    assert runner.run_once(engine) is True
+    with Session(engine) as s:
+        job = s.get(Job, 1)
+        assert job.status == JobStatus.queued
+        assert job.attempts == 1
+        assert job.last_error
 
 
 def test_recover_resets_running(engine, session):

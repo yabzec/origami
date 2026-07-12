@@ -33,6 +33,7 @@ def run_once(engine) -> bool:
         try:
             handler(session, job.payload)
         except Exception:
+            session.rollback()
             log.exception("Job %s failed", job.id)
             fail(session, job, traceback.format_exc()[-2000:])
         else:
