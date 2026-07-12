@@ -22,3 +22,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+    # Upstream FastAPI TestClient uses deprecated httpx API; tracked for removal when FastAPI updates TestClient
+    "ignore:Using.*httpx.*with.*starlette.testclient.*is deprecated",
+]
