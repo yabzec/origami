@@ -46,6 +46,11 @@ def test_scanimage_stderr_mapping():
     assert isinstance(m("sane_start: Document feeder jammed", 1), ScannerJam)
     assert isinstance(m("sane_start: Cover open", 1), type(m("cover open", 1)))
     assert m("anything else", 1).code == "scanner_error"
+    # Narrow offline detection: "no such device" maps to offline
+    assert isinstance(m("open of device foo failed: no such device", 1), ScannerOffline)
+    # But "invalid argument" should NOT map to offline (it's a bad parameter, not device missing)
+    assert not isinstance(m("scanimage: sane_start: Invalid argument (bad --resolution)", 1), ScannerOffline)
+    assert m("scanimage: sane_start: Invalid argument (bad --resolution)", 1).code == "scanner_error"
 
 
 def test_scanimage_timeout_maps(monkeypatch):

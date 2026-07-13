@@ -60,7 +60,7 @@ class ScanimageBackend:
     @staticmethod
     def _map_error(stderr: str, returncode: int) -> ScannerError:
         lowered = stderr.lower()
-        if "no sane devices" in lowered or "invalid argument" in lowered:
+        if "no sane devices" in lowered or "no such device" in lowered:
             return ScannerOffline(stderr.strip())
         if "device busy" in lowered:
             return ScannerBusy(stderr.strip())
