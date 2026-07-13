@@ -50,3 +50,30 @@ def test_describe_image(monkeypatch, tmp_path):
     kinds = [p["type"] for p in captured["parts"]]
     assert kinds == ["text", "image_url"]
     assert captured["parts"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+def test_complete_non_stream(monkeypatch):
+    def fake_completion(model, messages, stream=False):
+        assert stream is False
+        assert model == "gemini/gemini-2.5-flash"
+        msg = SimpleNamespace(content="Risposta completa.")
+        return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
+
+    monkeypatch.setattr(litellm, "completion", fake_completion)
+    assert llm.complete([{"role": "user", "content": "ciao"}]) == "Risposta completa."
+
+
+def test_complete_stream_yields_deltas(monkeypatch):
+    def fake_completion(model, messages, stream=False):
+        assert stream is True
+
+        def chunks():
+            for piece in ["Ecco ", None, "la risposta.", ""]:
+                delta = SimpleNamespace(content=piece)
+                yield SimpleNamespace(choices=[SimpleNamespace(delta=delta)])
+
+        return chunks()
+
+    monkeypatch.setattr(litellm, "completion", fake_completion)
+    deltas = list(llm.complete([{"role": "user", "content": "ciao"}], stream=True))
+    assert deltas == ["Ecco ", "la risposta."]  # None/empty deltas filtered out

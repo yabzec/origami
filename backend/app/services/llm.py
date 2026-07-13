@@ -36,3 +36,18 @@ def describe(text: str | None = None, image_path: Path | None = None) -> str:
         model = settings.llm_model
     resp = litellm.completion(model=model, messages=[{"role": "user", "content": content}])
     return resp.choices[0].message.content.strip()
+
+
+def complete(messages: list[dict], stream: bool = False):
+    settings = get_settings()
+    resp = litellm.completion(model=settings.llm_model, messages=messages, stream=stream)
+    if not stream:
+        return resp.choices[0].message.content
+
+    def deltas():
+        for chunk in resp:
+            piece = chunk.choices[0].delta.content
+            if piece:
+                yield piece
+
+    return deltas()
