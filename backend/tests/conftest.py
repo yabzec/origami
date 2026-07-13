@@ -77,3 +77,21 @@ def storage(tmp_path):
     main_app.dependency_overrides[real_get_storage] = lambda: s
     yield s
     main_app.dependency_overrides.pop(real_get_storage, None)
+
+
+@pytest.fixture
+def llm_stub(monkeypatch):
+    """Stub the ONLY sanctioned mock boundary: app.services.llm."""
+    calls = {"embed": [], "describe": []}
+
+    def fake_embed(texts):
+        calls["embed"].append(list(texts))
+        return [[0.1] * 1536 for _ in texts]
+
+    def fake_describe(text=None, image_path=None):
+        calls["describe"].append({"text": text, "image_path": image_path})
+        return "Descrizione generata."
+
+    monkeypatch.setattr("app.worker.pipeline.llm_embed", fake_embed)
+    monkeypatch.setattr("app.worker.pipeline.llm_describe", fake_describe)
+    return calls
