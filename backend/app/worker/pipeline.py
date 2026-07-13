@@ -218,11 +218,27 @@ SESSION_MAX_AGE = timedelta(hours=24)
 
 @register("sweep_scan_sessions")
 def sweep_scan_sessions(session: Session, payload: dict) -> None:
-    from app.models import ScanPage, ScanSession, ScanSessionStatus
+    from app.models import Job, JobStatus, ScanPage, ScanSession, ScanSessionStatus
     from app.services.jobs import enqueue
 
     storage = get_pipeline_storage()
     cutoff = datetime.now(timezone.utc) - SESSION_MAX_AGE
+
+    # Sessions with a queued/running process_document job must survive the sweep even
+    # if they look "abandoned" by age, otherwise a backlogged worker could have its
+    # temp page files deleted out from under an in-flight compile job.
+    in_flight_jobs = session.exec(
+        select(Job).where(
+            Job.type == "process_document",
+            Job.status.in_([JobStatus.queued, JobStatus.running]),
+        )
+    ).all()
+    protected_session_ids = {
+        job.payload.get("scan_session_id")
+        for job in in_flight_jobs
+        if job.payload.get("scan_session_id") is not None
+    }
+
     for scan_session in session.exec(select(ScanSession)).all():
         finished = scan_session.status in (
             ScanSessionStatus.done,
@@ -232,15 +248,22 @@ def sweep_scan_sessions(session: Session, payload: dict) -> None:
         if created.tzinfo is None:
             created = created.replace(tzinfo=timezone.utc)
         abandoned = not finished and created < cutoff
+        if (
+            abandoned
+            and scan_session.status == ScanSessionStatus.compiling
+            and scan_session.id in protected_session_ids
+        ):
+            continue
         if not (finished or abandoned):
             continue
         for page in session.exec(
             select(ScanPage).where(ScanPage.session_id == scan_session.id)
         ).all():
             session.delete(page)
+        sid = scan_session.id
         session.delete(scan_session)
         session.commit()
-        storage.remove_scan_session_dir(scan_session.id)
+        storage.remove_scan_session_dir(sid)
 
     enqueue(
         session,

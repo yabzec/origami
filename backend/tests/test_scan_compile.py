@@ -96,6 +96,30 @@ def test_sweep_purges_old_sessions(session, storage, engine, monkeypatch):
     assert jobs[0].status == JobStatus.queued
 
 
+def test_sweep_skips_compiling_session_with_in_flight_job(session, storage, engine, monkeypatch):
+    monkeypatch.setattr(pipeline, "get_pipeline_storage", lambda: storage)
+    compiling = ScanSession(
+        status=ScanSessionStatus.compiling,
+        created_at=datetime.now(timezone.utc) - timedelta(hours=30),
+    )
+    session.add(compiling)
+    session.commit()
+    storage.scan_session_dir(compiling.id)
+
+    job = Job(
+        type="process_document",
+        payload={"document_id": "doc-in-flight", "scan_session_id": compiling.id},
+        status=JobStatus.queued,
+    )
+    session.add(job)
+    session.commit()
+
+    pipeline.sweep_scan_sessions(session, {})
+
+    assert session.get(ScanSession, compiling.id) is not None
+    assert (storage.tmp_scans_dir / str(compiling.id)).exists()
+
+
 def test_ensure_sweep_scheduled_is_idempotent(session, engine):
     pipeline.ensure_sweep_scheduled(engine)
     pipeline.ensure_sweep_scheduled(engine)
