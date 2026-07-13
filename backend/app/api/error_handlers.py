@@ -53,3 +53,12 @@ def register_error_handlers(app: FastAPI) -> None:
                 }
             },
         )
+
+    from app.services.scanner import ScannerError
+
+    @app.exception_handler(ScannerError)
+    async def scanner_error_handler(request, exc: ScannerError):
+        return JSONResponse(
+            status_code=exc.http_status,
+            content={"error": {"code": exc.code, "message": exc.message, "detail": None}},
+        )

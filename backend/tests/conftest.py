@@ -80,6 +80,17 @@ def storage(tmp_path):
 
 
 @pytest.fixture
+def fake_scanner(client):
+    from app.main import app as main_app
+    from app.services.scanner import FakeScannerBackend, get_scanner
+
+    backend = FakeScannerBackend()
+    main_app.dependency_overrides[get_scanner] = lambda: backend
+    yield backend
+    main_app.dependency_overrides.pop(get_scanner, None)
+
+
+@pytest.fixture
 def llm_stub(monkeypatch):
     """Stub the ONLY sanctioned mock boundary: app.services.llm."""
     calls = {"embed": [], "describe": []}
