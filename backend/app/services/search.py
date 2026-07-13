@@ -107,3 +107,69 @@ def rrf_fuse(rankings: list[list[int]], k: int = RRF_K) -> list[int]:
         for position, chunk_id in enumerate(ranking):
             scores[chunk_id] = scores.get(chunk_id, 0.0) + 1.0 / (k + position + 1)
     return [cid for cid, _ in sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))]
+
+
+def search(
+    session: Session,
+    query: str,
+    mode: str = "hybrid",
+    filters: SearchFilters | None = None,
+    limit: int = 10,
+) -> list[dict]:
+    filters = filters or SearchFilters()
+    doc_ids = allowed_document_ids(session, filters)
+    if doc_ids is not None and not doc_ids:
+        return []
+
+    fetch = max(limit * 5, 20)
+    semantic_hits: list[SemanticHit] = []
+    keyword_hits: list[KeywordHit] = []
+    if mode in ("semantic", "hybrid"):
+        query_vector = llm_embed([query])[0]
+        semantic_hits = semantic_search(session, query_vector, fetch, doc_ids)
+    if mode in ("keyword", "hybrid"):
+        keyword_hits = keyword_search(session, query, fetch, doc_ids)
+
+    if mode == "semantic":
+        ordered = [h.chunk_id for h in semantic_hits]
+    elif mode == "keyword":
+        ordered = [h.chunk_id for h in keyword_hits]
+    else:
+        ordered = rrf_fuse(
+            [[h.chunk_id for h in semantic_hits], [h.chunk_id for h in keyword_hits]]
+        )
+    if not ordered:
+        return []
+
+    similarities = {h.chunk_id: h.similarity for h in semantic_hits}
+    snippets = {h.chunk_id: h.snippet for h in keyword_hits}
+    chunks = {
+        c.id: c for c in session.exec(select(Chunk).where(Chunk.id.in_(ordered)))
+    }
+
+    results: list[dict] = []
+    by_document: dict = {}
+    for position, chunk_id in enumerate(ordered):
+        chunk = chunks[chunk_id]
+        entry = by_document.get(chunk.document_id)
+        if entry is None:
+            if len(results) >= limit:
+                continue
+            entry = {
+                "document_id": chunk.document_id,
+                "score": 1.0 / (position + 1),
+                "snippets": [],
+            }
+            by_document[chunk.document_id] = entry
+            results.append(entry)
+        if len(entry["snippets"]) < 3:
+            entry["snippets"].append(
+                {
+                    "chunk_id": chunk_id,
+                    "page_number": chunk.page_number,
+                    "source": chunk.source,
+                    "text": snippets.get(chunk_id) or chunk.content[:250],
+                    "similarity": similarities.get(chunk_id),
+                }
+            )
+    return results
