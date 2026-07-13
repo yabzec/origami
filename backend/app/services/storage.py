@@ -30,6 +30,13 @@ class Storage:
         path.write_bytes(data)
         return f"files/{name}", len(data)
 
+    def store_fileobj(self, document_id: uuid.UUID, ext: str, fileobj) -> tuple[str, int]:
+        name = f"{document_id}{ext}"
+        path = self.files_dir / name
+        with path.open("wb") as out:
+            shutil.copyfileobj(fileobj, out)
+        return f"files/{name}", path.stat().st_size
+
     def delete_document_file(self, rel: str | None) -> None:
         if rel:
             self.abs_path(rel).unlink(missing_ok=True)
