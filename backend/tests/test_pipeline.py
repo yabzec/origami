@@ -4,7 +4,6 @@ import pytest
 from sqlmodel import select
 
 from app.models import Chunk, ChunkSource, DocStatus, DocType, Document
-from app.services.ocr import ocr_image
 from app.services.storage import Storage
 from app.worker import pipeline
 from tests.helpers import make_text_image

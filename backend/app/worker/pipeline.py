@@ -1,6 +1,5 @@
 import logging
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 from sqlmodel import Session, select
 
@@ -206,6 +205,10 @@ def _embed_pending_chunks(session: Session, doc: Document) -> None:
     if not pending:
         return
     vectors = llm_embed([c.content for c in pending])
+    if len(vectors) != len(pending):
+        raise ValueError(
+            f"Expected {len(pending)} embeddings from llm_embed, got {len(vectors)}"
+        )
     for chunk, vector in zip(pending, vectors):
         chunk.embedding = vector
         session.add(chunk)
