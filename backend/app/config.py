@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     embedding_dim: int = 1536
     gemini_api_key: str = ""
     default_ocr_languages: str = "ita+eng"
+    rag_top_k: int = 8
+    rag_relevance_floor: float = 0.35
 
 
 @lru_cache
