@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from sqlmodel import Session, select
@@ -14,7 +15,7 @@ from app.services.extract import (
 )
 from app.services.llm import describe as llm_describe
 from app.services.llm import embed as llm_embed
-from app.services.ocr import ocr_image, pdf_to_searchable_pdf
+from app.services.ocr import images_to_searchable_pdf, ocr_image, pdf_to_searchable_pdf
 from app.services.storage import Storage
 from app.worker.runner import register
 
@@ -70,6 +71,10 @@ def _extract_content(
     """Return page texts; skip (return []) if content chunks already exist."""
     if doc.doc_type == DocType.video or _has_chunks(session, doc, ChunkSource.content):
         return []
+
+    if doc.doc_type == DocType.scan:
+        return _extract_scan(session, doc, storage, payload)  # Task 9
+
     path = storage.abs_path(doc.file_path)
 
     if doc.doc_type == DocType.text:
@@ -93,14 +98,36 @@ def _extract_content(
         session.commit()
         return pages
 
-    if doc.doc_type == DocType.scan:
-        return _extract_scan(session, doc, storage, payload)  # Task 9
-
     raise ValueError(f"Unknown doc_type {doc.doc_type!r}")
 
 
-def _extract_scan(session, doc, storage, payload):  # implemented in Task 9
-    raise NotImplementedError("scan compilation lands in the scan-compile task")
+def _extract_scan(
+    session: Session, doc: Document, storage: Storage, payload: dict
+) -> list[tuple[int | None, str]]:
+    from app.models import ScanPage, ScanSession, ScanSessionStatus
+
+    session_id = payload["scan_session_id"]
+    if doc.file_path and storage.abs_path(doc.file_path).exists():
+        # retry after the PDF was already built: recover text from the stored PDF
+        pages = extract_pdf_text(storage.abs_path(doc.file_path))
+    else:
+        page_rows = session.exec(
+            select(ScanPage)
+            .where(ScanPage.session_id == session_id)
+            .order_by(ScanPage.page_number)
+        ).all()
+        image_paths = [storage.abs_path(p.image_path) for p in page_rows]
+        pdf_bytes, pages = images_to_searchable_pdf(image_paths, doc.ocr_languages)
+        rel, size = storage.store_file(doc.id, ".pdf", pdf_bytes)
+        doc.file_path = rel
+        doc.file_size = size
+    doc.page_count = len(pages)
+    scan_session = session.get(ScanSession, session_id)
+    if scan_session is not None:
+        scan_session.status = ScanSessionStatus.done
+    session.commit()
+    storage.remove_scan_session_dir(session_id)
+    return pages
 
 
 def _ensure_content_chunks(
@@ -183,3 +210,56 @@ def _embed_pending_chunks(session: Session, doc: Document) -> None:
         chunk.embedding = vector
         session.add(chunk)
     session.commit()
+
+
+SWEEP_INTERVAL = timedelta(hours=1)
+SESSION_MAX_AGE = timedelta(hours=24)
+
+
+@register("sweep_scan_sessions")
+def sweep_scan_sessions(session: Session, payload: dict) -> None:
+    from app.models import ScanPage, ScanSession, ScanSessionStatus
+    from app.services.jobs import enqueue
+
+    storage = get_pipeline_storage()
+    cutoff = datetime.now(timezone.utc) - SESSION_MAX_AGE
+    for scan_session in session.exec(select(ScanSession)).all():
+        finished = scan_session.status in (
+            ScanSessionStatus.done,
+            ScanSessionStatus.cancelled,
+        )
+        created = scan_session.created_at
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        abandoned = not finished and created < cutoff
+        if not (finished or abandoned):
+            continue
+        for page in session.exec(
+            select(ScanPage).where(ScanPage.session_id == scan_session.id)
+        ).all():
+            session.delete(page)
+        session.delete(scan_session)
+        session.commit()
+        storage.remove_scan_session_dir(scan_session.id)
+
+    enqueue(
+        session,
+        "sweep_scan_sessions",
+        {},
+        run_at=datetime.now(timezone.utc) + SWEEP_INTERVAL,
+    )
+
+
+def ensure_sweep_scheduled(engine) -> None:
+    from app.models import Job, JobStatus
+    from app.services.jobs import enqueue
+
+    with Session(engine) as session:
+        existing = session.exec(
+            select(Job).where(
+                Job.type == "sweep_scan_sessions",
+                Job.status.in_([JobStatus.queued, JobStatus.running]),
+            )
+        ).first()
+        if existing is None:
+            enqueue(session, "sweep_scan_sessions", {})

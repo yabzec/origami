@@ -4,9 +4,12 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.api.deps import api_error, get_current_user
+from app.api.documents import serialize
+from app.api.uploads import create_pending_document
 from app.config import get_settings
 from app.db import get_session
-from app.models import ScanPage, ScanSession, ScanSessionStatus
+from app.models import DocType, ScanPage, ScanSession, ScanSessionStatus
+from app.services.jobs import enqueue
 from app.services.scanner import ScannerBackend, get_scanner, scan_locked
 from app.services import scanner as scanner_module
 from app.services.storage import Storage, get_storage
@@ -27,6 +30,12 @@ class PageScanRequest(BaseModel):
 
 class ReorderRequest(BaseModel):
     page_ids: list[int]
+
+
+class CompileRequest(BaseModel):
+    title: str
+    folder_id: int | None = None
+    tag_ids: list[int] = []
 
 
 def get_session_or_404(db: Session, session_id: int) -> ScanSession:
@@ -164,3 +173,33 @@ def cancel_session(
     scan_session.status = ScanSessionStatus.cancelled
     db.commit()
     storage.remove_scan_session_dir(session_id)
+
+
+@router.post("/sessions/{session_id}/compile", status_code=201)
+def compile_session(
+    session_id: int, body: CompileRequest, db: Session = Depends(get_session)
+) -> dict:
+    scan_session = get_session_or_404(db, session_id)
+    if scan_session.status != ScanSessionStatus.active:
+        raise api_error(409, "session_not_active", "Scan session is not active")
+    if not session_pages(db, session_id):
+        raise api_error(422, "no_pages", "Scan session has no pages to compile")
+
+    doc = create_pending_document(
+        db,
+        title=body.title,
+        doc_type=DocType.scan,
+        ocr_languages=scan_session.ocr_languages,
+        folder_id=body.folder_id,
+        tag_ids=body.tag_ids,
+        original_filename=None,
+    )
+    scan_session.status = ScanSessionStatus.compiling
+    db.commit()
+    enqueue(
+        db,
+        "process_document",
+        {"document_id": str(doc.id), "scan_session_id": session_id},
+    )
+    db.refresh(doc)
+    return serialize(db, doc)
