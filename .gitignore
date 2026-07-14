@@ -8,3 +8,5 @@ dist/
 .ruff_cache/
 storage/
 graphify-out/
+frontend/node_modules/
+frontend/dist/
