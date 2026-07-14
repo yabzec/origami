@@ -2,8 +2,8 @@ import { Route, Routes } from "react-router";
 import { RequireAuth } from "@/auth";
 import { Layout } from "@/components/Layout";
 import { LoginPage } from "@/pages/LoginPage";
+import { BrowsePage } from "@/pages/BrowsePage";
 
-const BrowsePage = () => <div className="p-8">Browse</div>;
 const DocumentPage = () => <div className="p-8">Document</div>;
 const ScanPage = () => <div className="p-8">Scan</div>;
 const SearchPage = () => <div className="p-8">Search</div>;
