@@ -8,7 +8,7 @@ import { Select } from "@/components/ui/select";
 import { STATUS_VARIANTS } from "@/components/DocumentCard";
 import { useFolders } from "@/hooks/useFolders";
 import { useTags } from "@/hooks/useTags";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { splitHighlights } from "@/lib/snippets";
 import type { SearchResponse } from "@/lib/types";
 
@@ -108,6 +108,11 @@ export function SearchPage() {
         </Button>
       </form>
 
+      {search.isError && (
+        <div className="mb-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {search.error instanceof ApiError ? search.error.message : "Search failed"}
+        </div>
+      )}
       {search.data && search.data.results.length === 0 && <p className="text-zinc-400">No results.</p>}
       <div className="space-y-4">
         {search.data?.results.map((result) => (
