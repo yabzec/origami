@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
@@ -71,12 +71,15 @@ export function DocumentPage() {
   const [folderId, setFolderId] = useState<number | null>(null);
   const [tagIds, setTagIds] = useState<number[]>([]);
 
+  const hydratedForDocId = useRef<string | null>(null);
+
   useEffect(() => {
-    if (doc) {
+    if (doc && hydratedForDocId.current !== doc.id) {
       setTitle(doc.title);
       setDescription(doc.description);
       setFolderId(doc.folder_id);
       setTagIds(doc.tags.map((t) => t.id));
+      hydratedForDocId.current = doc.id;
     }
   }, [doc]);
 
