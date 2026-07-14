@@ -16,7 +16,7 @@ def register_spa(app: FastAPI, dist: Path) -> None:
     def spa_fallback(full_path: str) -> FileResponse:
         if full_path.startswith("api/"):
             raise HTTPException(status_code=404, detail="Not found")
-        candidate = dist / full_path
-        if full_path and candidate.is_file():
+        candidate = (dist / full_path).resolve()
+        if full_path and candidate.is_file() and candidate.is_relative_to(dist.resolve()):
             return FileResponse(candidate)
         return FileResponse(index)
