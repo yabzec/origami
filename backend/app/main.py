@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from app.api import auth, chat, documents, folders, scan, search, tags, uploads
+from app.api import auth, chat, documents, files, folders, scan, search, tags, uploads
 from app.api.error_handlers import register_error_handlers
 
 app = FastAPI(title="Origami")
@@ -8,6 +8,7 @@ register_error_handlers(app)
 app.include_router(auth.router)
 app.include_router(chat.router)
 app.include_router(documents.router)
+app.include_router(files.router)
 app.include_router(folders.router)
 app.include_router(scan.router)
 app.include_router(search.router)

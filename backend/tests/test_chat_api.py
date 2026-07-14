@@ -53,3 +53,17 @@ def test_chat_empty_question_422(auth_client):
 
 def test_chat_requires_auth(client):
     assert client.post("/api/chat", json={"question": "x"}).status_code == 401
+
+
+def test_chat_emits_error_event_on_failure(auth_client, monkeypatch):
+    from app.services import rag
+
+    def boom(texts):
+        raise RuntimeError("embedding down")
+
+    monkeypatch.setattr(rag, "llm_embed", boom)
+    resp = auth_client.post("/api/chat", json={"question": "ciao"})
+    assert resp.status_code == 200
+    events = parse_sse(resp.text)
+    assert events[-1]["type"] == "error"
+    assert events[-1]["code"] == "chat_failed"

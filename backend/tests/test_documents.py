@@ -100,3 +100,24 @@ def test_delete_removes_file(auth_client, session, storage):
 def test_get_missing_404(auth_client):
     resp = auth_client.get(f"/api/documents/{uuid.uuid4()}")
     assert resp.status_code == 404
+
+
+def test_document_text_endpoint(auth_client, session):
+    from app.models import Chunk, ChunkSource
+    from tests.helpers import seed_document
+
+    doc = seed_document(
+        session, "Testo",
+        [
+            {"content": "Pagina uno.", "page_number": 1},
+            {"content": "Pagina due.", "page_number": 2},
+            {"content": "Riassunto.", "source": ChunkSource.summary},
+        ],
+    )
+    doc.summary = "Riassunto."
+    session.commit()
+
+    body = auth_client.get(f"/api/documents/{doc.id}/text").json()
+    assert body["summary"] == "Riassunto."
+    assert [c["content"] for c in body["chunks"]] == ["Pagina uno.", "Pagina due."]
+    assert body["chunks"][0]["page_number"] == 1

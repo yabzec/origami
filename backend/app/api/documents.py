@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 
 from app.api.deps import api_error, get_current_user
 from app.db import get_session
-from app.models import Document, DocumentTag, Folder, Tag
+from app.models import Chunk, ChunkSource, Document, DocumentTag, Folder, Tag
 from app.services.storage import Storage, get_storage
 
 router = APIRouter(
@@ -68,6 +68,23 @@ def list_documents(
 @router.get("/{document_id}")
 def get_document(document_id: uuid.UUID, session: Session = Depends(get_session)) -> dict:
     return serialize(session, get_doc_or_404(session, document_id))
+
+
+@router.get("/{document_id}/text")
+def document_text(document_id: uuid.UUID, session: Session = Depends(get_session)) -> dict:
+    doc = get_doc_or_404(session, document_id)
+    chunks = session.exec(
+        select(Chunk)
+        .where(Chunk.document_id == doc.id, Chunk.source == ChunkSource.content)
+        .order_by(Chunk.chunk_index)
+    ).all()
+    return {
+        "summary": doc.summary,
+        "chunks": [
+            {"chunk_index": c.chunk_index, "page_number": c.page_number, "content": c.content}
+            for c in chunks
+        ],
+    }
 
 
 @router.patch("/{document_id}")

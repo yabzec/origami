@@ -36,3 +36,22 @@ def get_current_user(
     if user is None:
         raise api_error(401, "unauthorized", "Unknown user")
     return user
+
+
+def get_current_user_flexible(
+    creds: HTTPAuthorizationCredentials | None = Depends(bearer),
+    token: str | None = None,
+    session: Session = Depends(get_session),
+) -> User:
+    """Auth via Bearer header OR ?token= query param (browser-native resource loads)."""
+    raw = creds.credentials if creds is not None else token
+    if raw is None:
+        raise api_error(401, "unauthorized", "Missing bearer token")
+    try:
+        payload = decode_token(raw)
+    except pyjwt.InvalidTokenError:
+        raise api_error(401, "unauthorized", "Invalid or expired token")
+    user = session.get(User, int(payload["sub"]))
+    if user is None:
+        raise api_error(401, "unauthorized", "Unknown user")
+    return user
