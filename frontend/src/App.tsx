@@ -5,8 +5,8 @@ import { LoginPage } from "@/pages/LoginPage";
 import { BrowsePage } from "@/pages/BrowsePage";
 import { DocumentPage } from "@/pages/DocumentPage";
 import { ScanPage } from "@/pages/ScanPage";
+import { SearchPage } from "@/pages/SearchPage";
 
-const SearchPage = () => <div className="p-8">Search</div>;
 const ChatPage = () => <div className="p-8">Chat</div>;
 
 export default function App() {
