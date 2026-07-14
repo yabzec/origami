@@ -3,8 +3,8 @@ import { RequireAuth } from "@/auth";
 import { Layout } from "@/components/Layout";
 import { LoginPage } from "@/pages/LoginPage";
 import { BrowsePage } from "@/pages/BrowsePage";
+import { DocumentPage } from "@/pages/DocumentPage";
 
-const DocumentPage = () => <div className="p-8">Document</div>;
 const ScanPage = () => <div className="p-8">Scan</div>;
 const SearchPage = () => <div className="p-8">Search</div>;
 const ChatPage = () => <div className="p-8">Chat</div>;
