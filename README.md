@@ -52,3 +52,17 @@ Run tests (real Postgres, no mocks — `docker compose up -d db` must be running
 ```bash
 uv run pytest
 ```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev        # dev server on :5173, proxies /api to :8000
+npm test           # vitest
+npm run build      # outputs frontend/dist
+```
+
+In production, build the frontend and run only the backend: FastAPI serves
+`frontend/dist` automatically when it exists, so the Cloudflare tunnel needs
+just the one backend port.
