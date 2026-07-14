@@ -10,6 +10,7 @@ import { useFolders } from "@/hooks/useFolders";
 import { useTags } from "@/hooks/useTags";
 import { api, ApiError } from "@/lib/api";
 import { splitHighlights } from "@/lib/snippets";
+import { DOC_TYPES } from "@/lib/types";
 import type { SearchResponse } from "@/lib/types";
 
 function Snippet({ text }: { text: string }) {
@@ -97,7 +98,7 @@ export function SearchPage() {
         </Select>
         <Select className="w-28" value={docType ?? ""} onChange={(e) => setDocType(e.target.value || null)}>
           <option value="">All types</option>
-          {["scan", "pdf", "text", "image", "video"].map((t) => (
+          {DOC_TYPES.map((t) => (
             <option key={t} value={t}>
               {t}
             </option>

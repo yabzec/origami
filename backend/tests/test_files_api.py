@@ -26,6 +26,13 @@ def test_file_served_with_token_query_param(client, session, storage, user):
     assert resp.headers["content-type"] == "video/mp4"
 
 
+def test_file_header_wins_over_mismatched_query_token(auth_client, session, storage):
+    doc = stored_doc(session, storage)
+    resp = auth_client.get(f"/api/documents/{doc.id}/file?token=garbage-does-not-matter")
+    assert resp.status_code == 200
+    assert resp.content == b"%PDF-1.7 x"
+
+
 def test_file_requires_auth(client, session, storage):
     doc = stored_doc(session, storage)
     assert client.get(f"/api/documents/{doc.id}/file").status_code == 401

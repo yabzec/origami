@@ -10,12 +10,22 @@ import { useUploadDocument } from "@/hooks/useDocuments";
 import { ApiError } from "@/lib/api";
 import { buildUploadForm, fileStem } from "@/lib/upload";
 
-export function UploadDialog({ file, open, onClose }: { file: File | null; open: boolean; onClose: () => void }) {
+export function UploadDialog({
+  file,
+  open,
+  onClose,
+  initialFolderId,
+}: {
+  file: File | null;
+  open: boolean;
+  onClose: () => void;
+  initialFolderId?: number | null;
+}) {
   const { data: folders } = useFolders();
   const { data: tags } = useTags();
   const upload = useUploadDocument();
   const [title, setTitle] = useState("");
-  const [folderId, setFolderId] = useState<number | null>(null);
+  const [folderId, setFolderId] = useState<number | null>(initialFolderId ?? null);
   const [tagIds, setTagIds] = useState<number[]>([]);
   const [languages, setLanguages] = useState("ita+eng");
   const [error, setError] = useState<string | null>(null);

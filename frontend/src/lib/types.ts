@@ -12,6 +12,7 @@ export interface Folder {
 }
 
 export type DocType = "scan" | "pdf" | "text" | "image" | "video";
+export const DOC_TYPES: DocType[] = ["scan", "pdf", "text", "image", "video"];
 export type DocStatus = "pending" | "processing" | "ready" | "failed";
 
 export interface Document {

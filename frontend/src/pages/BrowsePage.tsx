@@ -6,8 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { useDeleteDocument, useDocuments } from "@/hooks/useDocuments";
 import { useTags } from "@/hooks/useTags";
-
-const DOC_TYPES = ["scan", "pdf", "text", "image", "video"];
+import { DOC_TYPES } from "@/lib/types";
 
 export function BrowsePage() {
   const [searchParams] = useSearchParams();
@@ -85,7 +84,12 @@ export function BrowsePage() {
           <DocumentCard key={doc.id} doc={doc} onDelete={(id) => deleteDoc.mutate(id)} />
         ))}
       </div>
-      <UploadDialog file={pendingFile} open={pendingFile !== null} onClose={() => setPendingFile(null)} />
+      <UploadDialog
+        file={pendingFile}
+        open={pendingFile !== null}
+        onClose={() => setPendingFile(null)}
+        initialFolderId={folderId}
+      />
     </div>
   );
 }
