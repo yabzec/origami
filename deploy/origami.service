@@ -1,0 +1,16 @@
+[Unit]
+Description=Origami DMS (API + worker; ensures db container is up)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=mcolpo
+SupplementaryGroups=docker
+WorkingDirectory=/home/mcolpo/Developer/Private/origami
+ExecStart=/home/mcolpo/Developer/Private/origami/deploy/origami.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
