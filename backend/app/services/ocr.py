@@ -50,3 +50,15 @@ def pdf_to_searchable_pdf(
         pdf_pages.append(page_pdf)
         texts.append((number, text))
     return _merge(pdf_pages), texts
+
+
+def images_to_pdf(image_paths: list[Path]) -> bytes:
+    """Embed images as PDF pages with no OCR text layer (no-OCR scans)."""
+    images = [Image.open(p).convert("RGB") for p in image_paths]
+    try:
+        out = io.BytesIO()
+        images[0].save(out, "PDF", save_all=True, append_images=images[1:])
+        return out.getvalue()
+    finally:
+        for image in images:
+            image.close()

@@ -21,3 +21,13 @@ def test_chunks_has_vector_and_tsv(engine):
         }
     assert cols["embedding"] == "USER-DEFINED"  # vector
     assert cols["content_tsv"] == "tsvector"
+
+
+def test_ocr_enabled_and_device_columns(engine):
+    from sqlalchemy import inspect
+
+    inspector = inspect(engine)
+    doc_cols = {c["name"] for c in inspector.get_columns("documents")}
+    assert "ocr_enabled" in doc_cols
+    session_cols = {c["name"] for c in inspector.get_columns("scan_sessions")}
+    assert {"ocr_enabled", "device"} <= session_cols

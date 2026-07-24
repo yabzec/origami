@@ -40,6 +40,7 @@ def create_pending_document(
     title: str,
     doc_type: str,
     ocr_languages: str,
+    ocr_enabled: bool = True,
     folder_id: int | None,
     tag_ids: list[int],
     original_filename: str | None,
@@ -54,6 +55,7 @@ def create_pending_document(
         title=title,
         doc_type=doc_type,
         ocr_languages=ocr_languages,
+        ocr_enabled=ocr_enabled,
         folder_id=folder_id,
         original_filename=original_filename,
     )
@@ -82,6 +84,7 @@ def upload_document(
     folder_id: int | None = Form(default=None),
     tag_ids: str | None = Form(default=None),
     ocr_languages: str | None = Form(default=None),
+    ocr_enabled: bool = Form(default=True),
     session: Session = Depends(get_session),
     storage: Storage = Depends(get_storage),
 ) -> dict:
@@ -95,6 +98,7 @@ def upload_document(
         title=title or Path(file.filename).stem,
         doc_type=doc_type,
         ocr_languages=ocr_languages or get_settings().default_ocr_languages,
+        ocr_enabled=ocr_enabled,
         folder_id=folder_id,
         tag_ids=parse_tag_ids(tag_ids),
         original_filename=file.filename,

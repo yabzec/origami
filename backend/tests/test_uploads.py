@@ -66,3 +66,27 @@ def test_upload_bad_folder_404(auth_client, storage):
 def test_upload_requires_auth(client, storage):
     resp = upload(client, "a.pdf")
     assert resp.status_code == 401
+
+
+def test_upload_ocr_disabled(auth_client, session, storage):
+    from app.models import Document
+
+    resp = auth_client.post(
+        "/api/documents/upload",
+        files={"file": ("a.pdf", b"%PDF-1.7 x", "application/octet-stream")},
+        data={"ocr_enabled": "false"},
+    )
+    assert resp.status_code == 201
+    doc = session.get(Document, resp.json()["id"])
+    assert doc.ocr_enabled is False
+
+
+def test_upload_ocr_enabled_default_true(auth_client, session, storage):
+    from app.models import Document
+
+    resp = auth_client.post(
+        "/api/documents/upload",
+        files={"file": ("b.pdf", b"%PDF-1.7 x", "application/octet-stream")},
+    )
+    doc = session.get(Document, resp.json()["id"])
+    assert doc.ocr_enabled is True

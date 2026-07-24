@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
@@ -10,7 +10,7 @@ from app.config import get_settings
 from app.db import get_session
 from app.models import DocType, ScanPage, ScanSession, ScanSessionStatus
 from app.services.jobs import enqueue
-from app.services.scanner import ScannerBackend, get_scanner, scan_locked
+from app.services.scanner import ScannerBackend, get_scanner, preview_locked, scan_locked
 from app.services import scanner as scanner_module
 from app.services.storage import Storage, get_storage
 
@@ -21,11 +21,17 @@ router = APIRouter(
 
 class SessionCreate(BaseModel):
     ocr_languages: str | None = None
+    ocr_enabled: bool = True
+    device: str | None = None
 
 
 class PageScanRequest(BaseModel):
     dpi: int = 300
     mode: str = "Color"
+
+
+class PreviewRequest(BaseModel):
+    device: str | None = None
 
 
 class ReorderRequest(BaseModel):
@@ -63,12 +69,28 @@ def scan_status(backend: ScannerBackend = Depends(get_scanner)) -> dict:
     }
 
 
+@router.get("/devices")
+def scan_devices(backend: ScannerBackend = Depends(get_scanner)) -> dict:
+    devices = backend.list_devices()
+    return {"devices": devices, "default": devices[0]["id"] if devices else None}
+
+
+@router.post("/preview")
+def scan_preview(
+    body: PreviewRequest, backend: ScannerBackend = Depends(get_scanner)
+) -> Response:
+    png = preview_locked(backend, device=body.device)
+    return Response(content=png, media_type="image/png")
+
+
 @router.post("/sessions", status_code=201)
 def create_session(
     body: SessionCreate, db: Session = Depends(get_session)
 ) -> ScanSession:
     scan_session = ScanSession(
-        ocr_languages=body.ocr_languages or get_settings().default_ocr_languages
+        ocr_languages=body.ocr_languages or get_settings().default_ocr_languages,
+        ocr_enabled=body.ocr_enabled,
+        device=body.device,
     )
     db.add(scan_session)
     db.commit()
@@ -88,7 +110,7 @@ def scan_page(
     if scan_session.status != ScanSessionStatus.active:
         raise api_error(409, "session_not_active", "Scan session is not active")
 
-    png = scan_locked(backend, dpi=body.dpi, mode=body.mode)
+    png = scan_locked(backend, dpi=body.dpi, mode=body.mode, device=scan_session.device)
 
     number = len(session_pages(db, session_id)) + 1
     filename = f"page_{number:03d}.png"
@@ -190,6 +212,7 @@ def compile_session(
         title=body.title,
         doc_type=DocType.scan,
         ocr_languages=scan_session.ocr_languages,
+        ocr_enabled=scan_session.ocr_enabled,
         folder_id=body.folder_id,
         tag_ids=body.tag_ids,
         original_filename=None,

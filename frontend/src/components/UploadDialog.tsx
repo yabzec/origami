@@ -28,6 +28,7 @@ export function UploadDialog({
   const [folderId, setFolderId] = useState<number | null>(initialFolderId ?? null);
   const [tagIds, setTagIds] = useState<number[]>([]);
   const [languages, setLanguages] = useState("ita+eng");
+  const [ocrEnabled, setOcrEnabled] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   if (!file) return null;
@@ -35,7 +36,13 @@ export function UploadDialog({
   const submit = () => {
     setError(null);
     upload.mutate(
-      buildUploadForm(file, { title: title || fileStem(file.name), folderId, tagIds, ocrLanguages: languages }),
+      buildUploadForm(file, {
+        title: title || fileStem(file.name),
+        folderId,
+        tagIds,
+        ocrLanguages: languages,
+        ocrEnabled,
+      }),
       {
         onSuccess: () => {
           setTitle("");
@@ -87,13 +94,21 @@ export function UploadDialog({
           </div>
         </div>
         <div>
-          <Label htmlFor="up-lang">OCR language</Label>
-          <Select id="up-lang" value={languages} onChange={(e) => setLanguages(e.target.value)}>
-            <option value="ita+eng">Italian + English</option>
-            <option value="ita">Italian</option>
-            <option value="eng">English</option>
-          </Select>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={ocrEnabled} onChange={(e) => setOcrEnabled(e.target.checked)} />
+            Run OCR (extract text)
+          </label>
         </div>
+        {ocrEnabled && (
+          <div>
+            <Label htmlFor="up-lang">OCR language</Label>
+            <Select id="up-lang" value={languages} onChange={(e) => setLanguages(e.target.value)}>
+              <option value="ita+eng">Italian + English</option>
+              <option value="ita">Italian</option>
+              <option value="eng">English</option>
+            </Select>
+          </div>
+        )}
         {error && <p className="text-sm text-red-600">{error}</p>}
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose}>

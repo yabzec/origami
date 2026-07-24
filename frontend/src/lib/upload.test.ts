@@ -31,6 +31,13 @@ describe("buildUploadForm", () => {
     expect(form.has("folder_id")).toBe(false);
     expect(form.has("tag_ids")).toBe(false);
   });
+
+  it("appends ocr_enabled=false only when OCR is disabled", () => {
+    const file = new File([new Uint8Array([1])], "a.pdf", { type: "application/pdf" });
+    expect(buildUploadForm(file, {}).has("ocr_enabled")).toBe(false);
+    expect(buildUploadForm(file, { ocrEnabled: true }).has("ocr_enabled")).toBe(false);
+    expect(buildUploadForm(file, { ocrEnabled: false }).get("ocr_enabled")).toBe("false");
+  });
 });
 
 describe("fileStem", () => {

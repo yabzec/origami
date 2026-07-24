@@ -1,12 +1,24 @@
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import auth, chat, documents, files, folders, scan, search, tags, uploads
 from app.api.error_handlers import register_error_handlers
 from app.api.spa import register_spa
+from app.config import get_settings
 
 app = FastAPI(title="Origami")
+
+_origins = [o.strip() for o in get_settings().cors_origins.split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_origins or ["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 register_error_handlers(app)
 app.include_router(auth.router)
 app.include_router(chat.router)

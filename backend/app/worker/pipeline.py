@@ -14,13 +14,14 @@ from app.services.extract import (
 )
 from app.services.llm import describe as llm_describe
 from app.services.llm import embed as llm_embed
-from app.services.ocr import images_to_searchable_pdf, ocr_image, pdf_to_searchable_pdf
+from app.services.ocr import images_to_pdf, images_to_searchable_pdf, ocr_image, pdf_to_searchable_pdf
 from app.services.storage import Storage
 from app.worker.runner import register
 
 log = logging.getLogger("origami.pipeline")
 
 SUMMARY_INPUT_CHARS = 8000
+IMAGE_SUMMARY_TEXT_THRESHOLD = 40
 
 
 def get_pipeline_storage() -> Storage:
@@ -72,7 +73,7 @@ def _extract_content(
         return []
 
     if doc.doc_type == DocType.scan:
-        return _extract_scan(session, doc, storage, payload)  # Task 9
+        return _extract_scan(session, doc, storage, payload)
 
     path = storage.abs_path(doc.file_path)
 
@@ -81,14 +82,15 @@ def _extract_content(
         return [(None, text)]
 
     if doc.doc_type == DocType.image:
+        if not doc.ocr_enabled:
+            return []  # photo path: no OCR, no companion pdf; summary via vision
         pdf_bytes, text = ocr_image(path, doc.ocr_languages)
-        # companion searchable PDF alongside the original image
-        storage.store_file(doc.id, ".pdf", pdf_bytes)
+        storage.store_file(doc.id, ".pdf", pdf_bytes)  # companion searchable PDF
         return [(1, text)]
 
     if doc.doc_type == DocType.pdf:
         pages = extract_pdf_text(path)
-        if pdf_needs_ocr(pages):
+        if doc.ocr_enabled and pdf_needs_ocr(pages):
             pdf_bytes, pages = pdf_to_searchable_pdf(path, doc.ocr_languages)
             rel, size = storage.store_file(doc.id, ".pdf", pdf_bytes)
             doc.file_path = rel
@@ -106,8 +108,8 @@ def _extract_scan(
     from app.models import ScanPage, ScanSession, ScanSessionStatus
 
     session_id = payload["scan_session_id"]
+    # Retry after the PDF was already built: recover text from the stored PDF instead of re-compiling from scans.
     if doc.file_path and storage.abs_path(doc.file_path).exists():
-        # retry after the PDF was already built: recover text from the stored PDF
         pages = extract_pdf_text(storage.abs_path(doc.file_path))
     else:
         page_rows = session.exec(
@@ -116,7 +118,11 @@ def _extract_scan(
             .order_by(ScanPage.page_number)
         ).all()
         image_paths = [storage.abs_path(p.image_path) for p in page_rows]
-        pdf_bytes, pages = images_to_searchable_pdf(image_paths, doc.ocr_languages)
+        if doc.ocr_enabled:
+            pdf_bytes, pages = images_to_searchable_pdf(image_paths, doc.ocr_languages)
+        else:
+            pdf_bytes = images_to_pdf(image_paths)
+            pages = []
         rel, size = storage.store_file(doc.id, ".pdf", pdf_bytes)
         doc.file_path = rel
         doc.file_size = size
@@ -153,7 +159,17 @@ def _ensure_summary(session: Session, doc: Document, storage: Storage) -> None:
     if doc.doc_type in (DocType.video, DocType.scan) or doc.summary is not None:
         return
     if doc.doc_type == DocType.image:
-        summary = llm_describe(image_path=storage.abs_path(doc.file_path))
+        content_chunks = session.exec(
+            select(Chunk)
+            .where(Chunk.document_id == doc.id, Chunk.source == ChunkSource.content)
+            .order_by(Chunk.chunk_index)
+        ).all()
+        ocr_text = "\n\n".join(c.content for c in content_chunks).strip()
+        if len(ocr_text) >= IMAGE_SUMMARY_TEXT_THRESHOLD:
+            summary = llm_describe(text=ocr_text[:SUMMARY_INPUT_CHARS])
+        else:
+            # No usable extracted text (a photo, or no-OCR) — send the file to vision.
+            summary = llm_describe(image_path=storage.abs_path(doc.file_path))
     else:
         content_chunks = session.exec(
             select(Chunk)

@@ -1,4 +1,5 @@
 import io
+import re
 import subprocess
 import threading
 from itertools import cycle
@@ -8,6 +9,20 @@ from PIL import Image, ImageDraw
 
 SCAN_TIMEOUT_SECONDS = 120
 PROBE_TIMEOUT_SECONDS = 10
+PREVIEW_TIMEOUT_SECONDS = 30
+PREVIEW_RESOLUTION = 75
+PREVIEW_MODE = "Gray"
+
+_DEVICE_RE = re.compile(r"^device\s+[`'\"](?P<id>[^`'\"]+)['\"]?\s+is a\s+(?P<name>.+?)\s*$")
+
+
+def parse_scanimage_devices(output: str) -> list[dict]:
+    devices = []
+    for line in output.splitlines():
+        match = _DEVICE_RE.match(line.strip())
+        if match:
+            devices.append({"id": match.group("id"), "name": match.group("name")})
+    return devices
 
 
 class ScannerError(Exception):
@@ -50,8 +65,10 @@ class ScannerTimeout(ScannerError):
 
 
 class ScannerBackend(Protocol):
-    def scan(self, dpi: int, mode: str) -> bytes: ...
+    def scan(self, dpi: int, mode: str, device: str | None = None) -> bytes: ...
+    def preview(self, device: str | None = None) -> bytes: ...
     def available(self) -> bool: ...
+    def list_devices(self) -> list[dict]: ...
 
 
 class ScanimageBackend:
@@ -70,13 +87,29 @@ class ScanimageBackend:
             return CoverOpen(stderr.strip())
         return ScannerError(stderr.strip() or f"scanimage exited {returncode}")
 
-    def scan(self, dpi: int, mode: str) -> bytes:
+    def scan(self, dpi: int, mode: str, device: str | None = None) -> bytes:
+        argv = ["scanimage", "--format=png", f"--resolution={dpi}", f"--mode={mode}"]
+        if device:
+            argv += ["-d", device]
         try:
-            result = subprocess.run(
-                ["scanimage", "--format=png", f"--resolution={dpi}", f"--mode={mode}"],
-                capture_output=True,
-                timeout=SCAN_TIMEOUT_SECONDS,
-            )
+            result = subprocess.run(argv, capture_output=True, timeout=SCAN_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            raise ScannerTimeout()
+        if result.returncode != 0:
+            raise self._map_error(result.stderr.decode(errors="replace"), result.returncode)
+        return result.stdout
+
+    def preview(self, device: str | None = None) -> bytes:
+        argv = [
+            "scanimage",
+            "--format=png",
+            f"--resolution={PREVIEW_RESOLUTION}",
+            f"--mode={PREVIEW_MODE}",
+        ]
+        if device:
+            argv += ["-d", device]
+        try:
+            result = subprocess.run(argv, capture_output=True, timeout=PREVIEW_TIMEOUT_SECONDS)
         except subprocess.TimeoutExpired:
             raise ScannerTimeout()
         if result.returncode != 0:
@@ -92,15 +125,30 @@ class ScanimageBackend:
             return False
         return result.returncode == 0 and b"device" in result.stdout.lower()
 
+    def list_devices(self) -> list[dict]:
+        try:
+            result = subprocess.run(
+                ["scanimage", "-L"], capture_output=True, timeout=PROBE_TIMEOUT_SECONDS
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return []
+        return parse_scanimage_devices(result.stdout.decode(errors="replace"))
+
 
 class FakeScannerBackend:
     """Test double: renders labelled PNGs or raises a scripted error."""
 
-    def __init__(self, pages: list[str] | None = None, error: ScannerError | None = None):
+    def __init__(
+        self,
+        pages: list[str] | None = None,
+        error: ScannerError | None = None,
+        devices: list[dict] | None = None,
+    ):
         self._labels = cycle(pages or ["SCAN"])
         self._error = error
+        self._devices = devices if devices is not None else [{"id": "fake:0", "name": "Fake Scanner"}]
 
-    def scan(self, dpi: int, mode: str) -> bytes:
+    def scan(self, dpi: int, mode: str, device: str | None = None) -> bytes:
         if self._error is not None:
             raise self._error
         img = Image.new("RGB", (600, 200), "white")
@@ -109,18 +157,35 @@ class FakeScannerBackend:
         img.save(buf, "PNG")
         return buf.getvalue()
 
+    def preview(self, device: str | None = None) -> bytes:
+        return self.scan(dpi=PREVIEW_RESOLUTION, mode=PREVIEW_MODE, device=device)
+
     def available(self) -> bool:
         return self._error is None or not isinstance(self._error, ScannerOffline)
+
+    def list_devices(self) -> list[dict]:
+        return list(self._devices)
 
 
 _scan_lock = threading.Lock()
 
 
-def scan_locked(backend: ScannerBackend, dpi: int = 300, mode: str = "Color") -> bytes:
+def scan_locked(
+    backend: ScannerBackend, dpi: int = 300, mode: str = "Color", device: str | None = None
+) -> bytes:
     if not _scan_lock.acquire(blocking=False):
         raise ScannerBusy("Another scan is in progress")
     try:
-        return backend.scan(dpi=dpi, mode=mode)
+        return backend.scan(dpi=dpi, mode=mode, device=device)
+    finally:
+        _scan_lock.release()
+
+
+def preview_locked(backend: ScannerBackend, device: str | None = None) -> bytes:
+    if not _scan_lock.acquire(blocking=False):
+        raise ScannerBusy("Another scan is in progress")
+    try:
+        return backend.preview(device=device)
     finally:
         _scan_lock.release()
 

@@ -34,3 +34,15 @@ def test_pdf_to_searchable_pdf_roundtrip(tmp_path):
     pdf_bytes, pages = pdf_to_searchable_pdf(source, "ita+eng", dpi=150)
     assert len(pages) == 1
     assert "RICEVUTA" in pages[0][1].upper()
+
+
+def test_images_to_pdf_has_pages_but_no_text(tmp_path):
+    from app.services.ocr import images_to_pdf
+
+    p1 = make_text_image(tmp_path / "a.png", "PAGINA UNO")
+    p2 = make_text_image(tmp_path / "b.png", "PAGINA DUE")
+    pdf_bytes = images_to_pdf([p1, p2])
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    assert len(reader.pages) == 2
+    # image-only: no extractable text layer
+    assert (reader.pages[0].extract_text() or "").strip() == ""

@@ -16,9 +16,14 @@ class Settings(BaseSettings):
     embedding_model: str = "gemini/gemini-embedding-001"
     embedding_dim: int = 1536
     gemini_api_key: str = ""
+    llm_api_key: str = ""
+    llm_api_base: str = ""
+    embedding_api_key: str = ""
+    embedding_api_base: str = ""
     default_ocr_languages: str = "ita+eng"
     rag_top_k: int = 8
     rag_relevance_floor: float = 0.35
+    cors_origins: str = "*"
 
 
 @lru_cache

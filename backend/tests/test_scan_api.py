@@ -81,3 +81,30 @@ def test_status_endpoint(auth_client, fake_scanner, storage):
 
 def test_scan_requires_auth(client, fake_scanner, storage):
     assert client.get("/api/scan/status").status_code == 401
+
+
+def test_devices_endpoint(auth_client, fake_scanner, storage):
+    resp = auth_client.get("/api/scan/devices")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert isinstance(body["devices"], list)
+    assert "default" in body
+
+
+def test_preview_endpoint_returns_png(auth_client, fake_scanner, storage):
+    resp = auth_client.post("/api/scan/preview", json={})
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/png"
+    assert resp.content.startswith(b"\x89PNG")
+
+
+def test_preview_busy_returns_409(auth_client, fake_scanner, storage):
+    from app.services import scanner as scanner_module
+
+    scanner_module._scan_lock.acquire()
+    try:
+        resp = auth_client.post("/api/scan/preview", json={})
+        assert resp.status_code == 409
+        assert resp.json()["error"]["code"] == "scanner_busy"
+    finally:
+        scanner_module._scan_lock.release()

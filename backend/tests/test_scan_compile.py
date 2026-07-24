@@ -125,3 +125,15 @@ def test_ensure_sweep_scheduled_is_idempotent(session, engine):
     pipeline.ensure_sweep_scheduled(engine)
     jobs = session.exec(select(Job).where(Job.type == "sweep_scan_sessions")).all()
     assert len(jobs) == 1
+
+
+def test_session_and_compiled_doc_carry_ocr_enabled(auth_client, fake_scanner, storage, session):
+    from app.models import Document, ScanSession
+
+    sid = auth_client.post("/api/scan/sessions", json={"ocr_enabled": False}).json()["id"]
+    assert session.get(ScanSession, sid).ocr_enabled is False
+    auth_client.post(f"/api/scan/sessions/{sid}/pages", json={})
+    doc_id = auth_client.post(
+        f"/api/scan/sessions/{sid}/compile", json={"title": "X"}
+    ).json()["id"]
+    assert session.get(Document, doc_id).ocr_enabled is False

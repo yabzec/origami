@@ -32,6 +32,7 @@ class Document(SQLModel, table=True):
     folder_id: int | None = Field(default=None, foreign_key="folders.id")
     doc_type: str  # DocType
     ocr_languages: str = "ita+eng"
+    ocr_enabled: bool = True
     status: str = DocStatus.pending  # DocStatus
     error_message: str | None = None
     original_filename: str | None = None

@@ -19,6 +19,8 @@ class ScanSession(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     status: str = ScanSessionStatus.active
     ocr_languages: str = "ita+eng"
+    ocr_enabled: bool = True
+    device: str | None = None
     created_at: datetime = Field(default_factory=utcnow)
 
 

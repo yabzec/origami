@@ -44,6 +44,11 @@ export interface ScanStatus {
   busy: boolean;
 }
 
+export interface ScanDevice {
+  id: string;
+  name: string;
+}
+
 export interface ScanPageInfo {
   id: number;
   page_number: number;

@@ -9,13 +9,14 @@ import { Select } from "@/components/ui/select";
 import { useFolders } from "@/hooks/useFolders";
 import { useTags } from "@/hooks/useTags";
 import { usePreviewImage } from "@/hooks/usePreviewImage";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, getToken } from "@/lib/api";
+import { scanDeviceHint } from "@/lib/scanDevices";
 import {
   initialScanState,
   scannerMessage,
   scanWizardReducer,
 } from "@/lib/scanWizard";
-import type { Document, ScanPageInfo, ScanStatus } from "@/lib/types";
+import type { Document, ScanDevice, ScanPageInfo, ScanStatus } from "@/lib/types";
 
 function Thumbnail({
   page,
@@ -65,6 +66,18 @@ export function ScanPage() {
   });
   const { data: folders } = useFolders();
   const { data: tags } = useTags();
+  const { data: deviceData } = useQuery({
+    queryKey: ["scan-devices"],
+    queryFn: () => api.get<{ devices: ScanDevice[]; default: string | null }>("/api/scan/devices"),
+  });
+  const devices = deviceData?.devices ?? [];
+  const [device, setDevice] = useState<string | null>(null);
+  const chosenDevice = device ?? deviceData?.default ?? null;
+
+  const [ocrEnabled, setOcrEnabled] = useState(true);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+
   const [compileOpen, setCompileOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [folderId, setFolderId] = useState<number | null>(null);
@@ -80,6 +93,8 @@ export function ScanPage() {
     try {
       const session = await api.post<{ id: number }>("/api/scan/sessions", {
         ocr_languages: state.languages,
+        ocr_enabled: ocrEnabled,
+        device: chosenDevice,
       });
       dispatch({ type: "SESSION_STARTED", sessionId: session.id });
     } catch (err) {
@@ -166,17 +181,83 @@ export function ScanPage() {
 
       {state.phase === "setup" && (
         <div className="max-w-sm space-y-3">
+          {ocrEnabled && (
+            <div>
+              <Label htmlFor="scan-lang">OCR language</Label>
+              <Select
+                id="scan-lang"
+                value={state.languages}
+                onChange={(e) => dispatch({ type: "SET_LANGUAGES", languages: e.target.value })}
+              >
+                <option value="ita+eng">Italian + English</option>
+                <option value="ita">Italian</option>
+                <option value="eng">English</option>
+              </Select>
+            </div>
+          )}
+          {scanDeviceHint(devices) === "none" && (
+            <p className="text-sm text-red-600">No scanner detected — check power and USB.</p>
+          )}
+          {scanDeviceHint(devices) === "single" && (
+            <p className="text-sm text-zinc-600">Scanner: {devices[0].name}</p>
+          )}
+          {scanDeviceHint(devices) === "multiple" && (
+            <div>
+              <Label htmlFor="scan-device">Scanner</Label>
+              <Select
+                id="scan-device"
+                value={chosenDevice ?? ""}
+                onChange={(e) => setDevice(e.target.value || null)}
+              >
+                {devices.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={ocrEnabled} onChange={(e) => setOcrEnabled(e.target.checked)} />
+            Run OCR (extract text)
+          </label>
           <div>
-            <Label htmlFor="scan-lang">OCR language</Label>
-            <Select
-              id="scan-lang"
-              value={state.languages}
-              onChange={(e) => dispatch({ type: "SET_LANGUAGES", languages: e.target.value })}
+            <Button
+              variant="outline"
+              disabled={previewing}
+              onClick={async () => {
+                setPreviewing(true);
+                try {
+                  const resp = await fetch("/api/scan/preview", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+                    body: JSON.stringify({ device: chosenDevice }),
+                  });
+                  if (resp.ok) {
+                    if (previewUrl) URL.revokeObjectURL(previewUrl);
+                    setPreviewUrl(URL.createObjectURL(await resp.blob()));
+                  }
+                } finally {
+                  setPreviewing(false);
+                }
+              }}
             >
-              <option value="ita+eng">Italian + English</option>
-              <option value="ita">Italian</option>
-              <option value="eng">English</option>
-            </Select>
+              {previewing ? "Previewing…" : "Preview"}
+            </Button>
+            {previewUrl && (
+              <div className="mt-2">
+                <img src={previewUrl} alt="scan preview" className="max-h-64 rounded border" />
+                <button
+                  className="mt-1 block text-xs text-zinc-500"
+                  onClick={() => {
+                    URL.revokeObjectURL(previewUrl);
+                    setPreviewUrl(null);
+                  }}
+                >
+                  clear preview
+                </button>
+              </div>
+            )}
           </div>
           <Button onClick={startSession}>Start scan session</Button>
         </div>

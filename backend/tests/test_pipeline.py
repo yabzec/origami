@@ -138,3 +138,103 @@ def test_pipeline_resumes_after_embedding_failure(session, pipeline_storage, llm
 def test_unknown_document_id_raises(session, pipeline_storage):
     with pytest.raises(ValueError):
         pipeline.process_document(session, {"document_id": str(uuid.uuid4())})
+
+
+def test_no_ocr_image_skips_ocr_and_has_no_content(session, pipeline_storage, llm_stub, tmp_path):
+    from PIL import Image as PILImage
+
+    from app.models import ChunkSource, DocStatus, DocType
+    from tests.helpers import make_text_image
+
+    img = make_text_image(tmp_path / "src.png", "SCONTRINO 12")
+    doc = make_doc(session, doc_type=DocType.image, title="Foto", ocr_enabled=False)
+    rel, _ = pipeline_storage.store_file(doc.id, ".png", img.read_bytes())
+    doc.file_path = rel
+    session.commit()
+
+    doc = run(session, doc)
+    assert doc.status == DocStatus.ready
+    by_source = chunks_by_source(session, doc)
+    assert ChunkSource.content not in by_source        # no OCR text
+    assert not pipeline_storage.abs_path(f"files/{doc.id}.pdf").exists()  # no companion pdf
+    assert llm_stub["describe"][0]["image_path"] is not None  # vision summary (photo path)
+
+
+def test_no_ocr_pdf_uses_native_text_only(session, pipeline_storage, llm_stub, tmp_path):
+    # image-only PDF (no text layer): with OCR it would be OCR'd; no-OCR must NOT OCR it.
+    from PIL import Image as PILImage
+
+    from app.models import ChunkSource, DocStatus, DocType
+    from tests.helpers import make_text_image
+
+    img = make_text_image(tmp_path / "p.png", "PREVENTIVO 77")
+    raw_pdf = tmp_path / "raw.pdf"
+    PILImage.open(img).convert("RGB").save(raw_pdf, "PDF")
+    doc = make_doc(session, doc_type=DocType.pdf, title="Prev", ocr_enabled=False)
+    rel, _ = pipeline_storage.store_file(doc.id, ".pdf", raw_pdf.read_bytes())
+    doc.file_path = rel
+    session.commit()
+
+    doc = run(session, doc)
+    assert doc.status == DocStatus.ready
+    # native extraction of an image-only pdf yields no usable text → no content chunks
+    assert ChunkSource.content not in chunks_by_source(session, doc)
+
+
+def test_no_ocr_scan_builds_image_only_pdf(
+    auth_client, fake_scanner, storage, session, engine, llm_stub, monkeypatch
+):
+    from app.models import ChunkSource, DocStatus, Document
+    from app.worker import pipeline
+    from app.worker.runner import run_once
+
+    monkeypatch.setattr(pipeline, "get_pipeline_storage", lambda: storage)
+    sid = auth_client.post(
+        "/api/scan/sessions", json={"ocr_languages": "ita+eng", "ocr_enabled": False}
+    ).json()["id"]
+    auth_client.post(f"/api/scan/sessions/{sid}/pages", json={})
+    doc_id = auth_client.post(
+        f"/api/scan/sessions/{sid}/compile", json={"title": "ScanNoOcr"}
+    ).json()["id"]
+
+    assert run_once(engine) is True
+    doc = session.get(Document, doc_id)
+    session.refresh(doc)
+    assert doc.status == DocStatus.ready
+    assert storage.abs_path(doc.file_path).exists()
+    assert ChunkSource.content not in chunks_by_source(session, doc)
+
+
+def test_image_summary_uses_text_when_ocr_text_present(session, pipeline_storage, llm_stub, tmp_path):
+    # rendered image whose OCR yields well over 40 chars (use large size to fit full text)
+    img = make_text_image(
+        tmp_path / "rich.png",
+        "FATTURA NUMERO 12345 DEL 2026 IMPORTO 42 EURO CLIENTE ACME SRL",
+        size=(2400, 400),
+    )
+    doc = make_doc(session, doc_type=DocType.image, title="Fattura")
+    rel, _ = pipeline_storage.store_file(doc.id, ".png", img.read_bytes())
+    doc.file_path = rel
+    session.commit()
+
+    doc = run(session, doc)
+    assert doc.summary is not None
+    # text path used: describe called with text=, image_path None
+    assert llm_stub["describe"][0]["text"] is not None
+    assert llm_stub["describe"][0]["image_path"] is None
+
+
+def test_image_summary_falls_back_to_vision_when_little_text(session, pipeline_storage, llm_stub, tmp_path):
+    # image doc with a tiny content chunk (< 40 chars), simulating a near-textless photo
+    doc = make_doc(session, doc_type=DocType.image, title="Foto")
+    rel, _ = pipeline_storage.store_file(doc.id, ".png", b"\x89PNG fake")
+    doc.file_path = rel
+    session.add(
+        Chunk(document_id=doc.id, chunk_index=0, page_number=1, source=ChunkSource.content, content="ciao")
+    )
+    session.commit()
+
+    from app.worker import pipeline
+
+    pipeline._ensure_summary(session, doc, pipeline_storage)
+    assert llm_stub["describe"][-1]["image_path"] is not None  # vision fallback
