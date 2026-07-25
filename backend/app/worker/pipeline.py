@@ -107,10 +107,17 @@ def _extract_scan(
 ) -> list[tuple[int | None, str]]:
     from app.models import ScanPage, ScanSession, ScanSessionStatus
 
-    session_id = payload["scan_session_id"]
+    session_id = payload.get("scan_session_id")
     # Retry after the PDF was already built: recover text from the stored PDF instead of re-compiling from scans.
+    # This is also the only path available when re-enqueued without a scan_session_id
+    # (e.g. by scripts/reingest_pending.py, which only knows document_id).
     if doc.file_path and storage.abs_path(doc.file_path).exists():
         pages = extract_pdf_text(storage.abs_path(doc.file_path))
+    elif session_id is None:
+        raise ValueError(
+            f"Scan document {doc.id} has no compiled PDF and no scan_session_id in "
+            "the job payload; cannot recompile from scan pages."
+        )
     else:
         page_rows = session.exec(
             select(ScanPage)
@@ -127,11 +134,12 @@ def _extract_scan(
         doc.file_path = rel
         doc.file_size = size
     doc.page_count = len(pages)
-    scan_session = session.get(ScanSession, session_id)
-    if scan_session is not None:
-        scan_session.status = ScanSessionStatus.done
+    if session_id is not None:
+        scan_session = session.get(ScanSession, session_id)
+        if scan_session is not None:
+            scan_session.status = ScanSessionStatus.done
+        storage.remove_scan_session_dir(session_id)
     session.commit()
-    storage.remove_scan_session_dir(session_id)
     return pages
 
 

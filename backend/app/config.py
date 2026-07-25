@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     jwt_expire_days: int = 30
     llm_model: str = "gemini/gemini-2.5-flash"
     embedding_model_name: str = "BAAI/bge-m3"
-    embedding_model_revision: str = "main"
+    embedding_model_revision: str = "5617a9f61b028005a4858fdac845db406aefb181"
     vision_model_name: str = "vikhyatk/moondream2"
     vision_model_revision: str = "6b714b26eea5cbd9f31e4edb2541c170afa935ba"
     gemini_api_key: str = ""

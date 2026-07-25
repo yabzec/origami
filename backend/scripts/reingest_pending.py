@@ -1,8 +1,11 @@
 """Enqueue a process_document job for every pending document.
 
 One-shot companion to the vector-dimension migration, which resets documents to
-`pending` without enqueuing work (Alembic must not depend on the worker). Safe to
-re-run: it only ever looks at documents already in `pending`.
+`pending` without enqueuing work (Alembic must not depend on the worker). Mostly
+idempotent to re-run: it only looks at documents currently `pending`, and downstream
+`_has_chunks` checks skip re-processing finished work. Not fully race-free, though —
+running it again while the worker is still mid-batch can enqueue a duplicate job for
+a document that hasn't flipped to `processing` yet.
 
 Usage, from backend/:  uv run python -m scripts.reingest_pending
 """

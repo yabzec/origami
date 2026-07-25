@@ -28,7 +28,7 @@ scanimage --version
 
 ```bash
 cd backend
-cp ../.env.example ../.env   # edit STORAGE_PATH, GEMINI_API_KEY, JWT_SECRET
+cp ../.env.example ../.env   # edit STORAGE_PATH, LLM_API_KEY, JWT_SECRET
 uv sync
 docker compose up -d db
 uv run alembic upgrade head
@@ -63,6 +63,14 @@ uv run pytest
 - **RAM:** Expect ~2.3GB resident in each of the two processes (`uvicorn` and the worker both embed concurrently), plus a transient ~3.7GB spike in the worker while an image is being described. Total steady-state ~4.6GB, peak ~8.3GB. This has been tested on a 16GB system running the Postgres container alongside; less than 16GB is not recommended.
 - **Changing embedding models:** The `EMBEDDING_MODEL_NAME` setting is not a simple config change. Switching models requires a new Alembic migration to match the new embedding dimension, followed by a full re-ingestion of all documents. The default is `BAAI/bge-m3` (1024-dim); if you need to change it, plan for downtime.
 - **Vision model pinning:** `VISION_MODEL_REVISION` is pinned to a specific commit because moondream2 executes arbitrary code from its HuggingFace repository (`trust_remote_code=True`). Do not unpin it casually — always verify the commit before updating.
+
+**Upgrading an existing install:** this branch's migration (`887ee519199f_local_embedding_dim`) wipes all chunks and summaries and resets every document to `pending` — it runs automatically on `alembic upgrade head`, which `deploy/origami.sh` also runs on every service start/restart. Nothing re-enqueues that work automatically, so after upgrading, rebuild the search index by running:
+
+```bash
+cd backend && uv run python -m scripts.reingest_pending
+```
+
+Skipping this step leaves the search index silently empty.
 
 ### Frontend
 

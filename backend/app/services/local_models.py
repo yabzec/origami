@@ -11,6 +11,7 @@ Lifecycle differs per model, deliberately:
 """
 
 import logging
+import threading
 from pathlib import Path
 
 from app.config import get_settings
@@ -18,21 +19,31 @@ from app.config import get_settings
 log = logging.getLogger("origami.local_models")
 
 _embedder = None
+_embedder_lock = threading.Lock()
 
 
 def _get_embedder():
-    """Load the sentence-transformers model once per process and keep it resident."""
+    """Load the sentence-transformers model once per process and keep it resident.
+
+    Double-checked locking: `search.run_search` and `chat.chat` are plain `def`
+    functions, so Starlette runs them in its threadpool (~40 workers by default).
+    Without the lock, two concurrent requests arriving before the first load
+    finishes could both see `_embedder is None` and each construct a
+    SentenceTransformer — two simultaneous ~2.3GB loads in one process.
+    """
     global _embedder
     if _embedder is None:
-        from sentence_transformers import SentenceTransformer
+        with _embedder_lock:
+            if _embedder is None:
+                from sentence_transformers import SentenceTransformer
 
-        settings = get_settings()
-        log.info("loading embedding model %s (cpu)", settings.embedding_model_name)
-        _embedder = SentenceTransformer(
-            settings.embedding_model_name,
-            revision=settings.embedding_model_revision,
-            device="cpu",
-        )
+                settings = get_settings()
+                log.info("loading embedding model %s (cpu)", settings.embedding_model_name)
+                _embedder = SentenceTransformer(
+                    settings.embedding_model_name,
+                    revision=settings.embedding_model_revision,
+                    device="cpu",
+                )
     return _embedder
 
 
@@ -72,14 +83,19 @@ def describe_image(image_path: Path, prompt: str) -> str:
     settings = get_settings()
     name = settings.vision_model_name
     revision = settings.vision_model_revision
+
+    # Open/validate the image before loading the ~3.7GB model, so a corrupt or
+    # missing image fails fast instead of wasting a full model load.
+    with Image.open(image_path) as image:
+        rgb_image = image.convert("RGB")
+
     log.info("loading vision model %s (cpu, bfloat16)", name)
     model = AutoModelForCausalLM.from_pretrained(
         name, revision=revision, trust_remote_code=True, torch_dtype=torch.bfloat16
     )
     try:
-        with Image.open(image_path) as image:
-            answer = model.query(image.convert("RGB"), prompt)["answer"]
+        answer = model.query(rgb_image, prompt)["answer"]
     finally:
         del model
         gc.collect()
-    return answer.strip()
+    return answer
