@@ -8,6 +8,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from app.db import get_session
 from app.main import app
+from app.models.chunk import EMBEDDING_DIM
 
 ADMIN_URL = "postgresql+psycopg://origami:origami@localhost:5432/postgres"
 TEST_URL = "postgresql+psycopg://origami:origami@localhost:5432/origami_test"
@@ -97,7 +98,7 @@ def llm_stub(monkeypatch):
 
     def fake_embed(texts):
         calls["embed"].append(list(texts))
-        return [[0.1] * 1536 for _ in texts]
+        return [[0.1] * EMBEDDING_DIM for _ in texts]
 
     def fake_describe(text=None, image_path=None):
         calls["describe"].append({"text": text, "image_path": image_path})

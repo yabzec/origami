@@ -6,7 +6,7 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import Column
 from sqlmodel import Field, SQLModel
 
-EMBEDDING_DIM = 1536
+EMBEDDING_DIM = 1024  # BAAI/bge-m3 dense output; must match the migrated column type
 
 
 class ChunkSource(StrEnum):

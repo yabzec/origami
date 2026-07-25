@@ -129,7 +129,9 @@ def test_pipeline_resumes_after_embedding_failure(session, pipeline_storage, llm
     describe_calls_after_first_run = len(llm_stub["describe"])
 
     # retry with embedding working again: must NOT redo extraction/summary
-    monkeypatch.setattr(pipeline, "llm_embed", lambda texts: [[0.2] * 1536 for _ in texts])
+    from app.models.chunk import EMBEDDING_DIM
+
+    monkeypatch.setattr(pipeline, "llm_embed", lambda texts: [[0.2] * EMBEDDING_DIM for _ in texts])
     doc = run(session, doc)
     assert doc.status == DocStatus.ready
     assert len(llm_stub["describe"]) == describe_calls_after_first_run  # summary not regenerated
@@ -238,3 +240,12 @@ def test_image_summary_falls_back_to_vision_when_little_text(session, pipeline_s
 
     pipeline._ensure_summary(session, doc, pipeline_storage)
     assert llm_stub["describe"][-1]["image_path"] is not None  # vision fallback
+
+
+def test_chunk_embedding_dimension_matches_the_local_model():
+    from app.models.chunk import EMBEDDING_DIM
+    from app.models import Chunk
+
+    # bge-m3 dense output. The DB column and the model constant must never drift.
+    assert EMBEDDING_DIM == 1024
+    assert Chunk.__table__.c.embedding.type.dim == 1024

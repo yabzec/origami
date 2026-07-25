@@ -17,8 +17,10 @@ def make_text_image(
 
 import uuid
 
+from app.models.chunk import EMBEDDING_DIM
 
-def basis_vector(index: int, dim: int = 1536) -> list[float]:
+
+def basis_vector(index: int, dim: int = EMBEDDING_DIM) -> list[float]:
     vector = [0.0] * dim
     vector[index] = 1.0
     return vector
