@@ -11,6 +11,7 @@ Lifecycle differs per model, deliberately:
 """
 
 import logging
+from pathlib import Path
 
 from app.config import get_settings
 
@@ -51,3 +52,34 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
         show_progress_bar=False,
     )
     return [v.tolist() for v in vectors]
+
+
+def describe_image(image_path: Path, prompt: str) -> str:
+    """Answer `prompt` about the image at `image_path` using the local vision model.
+
+    The model is loaded, used, and released within this call. That costs ~20-30s of
+    load time per call but keeps ~3.7GB out of the worker's steady-state footprint.
+    The trade is right because this path is rare by design: `pipeline._ensure_summary`
+    only reaches vision for images with under IMAGE_SUMMARY_TEXT_THRESHOLD chars of
+    extracted text (photos), and ingestion is async so the latency is not user-facing.
+    """
+    import gc
+
+    import torch
+    from PIL import Image
+    from transformers import AutoModelForCausalLM
+
+    settings = get_settings()
+    name = settings.vision_model_name
+    revision = settings.vision_model_revision
+    log.info("loading vision model %s (cpu, bfloat16)", name)
+    model = AutoModelForCausalLM.from_pretrained(
+        name, revision=revision, trust_remote_code=True, torch_dtype=torch.bfloat16
+    )
+    try:
+        with Image.open(image_path) as image:
+            answer = model.query(image.convert("RGB"), prompt)["answer"]
+    finally:
+        del model
+        gc.collect()
+    return answer.strip()

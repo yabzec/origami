@@ -37,3 +37,33 @@ def test_embed_texts_places_related_multilingual_text_closer_than_unrelated():
 
 def test_embed_texts_accepts_empty_list():
     assert local_models.embed_texts([]) == []
+
+
+def test_describe_image_returns_non_empty_text(tmp_path):
+    from PIL import Image, ImageDraw
+
+    img_path = tmp_path / "receipt.png"
+    image = Image.new("RGB", (640, 320), "white")
+    ImageDraw.Draw(image).text((20, 140), "TOTALE 42,00 EUR", fill="black")
+    image.save(img_path)
+
+    answer = local_models.describe_image(img_path, "What does this image show?")
+
+    assert isinstance(answer, str)
+    assert answer.strip()
+
+
+def test_describe_image_releases_the_model_after_the_call(tmp_path):
+    from PIL import Image
+
+    img_path = tmp_path / "blank.png"
+    Image.new("RGB", (64, 64), "white").save(img_path)
+
+    local_models.describe_image(img_path, "Describe this.")
+
+    # The vision model must not be cached anywhere: ~3.7GB of resident RAM per
+    # process is the difference between fitting in 16GB and not.
+    assert not any(
+        name for name in vars(local_models) if name.startswith("_vision")
+        and getattr(local_models, name) is not None
+    )

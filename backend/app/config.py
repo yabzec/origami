@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     embedding_dim: int = 1536
     embedding_model_name: str = "BAAI/bge-m3"
     embedding_model_revision: str = "main"
+    vision_model_name: str = "vikhyatk/moondream2"
+    vision_model_revision: str = "6b714b26eea5cbd9f31e4edb2541c170afa935ba"
     gemini_api_key: str = ""
     llm_api_key: str = ""
     llm_api_base: str = ""
