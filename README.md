@@ -53,6 +53,17 @@ Run tests (real Postgres, no mocks — `docker compose up -d db` must be running
 uv run pytest
 ```
 
+### Environment and Local Models
+
+**Chat and Text LLM (remote):** Only the chat endpoint requires an API key and provider configuration. Set `LLM_MODEL` (a LiteLLM model string; see `.env.example` for examples) and `LLM_API_KEY`. Embedding and image description do not use this — they run entirely locally.
+
+**Embedding and Image Description (local):**
+- Embedding (`BAAI/bge-m3`) and image description (`vikhyatk/moondream2`) run locally on CPU; no API key is needed.
+- **First-run model download:** ~6GB of weights from HuggingFace (~2.3GB embedding + ~3.7GB vision) are downloaded on first use and cached under `~/.cache/huggingface`. Relocate the cache by setting `HF_HOME`. The first ingestion after a fresh install is slow because of this download; the first image description is slower still while the vision model loads.
+- **RAM:** Expect ~2.3GB resident in each of the two processes (`uvicorn` and the worker both embed concurrently), plus a transient ~3.7GB spike in the worker while an image is being described. Total steady-state ~4.6GB, peak ~8.3GB. This has been tested on a 16GB system running the Postgres container alongside; less than 16GB is not recommended.
+- **Changing embedding models:** The `EMBEDDING_MODEL_NAME` setting is not a simple config change. Switching models requires a new Alembic migration to match the new embedding dimension, followed by a full re-ingestion of all documents. The default is `BAAI/bge-m3` (1024-dim); if you need to change it, plan for downtime.
+- **Vision model pinning:** `VISION_MODEL_REVISION` is pinned to a specific commit because moondream2 executes arbitrary code from its HuggingFace repository (`trust_remote_code=True`). Do not unpin it casually — always verify the commit before updating.
+
 ### Frontend
 
 ```bash
