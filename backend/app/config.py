@@ -12,9 +12,6 @@ class Settings(BaseSettings):
     jwt_secret: str = "dev-secret"
     jwt_expire_days: int = 30
     llm_model: str = "gemini/gemini-2.5-flash"
-    vision_model: str = "gemini/gemini-2.5-flash"
-    embedding_model: str = "gemini/gemini-embedding-001"
-    embedding_dim: int = 1536
     embedding_model_name: str = "BAAI/bge-m3"
     embedding_model_revision: str = "main"
     vision_model_name: str = "vikhyatk/moondream2"
@@ -22,8 +19,6 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     llm_api_key: str = ""
     llm_api_base: str = ""
-    embedding_api_key: str = ""
-    embedding_api_base: str = ""
     default_ocr_languages: str = "ita+eng"
     rag_top_k: int = 8
     rag_relevance_floor: float = 0.35

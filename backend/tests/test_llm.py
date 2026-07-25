@@ -2,19 +2,30 @@ from types import SimpleNamespace
 
 import litellm
 
-from app.services import llm
+from app.services import llm, local_models
 
 
-def test_embed_returns_vectors_in_input_order(monkeypatch):
-    def fake_embedding(model, input, dimensions):
-        assert model == "gemini/gemini-embedding-001"
-        assert dimensions == 1536
-        data = [{"index": i, "embedding": [float(i)] * 3} for i in range(len(input))]
-        return SimpleNamespace(data=list(reversed(data)))  # out of order on purpose
+def test_embed_delegates_to_local_model(monkeypatch):
+    captured = {}
 
-    monkeypatch.setattr(litellm, "embedding", fake_embedding)
+    def fake_embed_texts(texts):
+        captured["texts"] = list(texts)
+        return [[0.5, 0.5], [0.1, 0.9]]
+
+    monkeypatch.setattr(local_models, "embed_texts", fake_embed_texts)
     vectors = llm.embed(["a", "b"])
-    assert vectors == [[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]]
+
+    assert vectors == [[0.5, 0.5], [0.1, 0.9]]  # returned unchanged, order preserved
+    assert captured["texts"] == ["a", "b"]
+
+
+def test_embed_makes_no_litellm_call(monkeypatch):
+    def explode(*args, **kwargs):
+        raise AssertionError("embedding must not reach litellm — it is local now")
+
+    monkeypatch.setattr(litellm, "embedding", explode)
+    monkeypatch.setattr(local_models, "embed_texts", lambda texts: [[0.0]] * len(texts))
+    assert llm.embed(["a"]) == [[0.0]]
 
 
 def test_describe_text(monkeypatch):
@@ -33,23 +44,34 @@ def test_describe_text(monkeypatch):
     assert captured["model"] == "gemini/gemini-2.5-flash"
 
 
-def test_describe_image(monkeypatch, tmp_path):
+def test_describe_image_delegates_to_local_model(monkeypatch, tmp_path):
     img = tmp_path / "photo.png"
     img.write_bytes(b"\x89PNG fake")
     captured = {}
 
-    def fake_completion(model, messages):
-        captured["model"] = model
-        captured["parts"] = messages[0]["content"]
-        msg = SimpleNamespace(content="A receipt photo.")
-        return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
+    def fake_describe_image(image_path, prompt):
+        captured["image_path"] = image_path
+        captured["prompt"] = prompt
+        return "  Una foto di una ricevuta.  "
 
-    monkeypatch.setattr(litellm, "completion", fake_completion)
+    monkeypatch.setattr(local_models, "describe_image", fake_describe_image)
     result = llm.describe(image_path=img)
-    assert result == "A receipt photo."
-    kinds = [p["type"] for p in captured["parts"]]
-    assert kinds == ["text", "image_url"]
-    assert captured["parts"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+    assert result == "Una foto di una ricevuta."  # stripped
+    assert captured["image_path"] == img
+    assert captured["prompt"] == llm.DESCRIBE_PROMPT  # same prompt as the text branch
+
+
+def test_describe_image_makes_no_litellm_call(monkeypatch, tmp_path):
+    img = tmp_path / "photo.png"
+    img.write_bytes(b"\x89PNG fake")
+
+    def explode(*args, **kwargs):
+        raise AssertionError("vision must not reach litellm — it is local now")
+
+    monkeypatch.setattr(litellm, "completion", explode)
+    monkeypatch.setattr(local_models, "describe_image", lambda image_path, prompt: "ok")
+    assert llm.describe(image_path=img) == "ok"
 
 
 def test_complete_non_stream(monkeypatch):
@@ -101,26 +123,4 @@ def test_complete_passes_api_key_and_base(monkeypatch):
     llm.complete([{"role": "user", "content": "hi"}])
     assert captured["api_key"] == "sk-test"
     assert captured["api_base"] == "http://localhost:11434"
-    get_settings.cache_clear()
-
-
-def test_embed_falls_back_to_llm_key(monkeypatch):
-    import litellm
-
-    from app.config import get_settings
-    from app.services import llm
-
-    get_settings.cache_clear()
-    monkeypatch.setenv("LLM_API_KEY", "sk-shared")
-    monkeypatch.delenv("EMBEDDING_API_KEY", raising=False)
-
-    captured = {}
-
-    def fake_embedding(model, input, dimensions, api_key=None, api_base=None):
-        captured["api_key"] = api_key
-        return type("R", (), {"data": [{"index": 0, "embedding": [0.1] * dimensions}]})()
-
-    monkeypatch.setattr(litellm, "embedding", fake_embedding)
-    llm.embed(["hello"])
-    assert captured["api_key"] == "sk-shared"
     get_settings.cache_clear()
