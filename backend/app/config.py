@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     vision_model: str = "gemini/gemini-2.5-flash"
     embedding_model: str = "gemini/gemini-embedding-001"
     embedding_dim: int = 1536
+    embedding_model_name: str = "BAAI/bge-m3"
+    embedding_model_revision: str = "main"
     gemini_api_key: str = ""
     llm_api_key: str = ""
     llm_api_base: str = ""
