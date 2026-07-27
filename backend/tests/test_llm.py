@@ -5,27 +5,67 @@ import litellm
 from app.services import llm, local_models
 
 
-def test_embed_delegates_to_local_model(monkeypatch):
+def test_embed_returns_vectors_in_input_order(monkeypatch):
+    from app.config import get_settings
+
+    # Set the model explicitly rather than relying on the default: a developer's
+    # local .env overrides it, and this test asserts on the value passed through.
+    get_settings.cache_clear()
+    monkeypatch.setenv("EMBEDDING_MODEL", "openai/@cf/baai/bge-m3")
+
     captured = {}
 
-    def fake_embed_texts(texts):
-        captured["texts"] = list(texts)
-        return [[0.5, 0.5], [0.1, 0.9]]
+    def fake_embedding(model, input, **kwargs):
+        captured["model"] = model
+        captured["input"] = list(input)
+        data = [{"index": i, "embedding": [float(i)] * 3} for i in range(len(input))]
+        return SimpleNamespace(data=list(reversed(data)))  # out of order on purpose
 
-    monkeypatch.setattr(local_models, "embed_texts", fake_embed_texts)
+    monkeypatch.setattr(litellm, "embedding", fake_embedding)
     vectors = llm.embed(["a", "b"])
 
-    assert vectors == [[0.5, 0.5], [0.1, 0.9]]  # returned unchanged, order preserved
-    assert captured["texts"] == ["a", "b"]
+    assert vectors == [[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]]  # re-sorted by index
+    assert captured["input"] == ["a", "b"]
+    assert captured["model"] == "openai/@cf/baai/bge-m3"
+    get_settings.cache_clear()
 
 
-def test_embed_makes_no_litellm_call(monkeypatch):
+def test_embed_passes_embedding_credentials(monkeypatch):
+    """The embedding endpoint is Cloudflare's, not the chat provider's.
+
+    Chat and embeddings are different providers here, so `embed` must send
+    EMBEDDING_API_* and never fall back to the chat LLM's key/base.
+    """
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("EMBEDDING_API_KEY", "cf-token")
+    monkeypatch.setenv(
+        "EMBEDDING_API_BASE", "https://api.cloudflare.com/client/v4/accounts/abc/ai/v1"
+    )
+    monkeypatch.setenv("LLM_API_KEY", "gemini-key-must-not-leak-here")
+
+    captured = {}
+
+    def fake_embedding(model, input, api_key=None, api_base=None):
+        captured["api_key"] = api_key
+        captured["api_base"] = api_base
+        return SimpleNamespace(data=[{"index": 0, "embedding": [0.1, 0.2]}])
+
+    monkeypatch.setattr(litellm, "embedding", fake_embedding)
+    llm.embed(["hello"])
+
+    assert captured["api_key"] == "cf-token"
+    assert captured["api_base"] == "https://api.cloudflare.com/client/v4/accounts/abc/ai/v1"
+    get_settings.cache_clear()
+
+
+def test_embed_short_circuits_on_empty_input(monkeypatch):
     def explode(*args, **kwargs):
-        raise AssertionError("embedding must not reach litellm — it is local now")
+        raise AssertionError("no network call should be made for an empty batch")
 
     monkeypatch.setattr(litellm, "embedding", explode)
-    monkeypatch.setattr(local_models, "embed_texts", lambda texts: [[0.0]] * len(texts))
-    assert llm.embed(["a"]) == [[0.0]]
+    assert llm.embed([]) == []
 
 
 def test_describe_text(monkeypatch):

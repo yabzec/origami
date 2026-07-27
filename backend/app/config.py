@@ -12,8 +12,14 @@ class Settings(BaseSettings):
     jwt_secret: str = "dev-secret"
     jwt_expire_days: int = 30
     llm_model: str = "gemini/gemini-2.5-flash"
-    embedding_model_name: str = "BAAI/bge-m3"
-    embedding_model_revision: str = "5617a9f61b028005a4858fdac845db406aefb181"
+    # Embeddings run remotely (Cloudflare Workers AI serves the same BAAI/bge-m3
+    # weights we would otherwise run locally). Routed through LiteLLM's
+    # OpenAI-compatible path, so EMBEDDING_API_BASE points at Cloudflare's
+    # /ai/v1 endpoint: https://api.cloudflare.com/client/v4/accounts/<id>/ai/v1
+    embedding_model: str = "openai/@cf/baai/bge-m3"
+    embedding_api_key: str = ""
+    embedding_api_base: str = ""
+    # Vision still runs locally, load-per-call — see app.services.local_models.
     vision_model_name: str = "vikhyatk/moondream2"
     vision_model_revision: str = "6b714b26eea5cbd9f31e4edb2541c170afa935ba"
     gemini_api_key: str = ""

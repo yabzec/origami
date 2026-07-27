@@ -1,68 +1,22 @@
-"""Local, in-process inference for embeddings and image description.
+"""Local, in-process inference for image description.
 
-The only module that imports torch / transformers / sentence-transformers. Those
-imports are deferred into the loader functions so that importing this module (which
-`app.services.llm` does at import time) never pulls in torch — API startup and test
-collection stay fast.
+The only module that imports torch / transformers. Those imports are deferred into
+`describe_image` so that importing this module (which `app.services.llm` does at
+import time) never pulls in torch. That matters beyond startup speed: the API
+process only ever embeds — which is remote — so it never reaches this code and
+stays at ~30MB instead of carrying torch's ~700MB runtime floor.
 
-Lifecycle differs per model, deliberately:
-  * the embedding model is resident (hot path: every search query and every chunk);
-  * the vision model loads per call and is released (see `describe_image`).
+Nothing here is resident. The vision model loads per call and is released before
+returning; see `describe_image`. Embeddings are not local at all — they go to
+Cloudflare Workers AI via `app.services.llm.embed`.
 """
 
 import logging
-import threading
 from pathlib import Path
 
 from app.config import get_settings
 
 log = logging.getLogger("origami.local_models")
-
-_embedder = None
-_embedder_lock = threading.Lock()
-
-
-def _get_embedder():
-    """Load the sentence-transformers model once per process and keep it resident.
-
-    Double-checked locking: `search.run_search` and `chat.chat` are plain `def`
-    functions, so Starlette runs them in its threadpool (~40 workers by default).
-    Without the lock, two concurrent requests arriving before the first load
-    finishes could both see `_embedder is None` and each construct a
-    SentenceTransformer — two simultaneous ~2.3GB loads in one process.
-    """
-    global _embedder
-    if _embedder is None:
-        with _embedder_lock:
-            if _embedder is None:
-                from sentence_transformers import SentenceTransformer
-
-                settings = get_settings()
-                log.info("loading embedding model %s (cpu)", settings.embedding_model_name)
-                _embedder = SentenceTransformer(
-                    settings.embedding_model_name,
-                    revision=settings.embedding_model_revision,
-                    device="cpu",
-                )
-    return _embedder
-
-
-def embed_texts(texts: list[str]) -> list[list[float]]:
-    """Embed texts into unit-norm dense vectors, one per input, in input order.
-
-    bge-m3 needs no query/passage instruction prefix, so indexing text and query
-    text are embedded identically — which is what the shared `llm.embed` signature
-    requires.
-    """
-    if not texts:
-        return []
-    vectors = _get_embedder().encode(
-        texts,
-        normalize_embeddings=True,
-        batch_size=8,  # small: CPU inference, 8192-token context model
-        show_progress_bar=False,
-    )
-    return [v.tolist() for v in vectors]
 
 
 def describe_image(image_path: Path, prompt: str) -> str:

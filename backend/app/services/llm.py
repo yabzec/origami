@@ -22,8 +22,20 @@ def _kw(key: str, base: str) -> dict:
 
 
 def embed(texts: list[str]) -> list[list[float]]:
-    """Embeddings run locally — see app.services.local_models."""
-    return local_models.embed_texts(texts)
+    """Embed texts remotely, one vector per input, in input order.
+
+    Cloudflare Workers AI serves the same BAAI/bge-m3 weights, reached through
+    LiteLLM's OpenAI-compatible path. Keeping indexing and querying on one model
+    is what makes the stored chunk vectors and the query vector comparable — do
+    not split these across providers.
+    """
+    if not texts:
+        return []
+    settings = get_settings()
+    kw = _kw(settings.embedding_api_key, settings.embedding_api_base)
+    resp = litellm.embedding(model=settings.embedding_model, input=texts, **kw)
+    data = sorted(resp.data, key=lambda d: d["index"])
+    return [d["embedding"] for d in data]
 
 
 def describe(text: str | None = None, image_path: Path | None = None) -> str:

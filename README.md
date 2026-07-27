@@ -53,15 +53,22 @@ Run tests (real Postgres, no mocks — `docker compose up -d db` must be running
 uv run pytest
 ```
 
-### Environment and Local Models
+### Environment and AI models
 
-**Chat and Text LLM (remote):** Only the chat endpoint requires an API key and provider configuration. Set `LLM_MODEL` (a LiteLLM model string; see `.env.example` for examples) and `LLM_API_KEY`. Embedding and image description do not use this — they run entirely locally.
+Three AI paths, configured independently:
 
-**Embedding and Image Description (local):**
-- Embedding (`BAAI/bge-m3`) and image description (`vikhyatk/moondream2`) run locally on CPU; no API key is needed.
-- **First-run model download:** ~6GB of weights from HuggingFace (~2.3GB embedding + ~3.7GB vision) are downloaded on first use and cached under `~/.cache/huggingface`. Relocate the cache by setting `HF_HOME`. The first ingestion after a fresh install is slow because of this download; the first image description is slower still while the vision model loads.
-- **RAM:** Expect ~2.3GB resident in each of the two processes (`uvicorn` and the worker both embed concurrently), plus a transient ~3.7GB spike in the worker while an image is being described. Total steady-state ~4.6GB, peak ~8.3GB. This has been tested on a 16GB system running the Postgres container alongside; less than 16GB is not recommended.
-- **Changing embedding models:** The `EMBEDDING_MODEL_NAME` setting is not a simple config change. Switching models requires a new Alembic migration to match the new embedding dimension, followed by a full re-ingestion of all documents. The default is `BAAI/bge-m3` (1024-dim); if you need to change it, plan for downtime.
+**Chat / text (remote):** Set `LLM_MODEL` (a LiteLLM model string; see `.env.example`) and `LLM_API_KEY`.
+
+**Embeddings (remote — Cloudflare Workers AI):**
+- Both document indexing and search queries use `@cf/baai/bge-m3`, reached through LiteLLM's OpenAI-compatible path. Set `EMBEDDING_API_KEY` to a Cloudflare API token with the *Workers AI* permission, and `EMBEDDING_API_BASE` to `https://api.cloudflare.com/client/v4/accounts/<account_id>/ai/v1`.
+- **Cost:** Cloudflare's free tier is 10,000 Neurons/day, resetting 00:00 UTC. bge-m3 bills 1,075 Neurons per million input tokens, so the free pool is roughly **9.3M input tokens/day** — on the order of 37,000 chunks or hundreds of thousands of search queries. On the Workers *Free* plan, exceeding the pool makes requests fail outright until the reset; the Paid plan bills overage at $0.011/1,000 Neurons.
+- **Indexing and querying must use the same model.** Vector search compares the query vector against stored chunk vectors; if the two came from different models the comparison is meaningless and search silently returns noise. Never point indexing and search at different providers.
+- **Changing `EMBEDDING_MODEL`** to a model with a different vector size requires a new Alembic migration to match `EMBEDDING_DIM` in `app/models/chunk.py` (a code constant, not an env var) plus a full re-embed of every chunk. Not a config-only switch.
+
+**Image description (local):**
+- `vikhyatk/moondream2` runs locally on CPU; no API key needed. Document images never leave the machine.
+- **First-run download:** ~3.7GB from HuggingFace, cached under `~/.cache/huggingface`; relocate with `HF_HOME`. The first image description is slow while this downloads.
+- **RAM:** nothing is resident. The model is loaded per call and released, costing a transient ~3.7GB spike in the worker only while an image is being described (peak observed ~4.4GB, returning to ~1GB after). The API process never imports torch at all. Only images with little or no extractable text reach this path, so it is rare in practice.
 - **Vision model pinning:** `VISION_MODEL_REVISION` is pinned to a specific commit because moondream2 executes arbitrary code from its HuggingFace repository (`trust_remote_code=True`). Do not unpin it casually — always verify the commit before updating.
 
 **Upgrading an existing install:** this branch's migration (`887ee519199f_local_embedding_dim`) wipes all chunks and summaries and resets every document to `pending` — it runs automatically on `alembic upgrade head`, which `deploy/origami.sh` also runs on every service start/restart. Nothing re-enqueues that work automatically, so after upgrading, rebuild the search index by running:

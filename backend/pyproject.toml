@@ -19,7 +19,6 @@ dependencies = [
     "pdf2image>=1.17",
     "python-docx>=1.1",
     "python-multipart>=0.0.12",
-    "sentence-transformers>=3.0",
     "transformers>=4.44,<5",
     "torch>=2.4",
     "einops>=0.8",
