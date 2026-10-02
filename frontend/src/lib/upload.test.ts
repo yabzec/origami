@@ -38,6 +38,12 @@ describe("buildUploadForm", () => {
     expect(buildUploadForm(file, { ocrEnabled: true }).has("ocr_enabled")).toBe(false);
     expect(buildUploadForm(file, { ocrEnabled: false }).get("ocr_enabled")).toBe("false");
   });
+
+  it("sends document_date when set", () => {
+    const form = buildUploadForm(file, { documentDate: "2018-12-01" });
+    expect(form.get("document_date")).toBe("2018-12-01");
+    expect(buildUploadForm(file, {}).has("document_date")).toBe(false);
+  });
 });
 
 describe("fileStem", () => {

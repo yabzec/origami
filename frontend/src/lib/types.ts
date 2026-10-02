@@ -23,6 +23,11 @@ export interface Document {
   folder_id: number | null;
   doc_type: DocType;
   ocr_languages: string;
+  ocr_enabled: boolean;
+  document_date: string;
+  detected_language: string | null;
+  translation_status: "done" | "failed" | null;
+  ocr_applied: boolean | null;
   status: DocStatus;
   error_message: string | null;
   original_filename: string | null;
@@ -36,6 +41,10 @@ export interface Document {
 
 export interface DocumentText {
   summary: string | null;
+  variant: "content" | "translation";
+  detected_language: string | null;
+  translation_status: "done" | "failed" | null;
+  translation_language: string;
   chunks: { chunk_index: number; page_number: number | null; content: string }[];
 }
 

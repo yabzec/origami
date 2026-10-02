@@ -11,6 +11,7 @@ import { ApiError } from "@/lib/api";
 import { buildUploadForm, fileStem } from "@/lib/upload";
 import { OcrLanguageSelect } from "@/components/OcrLanguageSelect";
 import { DEFAULT_OCR_LANGUAGES } from "@/lib/ocrLanguages";
+import { todayIso } from "@/lib/dates";
 
 export function UploadDialog({
   file,
@@ -31,6 +32,7 @@ export function UploadDialog({
   const [tagIds, setTagIds] = useState<number[]>([]);
   const [languages, setLanguages] = useState(DEFAULT_OCR_LANGUAGES);
   const [ocrEnabled, setOcrEnabled] = useState(true);
+  const [documentDate, setDocumentDate] = useState(todayIso);
   const [error, setError] = useState<string | null>(null);
 
   if (!file) return null;
@@ -44,6 +46,7 @@ export function UploadDialog({
         tagIds,
         ocrLanguages: languages,
         ocrEnabled,
+        documentDate,
       }),
       {
         onSuccess: () => {
@@ -62,6 +65,10 @@ export function UploadDialog({
         <div>
           <Label htmlFor="up-title">Title</Label>
           <Input id="up-title" value={title} placeholder={fileStem(file.name)} onChange={(e) => setTitle(e.target.value)} />
+        </div>
+        <div>
+          <Label htmlFor="up-date">Document date</Label>
+          <Input id="up-date" type="date" value={documentDate} onChange={(e) => setDocumentDate(e.target.value)} />
         </div>
         <div>
           <Label htmlFor="up-folder">Folder</Label>
