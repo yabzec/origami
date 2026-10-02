@@ -332,3 +332,94 @@ def test_list_models_missing_key(monkeypatch):
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     with pytest.raises(ValueError, match="No API key for provider 'groq'"):
         llm.list_models()
+
+
+SELECT_IDS = [f"00000000-0000-4000-8000-{i:012d}" for i in range(12)]
+
+
+def _candidates(count=3):
+    return [
+        {
+            "id": SELECT_IDS[i],
+            "title": f"Documento {i}",
+            "document_date": "2026-03-15",
+            "doc_type": "pdf",
+            "summary_line": f"Riassunto {i}",
+        }
+        for i in range(count)
+    ]
+
+
+def _select_completion(reply, captured):
+    def fake_completion(model, messages, **kw):
+        captured.append({"model": model, "messages": messages, **kw})
+        if isinstance(reply, Exception):
+            raise reply
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=reply))])
+
+    return fake_completion
+
+
+def test_select_documents_keeps_only_candidate_ids_once_in_order(monkeypatch):
+    reply = jsonlib.dumps(
+        {"document_ids": [f"  {SELECT_IDS[2].upper()} ", "ghost-id", 7, SELECT_IDS[0],
+                          SELECT_IDS[2], SELECT_IDS[11]]}
+    )
+    monkeypatch.setattr(litellm, "completion", _select_completion(reply, []))
+    assert llm.select_documents("quale bolletta?", [], _candidates()) == [SELECT_IDS[2], SELECT_IDS[0]]
+
+
+def test_select_documents_caps_at_ten(monkeypatch):
+    reply = jsonlib.dumps({"document_ids": SELECT_IDS})
+    monkeypatch.setattr(litellm, "completion", _select_completion(reply, []))
+    assert llm.select_documents("tutto", [], _candidates(12)) == SELECT_IDS[:10]
+
+
+def test_select_documents_parses_fenced_json(monkeypatch):
+    fence = "`" * 3
+    reply = f'{fence}json\n{{"document_ids": ["{SELECT_IDS[1]}"]}}\n{fence}'
+    monkeypatch.setattr(litellm, "completion", _select_completion(reply, []))
+    assert llm.select_documents("q", [], _candidates()) == [SELECT_IDS[1]]
+
+
+def test_select_documents_parses_prose_wrapped_json(monkeypatch):
+    reply = f'Ecco i documenti: {{"document_ids": ["{SELECT_IDS[0]}"]}} spero aiuti.'
+    monkeypatch.setattr(litellm, "completion", _select_completion(reply, []))
+    assert llm.select_documents("q", [], _candidates()) == [SELECT_IDS[0]]
+
+
+def test_select_documents_junk_returns_empty(monkeypatch):
+    for reply in ["Non lo so.", '{"document_ids": "x"}', "{not json}", None]:
+        monkeypatch.setattr(litellm, "completion", _select_completion(reply, []))
+        assert llm.select_documents("q", [], _candidates()) == [], reply
+
+
+def test_select_documents_exception_returns_empty(monkeypatch, caplog):
+    monkeypatch.setattr(litellm, "completion", _select_completion(RuntimeError("provider down"), []))
+    assert llm.select_documents("q", [], _candidates()) == []
+    assert "document preflight failed" in caplog.text
+
+
+def test_select_documents_skips_call_without_candidates(monkeypatch):
+    captured = []
+    monkeypatch.setattr(litellm, "completion", _select_completion('{"document_ids": []}', captured))
+    assert llm.select_documents("q", [{"role": "user", "content": "x"}], []) == []
+    assert captured == []
+
+
+def test_select_documents_prompt_lists_candidates_and_last_four_messages(monkeypatch):
+    captured = []
+    monkeypatch.setattr(litellm, "completion", _select_completion('{"document_ids": []}', captured))
+    history = [
+        {"role": "user" if i % 2 == 0 else "assistant", "content": f"storico-{i}"} for i in range(6)
+    ]
+    assert llm.select_documents("quale bolletta?", history, _candidates(2)) == []
+    [call] = captured
+    assert call["model"] == "gemini/gemini-2.5-flash"
+    prompt = call["messages"][0]["content"]
+    assert f"1. {SELECT_IDS[0]} | Documento 0 | 2026-03-15 | pdf | Riassunto 0" in prompt
+    assert f"2. {SELECT_IDS[1]} | Documento 1 | 2026-03-15 | pdf | Riassunto 1" in prompt
+    assert "storico-1" not in prompt
+    assert "user: storico-2" in prompt and "assistant: storico-5" in prompt
+    assert '{"document_ids": [' in prompt
+    assert prompt.rstrip().endswith("Question: quale bolletta?")

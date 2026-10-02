@@ -1,5 +1,6 @@
 import base64
 import json
+import logging
 import os
 import re
 import urllib.parse
@@ -12,6 +13,8 @@ import litellm
 from app.config import get_primary_language, get_settings
 
 LANGUAGE_NAMES = {"it": "Italian", "en": "English", "de": "German", "fr": "French", "es": "Spanish"}
+
+log = logging.getLogger("origami.llm")
 
 
 def language_name(code: str) -> str:
@@ -137,6 +140,68 @@ def complete(messages: list[dict], stream: bool = False):
                 yield piece
 
     return deltas()
+
+
+SELECT_HISTORY_MESSAGES = 4
+SELECT_MAX_DOCUMENTS = 10
+
+
+def _select_prompt(question: str, history: list[dict], candidates: list[dict]) -> str:
+    lines = "\n".join(
+        f"{n}. {c['id']} | {c['title']} | {c['document_date']} | {c['doc_type']} | {c['summary_line']}"
+        for n, c in enumerate(candidates, start=1)
+    )
+    recent = history[-SELECT_HISTORY_MESSAGES:]
+    conversation = "\n".join(f"{m['role']}: {m['content']}" for m in recent) or "(no earlier messages)"
+    return (
+        "You pick which documents of a personal archive a chat question refers to.\n"
+        'Reply with ONLY a JSON object: {"document_ids": ["<id>", ...]}, listing the ids of the '
+        "documents the user is asking about or that are needed to answer. "
+        'Reply {"document_ids": []} if none apply.\n\n'
+        f"Candidate documents (id | title | date | type | summary):\n{lines}\n\n"
+        f"Recent conversation:\n{conversation}\n\n"
+        f"Question: {question}"
+    )
+
+
+def parse_document_ids(raw: str | None, candidate_ids: list[str]) -> list[str]:
+    """Candidate ids from the first {...} block of the reply, in order, de-duplicated, max 10."""
+    match = re.search(r"\{.*?\}", raw or "", re.DOTALL)
+    if match is None:
+        raise ValueError("no JSON object in the preflight reply")
+    data = json.loads(match.group(0))
+    ids = data.get("document_ids") if isinstance(data, dict) else None
+    if not isinstance(ids, list):
+        raise ValueError("document_ids is not a list")
+    allowed = {cid.lower(): cid for cid in candidate_ids}
+    selected: list[str] = []
+    for item in ids:
+        if not isinstance(item, str):
+            continue
+        cid = allowed.get(item.strip().lower())
+        if cid is not None and cid not in selected:
+            selected.append(cid)
+            if len(selected) == SELECT_MAX_DOCUMENTS:
+                break
+    return selected
+
+
+def select_documents(question: str, history: list[dict], candidates: list[dict]) -> list[str]:
+    """Chat preflight: ids of the candidates the question is about. Never raises: [] on failure."""
+    if not candidates:
+        return []
+    try:
+        settings = get_settings()
+        kw = _kw(settings.llm_api_key, settings.llm_api_base)
+        resp = litellm.completion(
+            model=settings.llm_model,
+            messages=[{"role": "user", "content": _select_prompt(question, history, candidates)}],
+            **kw,
+        )
+        return parse_document_ids(resp.choices[0].message.content, [c["id"] for c in candidates])
+    except Exception:
+        log.exception("document preflight failed")
+        return []
 
 
 OPENAI_STYLE_MODEL_URLS = {
