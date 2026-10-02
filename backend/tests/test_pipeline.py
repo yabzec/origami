@@ -595,3 +595,58 @@ def test_translation_discarded_when_document_reprocessed_meanwhile(
     doc = translate(session, doc)
     assert doc.translation_status is None
     assert ChunkSource.translation not in chunks_by_source(session, doc)
+
+
+def _reprocess_reset(engine, doc_id):
+    with Session(engine) as other:  # what reprocess_document commits
+        for c in other.exec(select(Chunk).where(Chunk.document_id == doc_id)).all():
+            other.delete(c)
+        fresh = other.get(Document, doc_id)
+        fresh.translation_status = None
+        fresh.detected_language = None
+        other.commit()
+
+
+def test_translation_discarded_when_reprocessed_during_embedding(
+    session, engine, pipeline_storage, llm_stub, monkeypatch
+):
+    doc = _german_doc(session, pipeline_storage, llm_stub)
+    real_embed = pipeline.llm_embed
+
+    def embed_during_reprocess(texts):
+        _reprocess_reset(engine, doc.id)
+        return real_embed(texts)
+
+    monkeypatch.setattr(pipeline, "llm_embed", embed_during_reprocess)
+    # final attempt: a superseded run must still neither raise nor mark failed
+    doc = translate(session, doc, _attempt=5, _final_attempt=True)
+    assert doc.translation_status is None
+    assert ChunkSource.translation not in chunks_by_source(session, doc)
+
+
+def test_translation_insert_holds_document_row_lock(
+    session, engine, pipeline_storage, llm_stub, monkeypatch
+):
+    """reprocess_document locks the same row before deleting chunks, so it cannot slip in
+    between the re-check and the insert."""
+    from sqlalchemy.exc import OperationalError
+
+    doc = _german_doc(session, pipeline_storage, llm_stub)
+    real = pipeline._next_chunk_index
+    seen = {}
+
+    def next_index_probing_lock(s, d):
+        with Session(engine) as other:
+            try:
+                other.exec(
+                    select(Document).where(Document.id == doc.id).with_for_update(nowait=True)
+                ).one()
+                seen["locked"] = False
+            except OperationalError:
+                seen["locked"] = True
+        return real(s, d)
+
+    monkeypatch.setattr(pipeline, "_next_chunk_index", next_index_probing_lock)
+    doc = translate(session, doc)
+    assert seen["locked"] is True
+    assert doc.translation_status == "done"

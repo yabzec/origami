@@ -198,6 +198,7 @@ def reprocess_document(
         if scan_session_id is None:
             raise api_error(409, "no_source", "The original scanned pages are no longer available")
         payload["scan_session_id"] = scan_session_id
+    session.refresh(doc, with_for_update=True)  # serialize with translate_document's writes
     for chunk in session.exec(
         select(Chunk).where(
             Chunk.document_id == doc.id,

@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from sqlalchemy import func, update
+from sqlalchemy.orm.exc import StaleDataError
 from sqlmodel import Session, select
 
 from app.config import get_primary_language, get_settings
@@ -299,9 +300,12 @@ def _insert_translation_chunks(session: Session, doc: Document) -> bool:
     content_chunks = _content_chunks(session, doc)
     source_ids = [c.id for c in content_chunks]
     translated = [(c.page_number, llm_translate(c.content, target)) for c in content_chunks]
-    session.refresh(doc)
+    # row lock (released by the commit below) serializes with reprocess_document, which takes
+    # the same lock before touching chunks; never held across the LLM calls above
+    session.refresh(doc, with_for_update=True)
     current_ids = [c.id for c in _content_chunks(session, doc)]
     if not source_ids or current_ids != source_ids or doc.translation_status != TranslationStatus.pending:
+        session.rollback()  # release the row lock
         log.info("Document %s changed during translation; result discarded", doc.id)
         return False
     next_index = _next_chunk_index(session, doc)
@@ -319,12 +323,26 @@ def _insert_translation_chunks(session: Session, doc: Document) -> bool:
     return True
 
 
+def _finish_translation(session: Session, doc: Document, status: str) -> bool:
+    """Set translation_status only if it is still pending (row-locked); False = superseded."""
+    session.refresh(doc, with_for_update=True)
+    if doc.translation_status != TranslationStatus.pending:
+        session.rollback()
+        log.info("Document %s changed during translation; result discarded", doc.id)
+        return False
+    doc.translation_status = status
+    session.commit()
+    return True
+
+
 @register("translate_document")
 def translate_document(session: Session, payload: dict) -> None:
     doc = session.get(Document, payload["document_id"])
     if doc is None:
         log.info("translate_document: document %s no longer exists", payload["document_id"])
         return
+    if not doc.detected_language or doc.detected_language == get_primary_language():
+        return  # nothing to translate (e.g. the document was re-processed since queueing)
     if doc.translation_status == TranslationStatus.done and _has_chunks(
         session, doc, ChunkSource.translation
     ):
@@ -335,15 +353,17 @@ def translate_document(session: Session, payload: dict) -> None:
             if not _insert_translation_chunks(session, doc):
                 return
         _embed_pending_chunks(session, doc)  # only translation chunks are still unembedded
-        doc.translation_status = TranslationStatus.done
-        session.commit()
+        _finish_translation(session, doc, TranslationStatus.done)
+    except StaleDataError:
+        # re-process deleted the chunks while they were being embedded: superseded run
+        session.rollback()
+        log.info("Document %s re-processed during translation; run discarded", doc.id)
     except Exception:
         session.rollback()
-        doc.translation_status = (
-            TranslationStatus.failed if is_final_attempt(payload) else TranslationStatus.pending
-        )
-        session.commit()
-        raise
+        status = TranslationStatus.failed if is_final_attempt(payload) else TranslationStatus.pending
+        if _finish_translation(session, doc, status):
+            raise
+        # superseded: complete the job quietly (no retry, no failure email)
 
 
 def _ensure_metadata_chunk(session: Session, doc: Document) -> None:
