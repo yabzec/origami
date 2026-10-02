@@ -74,6 +74,9 @@ def _extract_content(
     if doc.doc_type == DocType.video or _has_chunks(session, doc, ChunkSource.content):
         return []
 
+    if payload.get("force_ocr") and doc.doc_type in (DocType.pdf, DocType.scan):
+        return _reocr_pdf(session, doc, storage)
+
     if doc.doc_type == DocType.scan:
         return _extract_scan(session, doc, storage, payload)
 
@@ -97,11 +100,33 @@ def _extract_content(
             rel, size = storage.store_file(doc.id, ".pdf", pdf_bytes)
             doc.file_path = rel
             doc.file_size = size
+            doc.ocr_applied = True
+        else:
+            doc.ocr_applied = False  # original file kept
         doc.page_count = len(pages)
         session.commit()
         return pages
 
     raise ValueError(f"Unknown doc_type {doc.doc_type!r}")
+
+
+def _reocr_pdf(session: Session, doc: Document, storage: Storage) -> list[tuple[int | None, str]]:
+    """Re-process: OCR the stored PDF again (scan page images are gone after compile).
+
+    A born-digital PDF (ocr_applied False) is never rasterized unless its own text layer is poor;
+    unknown provenance (None, legacy rows) is treated as previously OCR'd.
+    """
+    path = storage.abs_path(doc.file_path)
+    pages = extract_pdf_text(path)
+    if doc.ocr_enabled and (doc.ocr_applied is not False or pdf_needs_ocr(pages)):
+        pdf_bytes, pages = pdf_to_searchable_pdf(path, doc.ocr_languages)
+        rel, size = storage.store_file(doc.id, ".pdf", pdf_bytes)
+        doc.file_path = rel
+        doc.file_size = size
+        doc.ocr_applied = True
+    doc.page_count = len(pages)
+    session.commit()
+    return pages
 
 
 def _extract_scan(
@@ -128,6 +153,7 @@ def _extract_scan(
         rel, size = storage.store_file(doc.id, ".pdf", pdf_bytes)
         doc.file_path = rel
         doc.file_size = size
+        doc.ocr_applied = doc.ocr_enabled
     doc.page_count = len(pages)
     scan_session = session.get(ScanSession, session_id)
     if scan_session is not None:

@@ -9,7 +9,8 @@ from sqlmodel import Session, select
 from app.api.deps import api_error, get_current_user
 from app.config import get_primary_language
 from app.db import get_session
-from app.models import Chunk, ChunkSource, Document, DocumentTag, Folder, Tag
+from app.models import Chunk, ChunkSource, DocStatus, DocType, Document, DocumentTag, Folder, Tag
+from app.services.jobs import enqueue
 from app.services.storage import Storage, get_storage
 
 router = APIRouter(
@@ -146,3 +147,40 @@ def delete_document(
     session.delete(doc)  # chunks and document_tags cascade via FK
     session.commit()
     storage.delete_document_file(rel_path)
+
+
+class ReprocessRequest(BaseModel):
+    ocr_languages: str
+    ocr_enabled: bool = True
+
+
+@router.post("/{document_id}/reprocess")
+def reprocess_document(
+    document_id: uuid.UUID,
+    body: ReprocessRequest,
+    session: Session = Depends(get_session),
+) -> dict:
+    doc = get_doc_or_404(session, document_id)
+    if doc.status in (DocStatus.pending, DocStatus.processing):
+        raise api_error(409, "document_busy", "Document is still being processed")
+    if doc.doc_type == DocType.video:
+        raise api_error(422, "not_reprocessable", "Videos have no text to re-process")
+    for chunk in session.exec(
+        select(Chunk).where(
+            Chunk.document_id == doc.id,
+            Chunk.source.in_([ChunkSource.content, ChunkSource.summary, ChunkSource.translation]),
+        )
+    ):
+        session.delete(chunk)
+    doc.ocr_languages = body.ocr_languages
+    doc.ocr_enabled = body.ocr_enabled
+    doc.summary = None
+    doc.detected_language = None
+    doc.translation_status = None
+    doc.error_message = None
+    doc.status = DocStatus.pending
+    doc.updated_at = datetime.now(timezone.utc)
+    session.commit()
+    enqueue(session, "process_document", {"document_id": str(doc.id), "force_ocr": True})
+    session.refresh(doc)
+    return serialize(session, doc)
