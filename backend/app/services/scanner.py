@@ -147,8 +147,10 @@ class FakeScannerBackend:
         self._labels = cycle(pages or ["SCAN"])
         self._error = error
         self._devices = devices if devices is not None else [{"id": "fake:0", "name": "Fake Scanner"}]
+        self.last_device: str | None = None
 
     def scan(self, dpi: int, mode: str, device: str | None = None) -> bytes:
+        self.last_device = device
         if self._error is not None:
             raise self._error
         img = Image.new("RGB", (600, 200), "white")

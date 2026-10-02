@@ -108,3 +108,42 @@ def test_preview_busy_returns_409(auth_client, fake_scanner, storage):
         assert resp.json()["error"]["code"] == "scanner_busy"
     finally:
         scanner_module._scan_lock.release()
+
+
+def test_page_scan_uses_request_device(auth_client, fake_scanner, storage):
+    sid = new_session(auth_client, device="fake:0").json()["id"]
+    auth_client.post(f"/api/scan/sessions/{sid}/pages", json={"device": "fake:1"})
+    assert fake_scanner.last_device == "fake:1"
+    auth_client.post(f"/api/scan/sessions/{sid}/pages", json={})
+    assert fake_scanner.last_device == "fake:0"  # falls back to the session device
+
+
+def test_compile_applies_form_fields(auth_client, fake_scanner, storage, session):
+    from app.models import Document
+
+    sid = new_session(auth_client, ocr_languages="ita+eng", ocr_enabled=True).json()["id"]
+    auth_client.post(f"/api/scan/sessions/{sid}/pages", json={})
+    resp = auth_client.post(
+        f"/api/scan/sessions/{sid}/compile",
+        json={
+            "title": "Brief",
+            "description": "Lettera dalla Germania",
+            "document_date": "2021-07-09",
+            "ocr_languages": "deu",
+            "ocr_enabled": False,
+        },
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["description"] == "Lettera dalla Germania"
+    assert body["document_date"] == "2021-07-09"
+    assert body["ocr_languages"] == "deu"
+    assert body["ocr_enabled"] is False
+
+
+def test_compile_falls_back_to_session_settings(auth_client, fake_scanner, storage):
+    sid = new_session(auth_client, ocr_languages="ita", ocr_enabled=False).json()["id"]
+    auth_client.post(f"/api/scan/sessions/{sid}/pages", json={})
+    body = auth_client.post(f"/api/scan/sessions/{sid}/compile", json={"title": "X"}).json()
+    assert body["ocr_languages"] == "ita"
+    assert body["ocr_enabled"] is False

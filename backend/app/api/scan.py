@@ -1,3 +1,5 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -28,6 +30,7 @@ class SessionCreate(BaseModel):
 class PageScanRequest(BaseModel):
     dpi: int = 300
     mode: str = "Color"
+    device: str | None = None
 
 
 class PreviewRequest(BaseModel):
@@ -42,6 +45,10 @@ class CompileRequest(BaseModel):
     title: str
     folder_id: int | None = None
     tag_ids: list[int] = []
+    description: str = ""
+    document_date: date | None = None
+    ocr_languages: str | None = None
+    ocr_enabled: bool | None = None
 
 
 def get_session_or_404(db: Session, session_id: int) -> ScanSession:
@@ -110,7 +117,7 @@ def scan_page(
     if scan_session.status != ScanSessionStatus.active:
         raise api_error(409, "session_not_active", "Scan session is not active")
 
-    png = scan_locked(backend, dpi=body.dpi, mode=body.mode, device=scan_session.device)
+    png = scan_locked(backend, dpi=body.dpi, mode=body.mode, device=body.device or scan_session.device)
 
     number = len(session_pages(db, session_id)) + 1
     filename = f"page_{number:03d}.png"
@@ -210,9 +217,11 @@ def compile_session(
     doc = create_pending_document(
         db,
         title=body.title,
+        description=body.description,
+        document_date=body.document_date,
         doc_type=DocType.scan,
-        ocr_languages=scan_session.ocr_languages,
-        ocr_enabled=scan_session.ocr_enabled,
+        ocr_languages=body.ocr_languages or scan_session.ocr_languages,
+        ocr_enabled=scan_session.ocr_enabled if body.ocr_enabled is None else body.ocr_enabled,
         folder_id=body.folder_id,
         tag_ids=body.tag_ids,
         original_filename=None,
