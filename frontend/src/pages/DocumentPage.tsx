@@ -12,16 +12,17 @@ import { OcrLanguageSelect } from "@/components/OcrLanguageSelect";
 import { useFolders } from "@/hooks/useFolders";
 import { useTags } from "@/hooks/useTags";
 import { api, ApiError, fileUrl } from "@/lib/api";
+import { isAiDescription, nextDescription } from "@/lib/description";
 import { DEFAULT_OCR_LANGUAGES } from "@/lib/ocrLanguages";
 import { languageLabel, textVariants, type TextVariant } from "@/lib/translation";
 import type { Document, DocumentText } from "@/lib/types";
 import { viewerKind } from "@/lib/viewer";
 
 function Viewer({ doc }: { doc: Document }) {
-  const kind = viewerKind(doc.doc_type);
+  const kind = viewerKind(doc);
   if (doc.status !== "ready" && kind !== "video")
     return <div className="flex h-96 items-center justify-center text-zinc-400">Processing…</div>;
-  const src = fileUrl(doc.id);
+  const src = fileUrl(doc.id, { preview: doc.preview_path !== null });
   if (kind === "pdf") return <iframe title="preview" src={src} className="h-[75vh] w-full rounded border" />;
   if (kind === "image") return <img src={src} alt={doc.title} className="max-h-[75vh] rounded border" />;
   if (kind === "video") return <video controls src={src} className="max-h-[75vh] w-full rounded border" />;
@@ -101,9 +102,11 @@ export function DocumentPage() {
   const lastStatus = useRef<string | null>(null);
 
   const hydratedForDocId = useRef<string | null>(null);
+  const serverDescription = useRef<string | null>(null);
 
   useEffect(() => {
-    if (doc && hydratedForDocId.current !== doc.id) {
+    if (!doc) return;
+    if (hydratedForDocId.current !== doc.id) {
       setTitle(doc.title);
       setDescription(doc.description);
       setFolderId(doc.folder_id);
@@ -112,7 +115,12 @@ export function DocumentPage() {
       setOcrLanguages(doc.ocr_languages);
       setOcrEnabled(doc.ocr_enabled);
       hydratedForDocId.current = doc.id;
+    } else if (serverDescription.current !== doc.description) {
+      // pipeline filled (or re-process cleared) the description: follow it unless the user edited the field
+      const previous = serverDescription.current;
+      setDescription((current) => nextDescription(current, previous, doc.description));
     }
+    serverDescription.current = doc.description;
   }, [doc]);
 
   useEffect(() => {
@@ -210,6 +218,7 @@ export function DocumentPage() {
         <div>
           <Label htmlFor="d-desc">Description</Label>
           <Textarea id="d-desc" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
+          {isAiDescription(description, doc.summary) && <p className="mt-1 text-xs text-zinc-400">AI generated</p>}
         </div>
         <div>
           <Label htmlFor="d-date">Document date</Label>
@@ -247,9 +256,6 @@ export function DocumentPage() {
             ))}
           </div>
         </div>
-        {doc.summary && (
-          <div className="rounded border border-zinc-200 bg-zinc-50 p-2 text-xs text-zinc-600">{doc.summary}</div>
-        )}
         <Button className="w-full" onClick={() => save.mutate()} disabled={save.isPending}>
           {save.isPending ? "Saving…" : "Save"}
         </Button>

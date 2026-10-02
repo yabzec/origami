@@ -52,6 +52,11 @@ describe("api client", () => {
     expect(fileUrl("doc-1")).toBe("/api/documents/doc-1/file?token=tok");
   });
 
+  it("fileUrl adds preview=1 when requested", () => {
+    setToken("tok");
+    expect(fileUrl("doc-1", { preview: true })).toBe("/api/documents/doc-1/file?token=tok&preview=1");
+  });
+
   it("fileUrl adds download=1 when requested", () => {
     setToken("tok");
     expect(fileUrl("doc-1", { download: true })).toBe("/api/documents/doc-1/file?token=tok&download=1");

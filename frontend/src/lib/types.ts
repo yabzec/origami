@@ -32,6 +32,7 @@ export interface Document {
   error_message: string | null;
   original_filename: string | null;
   file_path: string | null;
+  preview_path: string | null;
   page_count: number | null;
   file_size: number | null;
   created_at: string;
