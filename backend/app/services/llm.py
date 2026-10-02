@@ -1,5 +1,6 @@
 import base64
 import json
+import re
 from pathlib import Path
 from typing import NamedTuple
 
@@ -30,22 +31,31 @@ def _describe_prompt(target_language: str) -> str:
     )
 
 
-def parse_description(raw: str) -> Description:
+def parse_description(raw: str | None) -> Description:
     """Parse the describe() JSON reply; fall back to the raw text with no language."""
+    raw = raw or ""
     text = raw.strip()
     if text.startswith("```"):
         text = text.strip("`").removeprefix("json").strip()
+    first, last = text.find("{"), text.rfind("}")
+    if first != -1 and last > first:
+        text = text[first : last + 1]  # tolerate prose around the JSON object
     try:
         data = json.loads(text)
-        summary = str(data["summary"]).strip()
+        summary = data["summary"]
         language = data.get("language")
     except (ValueError, KeyError, TypeError, AttributeError):
         return Description(raw.strip(), None)
-    if not summary:
+    if not isinstance(summary, str) or not summary.strip():
         return Description(raw.strip(), None)
-    if isinstance(language, str) and language.strip():
-        return Description(summary, language.strip().lower()[:2])
-    return Description(summary, None)
+    return Description(summary.strip(), _normalize_language(language))
+
+
+def _normalize_language(language: object) -> str | None:
+    if not isinstance(language, str):
+        return None
+    code = re.split(r"[-_]", language.strip(), maxsplit=1)[0].lower()
+    return code if re.fullmatch(r"[a-z]{2}", code) else None
 
 
 def _kw(key: str, base: str) -> dict:

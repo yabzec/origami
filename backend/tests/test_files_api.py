@@ -58,3 +58,9 @@ def test_file_is_attachment_when_download_requested(auth_client, session, storag
     resp = auth_client.get(f"/api/documents/{doc.id}/file?download=1")
     assert resp.status_code == 200
     assert resp.headers["content-disposition"].startswith("attachment")
+
+
+def test_file_response_is_not_cached(auth_client, session, storage):
+    doc = stored_doc(session, storage)
+    resp = auth_client.get(f"/api/documents/{doc.id}/file")
+    assert resp.headers["cache-control"] == "no-cache"

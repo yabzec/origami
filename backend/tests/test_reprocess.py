@@ -178,3 +178,63 @@ def test_force_ocr_scan_uses_stored_pdf_without_session(session, tmp_path, monke
     session.refresh(doc)
     assert doc.status == DocStatus.ready
     assert doc.page_count == 1
+
+
+def _failed_scan_doc(auth_client, session):
+    """Compile a scan whose first OCR failed before the PDF was stored (no file_path)."""
+    sid = auth_client.post("/api/scan/sessions", json={"ocr_languages": "eng"}).json()["id"]
+    auth_client.post(f"/api/scan/sessions/{sid}/pages", json={})
+    doc_id = auth_client.post(f"/api/scan/sessions/{sid}/compile", json={"title": "Scan"}).json()["id"]
+    from app.models import Document, JobStatus
+
+    job = session.exec(select(Job).where(Job.type == "process_document")).one()
+    job.status = JobStatus.failed
+    doc = session.get(Document, doc_id)
+    doc.status = DocStatus.failed
+    doc.error_message = "tesseract crashed"
+    session.commit()
+    assert doc.file_path is None
+    return sid, doc
+
+
+def test_reprocess_failed_scan_rebuilds_from_page_images(
+    auth_client, fake_scanner, storage, session, monkeypatch, llm_stub
+):
+    monkeypatch.setattr(pipeline, "get_pipeline_storage", lambda: storage)
+    sid, doc = _failed_scan_doc(auth_client, session)
+
+    resp = auth_client.post(f"/api/documents/{doc.id}/reprocess", json={"ocr_languages": "eng"})
+    assert resp.status_code == 200
+    job = session.exec(
+        select(Job).where(Job.type == "process_document").order_by(Job.id.desc())
+    ).first()
+    assert job.payload == {"document_id": str(doc.id), "force_ocr": True, "scan_session_id": sid}
+
+    pipeline.process_document(session, job.payload)
+    session.refresh(doc)
+    assert doc.status == DocStatus.ready
+    assert doc.file_path is not None
+    assert storage.abs_path(doc.file_path).exists()
+
+
+def test_reprocess_scan_without_any_source_is_409(
+    auth_client, fake_scanner, storage, session, monkeypatch
+):
+    from app.models import ScanPage
+
+    sid, doc = _failed_scan_doc(auth_client, session)
+    for page in session.exec(select(ScanPage).where(ScanPage.session_id == sid)).all():
+        session.delete(page)
+    session.commit()
+    storage.remove_scan_session_dir(sid)
+    chunk_count = len(session.exec(select(Chunk).where(Chunk.document_id == doc.id)).all())
+
+    resp = auth_client.post(f"/api/documents/{doc.id}/reprocess", json={"ocr_languages": "deu"})
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "no_source"
+    session.refresh(doc)
+    assert doc.status == DocStatus.failed
+    assert doc.ocr_languages == "eng"
+    assert doc.error_message == "tesseract crashed"
+    assert len(session.exec(select(Chunk).where(Chunk.document_id == doc.id)).all()) == chunk_count
+    assert len(session.exec(select(Job).where(Job.type == "process_document")).all()) == 1

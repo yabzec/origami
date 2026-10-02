@@ -309,3 +309,30 @@ def test_scan_with_ocr_text_gets_summary_and_language(
     assert doc.summary == "Descrizione generata."
     assert doc.detected_language == "de"
     assert doc.translation_status == "done"
+
+
+def test_embedding_is_batched(session, pipeline_storage, llm_stub):
+    from tests.helpers import seed_document
+
+    doc = seed_document(
+        session,
+        "Big",
+        [{"content": f"chunk {i}"} for i in range(250)],
+        status=DocStatus.pending,
+        summary="already summarized",
+    )
+    pipeline._embed_pending_chunks(session, doc)
+    assert [len(batch) for batch in llm_stub["embed"]] == [100, 100, 50]
+    rows = session.exec(select(Chunk).where(Chunk.document_id == doc.id)).all()
+    assert len(rows) == 250
+    assert all(c.embedding is not None for c in rows)
+
+
+def test_empty_summary_is_not_stored(session, pipeline_storage, llm_stub, monkeypatch):
+    from app.services.llm import Description
+
+    monkeypatch.setattr(pipeline, "llm_describe", lambda text=None, image_path=None: Description("", None))
+    doc = run(session, _text_doc(session, pipeline_storage))
+    assert doc.status == DocStatus.ready
+    assert not doc.summary
+    assert ChunkSource.summary not in chunks_by_source(session, doc)

@@ -146,3 +146,26 @@ def test_embed_falls_back_to_llm_key(monkeypatch):
     llm.embed(["hello"])
     assert captured["api_key"] == "sk-shared"
     get_settings.cache_clear()
+
+
+def test_parse_description_rejects_null_summary():
+    raw = '{"summary": null, "language": "it"}'
+    assert llm.parse_description(raw) == llm.Description(raw, None)
+
+
+def test_parse_description_unknown_language_is_none():
+    assert llm.parse_description('{"summary": "Ok.", "language": "unknown"}') == llm.Description("Ok.", None)
+
+
+def test_parse_description_normalizes_region_language():
+    assert llm.parse_description('{"summary": "Ok.", "language": "de-DE"}') == llm.Description("Ok.", "de")
+    assert llm.parse_description('{"summary": "Ok.", "language": "EN_us"}') == llm.Description("Ok.", "en")
+
+
+def test_parse_description_extracts_json_from_prose():
+    raw = 'Here is the result:\n{"summary": "Una fattura.", "language": "it"}\nHope it helps!'
+    assert llm.parse_description(raw) == llm.Description("Una fattura.", "it")
+
+
+def test_parse_description_none_content():
+    assert llm.parse_description(None) == llm.Description("", None)

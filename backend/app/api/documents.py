@@ -9,8 +9,18 @@ from sqlmodel import Session, select
 from app.api.deps import api_error, get_current_user
 from app.config import get_primary_language
 from app.db import get_session
-from app.models import Chunk, ChunkSource, DocStatus, DocType, Document, DocumentTag, Folder, Tag
-from app.services.jobs import enqueue
+from app.models import (
+    Chunk,
+    ChunkSource,
+    DocStatus,
+    DocType,
+    Document,
+    DocumentTag,
+    Folder,
+    Job,
+    ScanPage,
+    Tag,
+)
 from app.services.storage import Storage, get_storage
 
 router = APIRouter(
@@ -159,12 +169,22 @@ def reprocess_document(
     document_id: uuid.UUID,
     body: ReprocessRequest,
     session: Session = Depends(get_session),
+    storage: Storage = Depends(get_storage),
 ) -> dict:
     doc = get_doc_or_404(session, document_id)
     if doc.status in (DocStatus.pending, DocStatus.processing):
         raise api_error(409, "document_busy", "Document is still being processed")
     if doc.doc_type == DocType.video:
         raise api_error(422, "not_reprocessable", "Videos have no text to re-process")
+    payload: dict = {"document_id": str(doc.id), "force_ocr": True}
+    if doc.doc_type == DocType.scan and not (
+        doc.file_path and storage.abs_path(doc.file_path).exists()
+    ):
+        # First compile failed before the PDF was stored: rebuild from the scan page images.
+        scan_session_id = _scan_session_with_pages(session, storage, doc)
+        if scan_session_id is None:
+            raise api_error(409, "no_source", "The original scanned pages are no longer available")
+        payload["scan_session_id"] = scan_session_id
     for chunk in session.exec(
         select(Chunk).where(
             Chunk.document_id == doc.id,
@@ -180,7 +200,27 @@ def reprocess_document(
     doc.error_message = None
     doc.status = DocStatus.pending
     doc.updated_at = datetime.now(timezone.utc)
+    # same row enqueue() would create, committed together with the reset (atomic)
+    session.add(Job(type="process_document", payload=payload, run_at=datetime.now(timezone.utc)))
     session.commit()
-    enqueue(session, "process_document", {"document_id": str(doc.id), "force_ocr": True})
     session.refresh(doc)
     return serialize(session, doc)
+
+
+def _scan_session_with_pages(session: Session, storage: Storage, doc: Document) -> int | None:
+    """Scan session of the doc's latest compile job, if its page images still exist on disk."""
+    jobs = session.exec(
+        select(Job)
+        .where(Job.type == "process_document", Job.payload["document_id"].astext == str(doc.id))
+        .order_by(Job.id.desc())
+    ).all()
+    scan_session_id = next(
+        (j.payload["scan_session_id"] for j in jobs if j.payload.get("scan_session_id") is not None),
+        None,
+    )
+    if scan_session_id is None:
+        return None
+    pages = session.exec(select(ScanPage).where(ScanPage.session_id == scan_session_id)).all()
+    if not pages or not all(storage.abs_path(p.image_path).exists() for p in pages):
+        return None
+    return scan_session_id

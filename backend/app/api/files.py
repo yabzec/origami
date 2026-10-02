@@ -37,4 +37,5 @@ def document_file(
         media_type=media_type,
         filename=doc.original_filename or path.name,
         content_disposition_type="attachment" if download else "inline",
+        headers={"Cache-Control": "no-cache"},  # re-process may replace the file at the same path
     )

@@ -23,6 +23,7 @@ log = logging.getLogger("origami.pipeline")
 
 SUMMARY_INPUT_CHARS = 8000
 IMAGE_SUMMARY_TEXT_THRESHOLD = 40
+EMBED_BATCH_SIZE = 100  # provider batch limit; translation doubles chunk count
 
 
 def get_pipeline_storage() -> Storage:
@@ -74,7 +75,12 @@ def _extract_content(
     if doc.doc_type == DocType.video or _has_chunks(session, doc, ChunkSource.content):
         return []
 
-    if payload.get("force_ocr") and doc.doc_type in (DocType.pdf, DocType.scan):
+    if (
+        payload.get("force_ocr")
+        and doc.doc_type in (DocType.pdf, DocType.scan)
+        and doc.file_path
+        and storage.abs_path(doc.file_path).exists()
+    ):
         return _reocr_pdf(session, doc, storage)
 
     if doc.doc_type == DocType.scan:
@@ -204,6 +210,8 @@ def _ensure_summary(session: Session, doc: Document, storage: Storage) -> None:
         result = llm_describe(text=text[:SUMMARY_INPUT_CHARS])
     else:
         return  # nothing to summarize (e.g. a no-OCR scan or an empty PDF)
+    if not result.summary:
+        return  # empty LLM reply: never store an empty summary chunk
     doc.summary = result.summary
     doc.detected_language = result.language
     session.add(
@@ -279,14 +287,16 @@ def _embed_pending_chunks(session: Session, doc: Document) -> None:
     ).all()
     if not pending:
         return
-    vectors = llm_embed([c.content for c in pending])
-    if len(vectors) != len(pending):
-        raise ValueError(
-            f"Expected {len(pending)} embeddings from llm_embed, got {len(vectors)}"
-        )
-    for chunk, vector in zip(pending, vectors):
-        chunk.embedding = vector
-        session.add(chunk)
+    for start in range(0, len(pending), EMBED_BATCH_SIZE):
+        batch = pending[start : start + EMBED_BATCH_SIZE]
+        vectors = llm_embed([c.content for c in batch])
+        if len(vectors) != len(batch):
+            raise ValueError(
+                f"Expected {len(batch)} embeddings from llm_embed, got {len(vectors)}"
+            )
+        for chunk, vector in zip(batch, vectors):
+            chunk.embedding = vector
+            session.add(chunk)
     session.commit()
 
 

@@ -147,3 +147,19 @@ def test_compile_falls_back_to_session_settings(auth_client, fake_scanner, stora
     body = auth_client.post(f"/api/scan/sessions/{sid}/compile", json={"title": "X"}).json()
     assert body["ocr_languages"] == "ita"
     assert body["ocr_enabled"] is False
+
+
+def test_cancel_compiling_session_is_409(auth_client, fake_scanner, storage, session):
+    from sqlmodel import select
+
+    from app.models import ScanPage
+
+    sid = auth_client.post("/api/scan/sessions", json={}).json()["id"]
+    auth_client.post(f"/api/scan/sessions/{sid}/pages", json={})
+    assert auth_client.post(f"/api/scan/sessions/{sid}/compile", json={"title": "T"}).status_code == 201
+    resp = auth_client.delete(f"/api/scan/sessions/{sid}")
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "session_not_active"
+    pages = session.exec(select(ScanPage).where(ScanPage.session_id == sid)).all()
+    assert len(pages) == 1
+    assert storage.abs_path(pages[0].image_path).exists()

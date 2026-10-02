@@ -197,6 +197,8 @@ def cancel_session(
     storage: Storage = Depends(get_storage),
 ) -> None:
     scan_session = get_session_or_404(db, session_id)
+    if scan_session.status != ScanSessionStatus.active:
+        raise api_error(409, "session_not_active", "Scan session is not active")
     for page in session_pages(db, session_id):
         db.delete(page)
     scan_session.status = ScanSessionStatus.cancelled
