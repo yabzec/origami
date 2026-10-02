@@ -214,6 +214,8 @@ def _ensure_summary(session: Session, doc: Document, storage: Storage) -> None:
         return  # empty LLM reply: never store an empty summary chunk
     doc.summary = result.summary
     doc.detected_language = result.language
+    if not (doc.description or "").strip():
+        doc.description = result.summary  # AI text; the UI labels it until the user edits it
     session.add(
         Chunk(
             document_id=doc.id,
@@ -262,7 +264,10 @@ def _ensure_translation(session: Session, doc: Document) -> None:
 def _ensure_metadata_chunk(session: Session, doc: Document) -> None:
     if _has_chunks(session, doc, ChunkSource.metadata):
         return
-    content = doc.title if not doc.description else f"{doc.title}\n\n{doc.description}"
+    if not doc.description or doc.description == doc.summary:
+        content = doc.title  # an AI description is already embedded as the summary chunk
+    else:
+        content = f"{doc.title}\n\n{doc.description}"
     session.add(
         Chunk(
             document_id=doc.id,

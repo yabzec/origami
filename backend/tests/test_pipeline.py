@@ -336,3 +336,29 @@ def test_empty_summary_is_not_stored(session, pipeline_storage, llm_stub, monkey
     assert doc.status == DocStatus.ready
     assert not doc.summary
     assert ChunkSource.summary not in chunks_by_source(session, doc)
+
+
+def test_summary_fills_empty_description(session, pipeline_storage, llm_stub):
+    doc = run(session, _text_doc(session, pipeline_storage))
+    assert doc.description == "Descrizione generata."
+    metadata = chunks_by_source(session, doc)[ChunkSource.metadata]
+    assert [c.content for c in metadata] == ["Brief"]  # summary has its own chunk; not embedded twice
+
+
+def test_summary_fills_whitespace_description(session, pipeline_storage, llm_stub):
+    doc = _text_doc(session, pipeline_storage)
+    doc.description = "   "
+    session.commit()
+    doc = run(session, doc)
+    assert doc.description == "Descrizione generata."
+
+
+def test_summary_keeps_user_description(session, pipeline_storage, llm_stub):
+    doc = _text_doc(session, pipeline_storage)
+    doc.description = "Lettera del notaio"
+    session.commit()
+    doc = run(session, doc)
+    assert doc.summary == "Descrizione generata."
+    assert doc.description == "Lettera del notaio"
+    metadata = chunks_by_source(session, doc)[ChunkSource.metadata]
+    assert [c.content for c in metadata] == ["Brief\n\nLettera del notaio"]

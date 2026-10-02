@@ -35,9 +35,21 @@ def test_reprocess_resets_and_enqueues(auth_client, session):
     assert body["translation_status"] is None
 
     sources = {c.source for c in session.exec(select(Chunk).where(Chunk.document_id == doc.id))}
-    assert sources == {ChunkSource.metadata}
+    assert sources == set()  # metadata is rebuilt by the pipeline too
     job = session.exec(select(Job).where(Job.type == "process_document")).one()
     assert job.payload == {"document_id": str(doc.id), "force_ocr": True}
+
+
+def test_reprocess_clears_ai_description(auth_client, session):
+    doc = _ready_doc(session, doc_type=DocType.pdf, description="riassunto")  # == summary
+    body = auth_client.post(f"/api/documents/{doc.id}/reprocess", json={"ocr_languages": "ita"}).json()
+    assert body["description"] == ""
+
+
+def test_reprocess_keeps_edited_description(auth_client, session):
+    doc = _ready_doc(session, doc_type=DocType.pdf, description="Bolletta luce di marzo")
+    body = auth_client.post(f"/api/documents/{doc.id}/reprocess", json={"ocr_languages": "ita"}).json()
+    assert body["description"] == "Bolletta luce di marzo"
 
 
 def test_reprocess_busy_returns_409(auth_client, session):

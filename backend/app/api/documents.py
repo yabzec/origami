@@ -188,12 +188,16 @@ def reprocess_document(
     for chunk in session.exec(
         select(Chunk).where(
             Chunk.document_id == doc.id,
-            Chunk.source.in_([ChunkSource.content, ChunkSource.summary, ChunkSource.translation]),
+            Chunk.source.in_(
+                [ChunkSource.content, ChunkSource.summary, ChunkSource.translation, ChunkSource.metadata]
+            ),
         )
     ):
         session.delete(chunk)
     doc.ocr_languages = body.ocr_languages
     doc.ocr_enabled = body.ocr_enabled
+    if doc.summary and doc.description == doc.summary:
+        doc.description = ""  # still the AI text: the new summary refills it; edited text is kept
     doc.summary = None
     doc.detected_language = None
     doc.translation_status = None

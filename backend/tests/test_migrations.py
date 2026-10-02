@@ -35,3 +35,55 @@ def test_document_date_backfilled_from_created_at(engine):
         command.upgrade(cfg, "head")
         with engine.begin() as conn:
             conn.execute(text("DELETE FROM documents WHERE title = 'MigrationOld'"))
+
+
+BEFORE_BACKFILL = "b7c4e2a91d05"
+DESCRIPTION_BACKFILL = "c3d81f0a6b27"
+
+
+def _backfill_descriptions(engine) -> dict[str, str]:
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text("SELECT title, description FROM documents WHERE title LIKE 'Backfill%'")
+        ).all()
+    return {title: description for title, description in rows}
+
+
+def test_summary_backfills_empty_description(engine):
+    cfg = _cfg()
+    command.downgrade(cfg, BEFORE_BACKFILL)
+    try:
+        with engine.begin() as conn:
+            for title, description, summary in [
+                ("BackfillEmpty", "", "Riassunto A."),
+                ("BackfillBlank", "   ", "Riassunto B."),
+                ("BackfillUser", "Mia nota", "Riassunto C."),
+                ("BackfillNoSummary", "", None),
+            ]:
+                conn.execute(
+                    text(
+                        "INSERT INTO documents (id, title, description, summary, doc_type, "
+                        "ocr_languages, ocr_enabled, status, created_at, updated_at) VALUES "
+                        "(gen_random_uuid(), :title, :description, :summary, 'pdf', 'ita', true, "
+                        "'ready', now(), now())"
+                    ),
+                    {"title": title, "description": description, "summary": summary},
+                )
+        command.upgrade(cfg, DESCRIPTION_BACKFILL)
+        assert _backfill_descriptions(engine) == {
+            "BackfillEmpty": "Riassunto A.",
+            "BackfillBlank": "Riassunto B.",
+            "BackfillUser": "Mia nota",
+            "BackfillNoSummary": "",
+        }
+        command.downgrade(cfg, BEFORE_BACKFILL)
+        assert _backfill_descriptions(engine) == {
+            "BackfillEmpty": "",
+            "BackfillBlank": "",
+            "BackfillUser": "Mia nota",
+            "BackfillNoSummary": "",
+        }
+    finally:
+        command.upgrade(cfg, "head")
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM documents WHERE title LIKE 'Backfill%'"))
