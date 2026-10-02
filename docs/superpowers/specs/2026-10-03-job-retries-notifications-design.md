@@ -131,3 +131,27 @@ Backend runs on real Postgres. Mock boundaries: `app/services/llm.py`, plus `smt
 | Document state during retries | `pending` with "Retrying:" message | Avoids showing `failed` between attempts |
 | Notify failure | Logged, never raises, never re-queues | The worker must not crash on email problems |
 | SMTP in tests | Mock `smtplib.SMTP` | External network boundary, like the LLM |
+
+## 12. Addendum: vision credentials and model listing
+
+Approved by the user after the main spec. Context: text moves to Groq (`LLM_MODEL=groq/openai/gpt-oss-120b`), while vision and embeddings stay on Gemini (`VISION_MODEL=gemini/gemini-2.5-flash`). Today `llm.describe()` sends `LLM_API_KEY`/`LLM_API_BASE` on vision calls too, so the Groq key would go to Gemini.
+
+### Vision credentials
+- New settings `vision_api_key` / `vision_api_base` (env `VISION_API_KEY`, `VISION_API_BASE`, default empty).
+- `llm.describe(image_path=...)` uses `_kw(vision_api_key or llm_api_key, vision_api_base or llm_api_base)`, the same fallback as embeddings. The text path is unchanged and never receives the vision key.
+- `.env.example` documents both settings with a "Groq text + Gemini vision/embeddings" example.
+
+### Model listing
+- `llm.list_models() -> list[dict]` in `app/services/llm.py` (provider HTTP stays in `llm.py`; stdlib `urllib.request` + `json`, timeout 20 s, no new dependency). The endpoint comes from the `LLM_MODEL` provider prefix:
+  - `LLM_API_BASE` set → `{base}/models`, Bearer `LLM_API_KEY`
+  - `groq/` → `https://api.groq.com/openai/v1/models`, Bearer `LLM_API_KEY` or `GROQ_API_KEY`
+  - `openai/` → `https://api.openai.com/v1/models`, Bearer `LLM_API_KEY` or `OPENAI_API_KEY`
+  - `gemini/` → `https://generativelanguage.googleapis.com/v1beta/models?key=<LLM_API_KEY or GEMINI_API_KEY>`
+  - anything else → `ValueError("Model listing not supported for provider '<prefix>'")`
+- Result items: `{id, owner, context_window, active}`. Missing fields are `None`. For Gemini, `id` is `name` without the `models/` prefix and `context_window` is `inputTokenLimit`.
+- CLI `python -m app.cli list-models` prints a header line with the provider and then a table (id, owner, context, active) sorted by id. On error it prints the message and exits with code 1.
+
+### Testing
+- `tests/test_llm.py`: the vision call gets `VISION_API_KEY` when it is set and falls back to `LLM_API_KEY` when it is not. The text call never gets `VISION_API_KEY` (`litellm.completion` monkeypatched, as in the existing tests).
+- `urllib.request.urlopen` is monkeypatched as part of the LLM mock boundary: the Groq (OpenAI-style `{"data": [...]}`) and Gemini (`{"models": [...]}`) shapes, plus the unsupported-provider error.
+- CLI: the table output and the error exit, with `llm.list_models` monkeypatched.

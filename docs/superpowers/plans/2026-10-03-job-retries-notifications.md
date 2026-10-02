@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Retry every failed background job on a 30 s / 2 min / 10 min / 30 min schedule (5 attempts), email all users with an address when a job fails for good, move translation into its own retried job, and show retry progress in the UI.
+**Goal:** Retry every failed background job on a 30 s / 2 min / 10 min / 30 min schedule (5 attempts), email all users with an address when a job fails for good, move translation into its own retried job, and show retry progress in the UI; also give vision calls their own credentials and add a `list-models` command (spec §12).
 
 **Architecture:** The generic retry policy lives in `app/services/jobs.py::fail` (constants in `app/models/job.py` to avoid an import cycle), which calls the new `app/services/notify.py` (SMTP via `smtplib`) after the final failure. The runner hands handlers `_attempt` / `_final_attempt` in a payload copy, so `process_document` and the new `translate_document` handler can keep a document `pending` (or a translation `pending`) between attempts. The documents API reports the newest open job per document as `active_job` (one query for the list endpoint) and re-process cancels queued jobs; the React document page and browse card render retry labels from pure helpers.
 
@@ -24,8 +24,10 @@
 - CLI: `python -m app.cli set-email <username> <email>`, `python -m app.cli test-email`.
 - `active_job` shape: `{"type", "attempts", "max_attempts", "run_at" (ISO, UTC offset), "last_error"}` or `null`.
 - UI copy (verbatim): `Processing failed, retrying (<retryLabel>): <error line>`, `Translation pending…`, `Translation retrying (<retryLabel>)`, `Translation failed — notification sent. Re-process to retry.`; `retryLabel` = `attempt {attempts + 1}/{max_attempts}, next ≈ {relative}` with relative `now` / `N s` / `N min` / `N h`, `null` when `attempts === 0`.
-- Mock boundaries: only `app/services/llm.py` (`llm_stub`) and `smtplib.SMTP` (spec ruling: external network service). Everything else runs for real, on Postgres.
+- Mock boundaries: only `app/services/llm.py` (`llm_stub`; `litellm.completion` and `urllib.request.urlopen` as used by `llm.py` count as part of it) and `smtplib.SMTP` (spec ruling: external network service). Everything else runs for real, on Postgres.
+- Addendum (spec §12): vision calls use `VISION_API_KEY`/`VISION_API_BASE`, falling back to `LLM_API_KEY`/`LLM_API_BASE`; text calls never get the vision key. `llm.list_models()` uses stdlib `urllib.request` + `json` only (timeout 20 s), and the unsupported-provider message is exactly `Model listing not supported for provider '<prefix>'`.
 - Commands: backend `cd /opt/origami/backend && uv run pytest -q`; frontend `cd /opt/origami/frontend && npx vitest run && npm run lint && npm run build`. Baseline before the prerequisite plan: backend 185 passed, frontend 51 passed; Task 1 records the post-prerequisite baseline. Every task ends with the suite of the side it touched green.
+- Never stage `.env.example.save` (editor leftover). Edit `.env.example` only at the anchors given.
 - Commits: Conventional Commits, message ends with the line `Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>`. Never stage `deploy/origami.service`, `deploy/origami.sh` or `..env.swp` (user's uncommitted work) — always `git add` explicit paths.
 
 ## Spec ambiguities resolved here (flagged for review)
@@ -35,6 +37,7 @@
 - The banner's "<last_error, first line>" uses the last non-empty line of `last_error` (the `ExceptionType: message` line); the literal first line of a stored traceback is `Traceback (most recent call last):` or a cut-off fragment.
 - Re-process keeps its 409 `document_busy` rule for `pending`/`processing` documents (the spec does not change it), so during processing retries the user waits; cancellation matters for queued `translate_document` jobs (document already `ready`) and stray queued `process_document` jobs.
 - A `translate_document` run that finds the document was re-processed while it was translating (translation status no longer `pending`, or content chunks replaced) writes nothing and completes; the new processing run schedules a fresh translation. This is how "its results are overwritten by the new run" is guaranteed.
+- Model listing: the Gemini key falls back to the existing `gemini_api_key` setting (`GEMINI_API_KEY` from `.env`) before `os.environ`, because pydantic reads `.env` without exporting it. For Groq/OpenAI the fallback is `os.environ` only (there are no settings fields for those keys). A missing key raises `ValueError("No API key for provider '<prefix>': set LLM_API_KEY")` instead of sending an unauthenticated request. Gemini gets `pageSize=1000` so that the listing is not cut at the default 50.
 - `test-email` exits non-zero with a message when SMTP is not configured, no user has an email, or sending fails; the function is named `send_test_email` (a module-level `test_email` would be collected by pytest when imported into a test module).
 
 ## Review Focus
@@ -60,8 +63,9 @@ Backend
 - `backend/app/worker/runner.py` — `_attempt` / `_final_attempt`, `is_final_attempt` (Task 3).
 - `backend/app/worker/pipeline.py` — retry-aware failure state (Task 4), `translate_document` job and scheduling (Task 5).
 - `backend/app/models/document.py` — `TranslationStatus.pending` (Task 5).
+- `backend/app/services/llm.py`, `backend/app/config.py`, `backend/app/cli.py`, `.env.example` — vision credentials, `list_models`, `list-models` command (Task 8).
 - `backend/app/api/documents.py` — `active_jobs_for`, `active_job` in `serialize`, cancel on re-process (Task 6).
-- Tests: `tests/conftest.py` (SMTP stub, settings fixture), `test_schema.py`, `test_migrations.py`, new `test_notify.py`, new `test_cli.py`, `test_jobs.py`, `test_worker.py`, `test_pipeline.py`, `test_reprocess.py`, `test_documents.py`.
+- Tests: `tests/conftest.py` (SMTP stub, settings fixture), `test_schema.py`, `test_migrations.py`, new `test_notify.py`, new `test_cli.py`, `test_jobs.py`, `test_worker.py`, `test_pipeline.py`, `test_reprocess.py`, `test_documents.py`, `test_llm.py` (Task 8).
 
 Frontend
 - `frontend/src/lib/types.ts` — `ActiveJob`, `TranslationStatus`, `Document.active_job` (Task 7).
@@ -2074,7 +2078,413 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 
 ---
 
-### Task 8: Full verification, deploy and manual checks
+### Task 8: Vision credentials and model listing (spec §12)
+
+**Files:**
+- Modify: `backend/app/config.py`
+- Modify: `backend/app/services/llm.py`
+- Modify: `backend/app/cli.py`
+- Modify: `.env.example`
+- Test: `backend/tests/test_llm.py`, `backend/tests/test_cli.py`
+
+**Interfaces:**
+- Consumes: `tests/test_cli.py` with its `run_cli(monkeypatch, *argv)` helper (Task 2); existing `llm._kw(key, base)`.
+- Produces:
+  - Settings fields `vision_api_key: str = ""`, `vision_api_base: str = ""`.
+  - `app.services.llm.model_provider() -> str`: the `LLM_MODEL` prefix before the first `/`.
+  - `app.services.llm.list_models() -> list[dict]`: items `{"id": str | None, "owner": str | None, "context_window": int | None, "active": bool | None}`. Raises `ValueError` for an unsupported provider or a missing key. HTTP/JSON errors propagate.
+  - `app.cli.print_models() -> None` behind `python -m app.cli list-models` (exit code 1 on error).
+
+- [ ] **Step 1: Write the failing llm tests**
+
+Append to `backend/tests/test_llm.py`:
+
+```python
+import io
+import json as jsonlib
+import urllib.request
+
+import pytest
+
+from app.config import Settings
+
+
+@pytest.fixture(autouse=True)
+def pinned_settings(monkeypatch):
+    """Default settings without the developer's .env, so a real LLM_API_KEY (e.g. a Groq key)
+    can't leak into the fakes. That would break the older tests whose fakes take no **kw."""
+    settings = Settings(_env_file=None, llm_api_key="", llm_api_base="", gemini_api_key="")
+    monkeypatch.setattr(llm, "get_settings", lambda: settings)
+    return settings
+
+
+def _use_settings(monkeypatch, **values):
+    settings = Settings(
+        _env_file=None,
+        **{
+            "llm_model": "groq/openai/gpt-oss-120b",
+            "vision_model": "gemini/gemini-2.5-flash",
+            "llm_api_key": "",
+            "llm_api_base": "",
+            "vision_api_key": "",
+            "vision_api_base": "",
+            "gemini_api_key": "",
+            **values,
+        },
+    )
+    monkeypatch.setattr(llm, "get_settings", lambda: settings)
+    return settings
+
+
+def _capturing_completion(captured):
+    def fake_completion(model, messages, **kw):
+        captured.append({"model": model, **kw})
+        msg = SimpleNamespace(content='{"summary": "Uno scontrino.", "language": "it"}')
+        return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
+
+    return fake_completion
+
+
+def _image(tmp_path):
+    img = tmp_path / "photo.png"
+    img.write_bytes(b"\x89PNG fake")
+    return img
+
+
+def test_vision_call_uses_vision_credentials(monkeypatch, tmp_path):
+    _use_settings(
+        monkeypatch,
+        llm_api_key="groq-key",
+        llm_api_base="https://api.groq.com/openai/v1",
+        vision_api_key="gemini-key",
+    )
+    captured = []
+    monkeypatch.setattr(litellm, "completion", _capturing_completion(captured))
+    llm.describe(image_path=_image(tmp_path))
+    assert captured == [{"model": "gemini/gemini-2.5-flash", "api_key": "gemini-key"}]
+
+
+def test_vision_call_falls_back_to_llm_credentials(monkeypatch, tmp_path):
+    _use_settings(monkeypatch, llm_api_key="shared-key")
+    captured = []
+    monkeypatch.setattr(litellm, "completion", _capturing_completion(captured))
+    llm.describe(image_path=_image(tmp_path))
+    assert captured[0]["api_key"] == "shared-key"
+
+
+def test_text_call_never_gets_vision_key(monkeypatch):
+    _use_settings(monkeypatch, llm_api_key="groq-key", vision_api_key="gemini-key")
+    captured = []
+    monkeypatch.setattr(litellm, "completion", _capturing_completion(captured))
+    llm.describe(text="Rechnung")
+    assert captured == [{"model": "groq/openai/gpt-oss-120b", "api_key": "groq-key"}]
+
+
+def _fake_urlopen(body, seen):
+    def fake(request, timeout=None):
+        seen.append({"url": request.full_url, "headers": dict(request.header_items()), "timeout": timeout})
+        return io.BytesIO(jsonlib.dumps(body).encode())
+
+    return fake
+
+
+def test_list_models_groq(monkeypatch):
+    _use_settings(monkeypatch, llm_api_key="groq-key")
+    seen = []
+    body = {
+        "object": "list",
+        "data": [
+            {"id": "openai/gpt-oss-120b", "owned_by": "OpenAI", "context_window": 131072, "active": True},
+            {"id": "whisper-large-v3"},
+        ],
+    }
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen(body, seen))
+    assert llm.model_provider() == "groq"
+    assert llm.list_models() == [
+        {"id": "openai/gpt-oss-120b", "owner": "OpenAI", "context_window": 131072, "active": True},
+        {"id": "whisper-large-v3", "owner": None, "context_window": None, "active": None},
+    ]
+    assert seen[0]["url"] == "https://api.groq.com/openai/v1/models"
+    assert seen[0]["headers"]["Authorization"] == "Bearer groq-key"
+    assert seen[0]["timeout"] == 20
+
+
+def test_list_models_groq_key_from_environment(monkeypatch):
+    _use_settings(monkeypatch)
+    monkeypatch.setenv("GROQ_API_KEY", "env-groq-key")
+    seen = []
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen({"data": []}, seen))
+    assert llm.list_models() == []
+    assert seen[0]["headers"]["Authorization"] == "Bearer env-groq-key"
+
+
+def test_list_models_custom_base(monkeypatch):
+    _use_settings(monkeypatch, llm_model="openai/local", llm_api_base="http://localhost:8080/v1/", llm_api_key="k")
+    seen = []
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen({"data": [{"id": "m"}]}, seen))
+    assert [m["id"] for m in llm.list_models()] == ["m"]
+    assert seen[0]["url"] == "http://localhost:8080/v1/models"
+
+
+def test_list_models_gemini(monkeypatch):
+    _use_settings(monkeypatch, llm_model="gemini/gemini-2.5-flash", gemini_api_key="g-key")
+    seen = []
+    body = {"models": [{"name": "models/gemini-2.5-flash", "inputTokenLimit": 1048576, "displayName": "Gemini 2.5 Flash"}]}
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen(body, seen))
+    assert llm.list_models() == [
+        {"id": "gemini-2.5-flash", "owner": None, "context_window": 1048576, "active": None}
+    ]
+    assert seen[0]["url"].startswith("https://generativelanguage.googleapis.com/v1beta/models?")
+    assert "key=g-key" in seen[0]["url"]
+    assert "Authorization" not in seen[0]["headers"]
+
+
+def test_list_models_unsupported_provider(monkeypatch):
+    _use_settings(monkeypatch, llm_model="ollama/llama3.1")
+    with pytest.raises(ValueError, match="Model listing not supported for provider 'ollama'"):
+        llm.list_models()
+
+
+def test_list_models_missing_key(monkeypatch):
+    _use_settings(monkeypatch)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="No API key for provider 'groq'"):
+        llm.list_models()
+```
+
+- [ ] **Step 2: Run, expect FAIL**
+
+Run: `cd /opt/origami/backend && uv run pytest tests/test_llm.py -v`
+Expected: FAIL. `Settings` ignores the unknown `vision_api_*` kwargs (`extra="ignore"`), so `test_vision_call_uses_vision_credentials` fails because it gets `api_key == 'groq-key'`. The listing tests fail with `AttributeError: module 'app.services.llm' has no attribute 'model_provider'` / `'list_models'`. The old tests keep passing under the autouse `pinned_settings`.
+
+- [ ] **Step 3: Implement settings and llm changes**
+
+In `backend/app/config.py`, add after `llm_api_base`:
+
+```python
+    vision_api_key: str = ""  # empty → llm_api_key (lets vision run on another provider than text)
+    vision_api_base: str = ""  # empty → llm_api_base
+```
+
+In `backend/app/services/llm.py`, add `import os`, `import urllib.parse` and `import urllib.request` to the imports. Replace the first two lines of `describe`'s body (`settings = ...` and `kw = ...`) and the branches so that the kwargs depend on the path:
+
+```python
+def describe(text: str | None = None, image_path: Path | None = None) -> Description:
+    settings = get_settings()
+    prompt = _describe_prompt(get_primary_language())
+    if image_path is not None:
+        suffix = Path(image_path).suffix.lstrip(".").lower() or "png"
+        b64 = base64.b64encode(Path(image_path).read_bytes()).decode()
+        content: str | list = [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": f"data:image/{suffix};base64,{b64}"}},
+        ]
+        model = settings.vision_model
+        kw = _kw(
+            settings.vision_api_key or settings.llm_api_key,
+            settings.vision_api_base or settings.llm_api_base,
+        )
+    else:
+        content = f"{prompt}\n\n---\n\n{(text or '')[:8000]}"
+        model = settings.llm_model
+        kw = _kw(settings.llm_api_key, settings.llm_api_base)
+    resp = litellm.completion(model=model, messages=[{"role": "user", "content": content}], **kw)
+    return parse_description(resp.choices[0].message.content)
+```
+
+Append at the end of `llm.py`:
+
+```python
+OPENAI_STYLE_MODEL_URLS = {
+    "groq": "https://api.groq.com/openai/v1/models",
+    "openai": "https://api.openai.com/v1/models",
+}
+GEMINI_MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+LIST_MODELS_TIMEOUT_SECONDS = 20
+
+
+def model_provider() -> str:
+    return get_settings().llm_model.split("/", 1)[0]
+
+
+def _models_request() -> tuple[urllib.request.Request, str]:
+    """Build the provider's model-list request; second item is the response shape."""
+    settings = get_settings()
+    provider = model_provider()
+    if settings.llm_api_base:
+        url, key = f"{settings.llm_api_base.rstrip('/')}/models", settings.llm_api_key
+    elif provider in OPENAI_STYLE_MODEL_URLS:
+        url = OPENAI_STYLE_MODEL_URLS[provider]
+        key = settings.llm_api_key or os.environ.get(f"{provider.upper()}_API_KEY", "")
+        if not key:
+            raise ValueError(f"No API key for provider '{provider}': set LLM_API_KEY")
+    elif provider == "gemini":
+        key = settings.llm_api_key or settings.gemini_api_key or os.environ.get("GEMINI_API_KEY", "")
+        if not key:
+            raise ValueError(f"No API key for provider '{provider}': set LLM_API_KEY")
+        query = urllib.parse.urlencode({"key": key, "pageSize": 1000})
+        return urllib.request.Request(f"{GEMINI_MODELS_URL}?{query}"), "gemini"
+    else:
+        raise ValueError(f"Model listing not supported for provider '{provider}'")
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    return urllib.request.Request(url, headers=headers), "openai"
+
+
+def list_models() -> list[dict]:
+    """Models offered by the text provider (LLM_MODEL), normalized to id/owner/context_window/active."""
+    request, shape = _models_request()
+    with urllib.request.urlopen(request, timeout=LIST_MODELS_TIMEOUT_SECONDS) as resp:
+        data = json.load(resp)
+    if shape == "gemini":
+        return [
+            {
+                "id": (m.get("name") or "").removeprefix("models/") or None,
+                "owner": None,
+                "context_window": m.get("inputTokenLimit"),
+                "active": None,
+            }
+            for m in data.get("models", [])
+        ]
+    return [
+        {
+            "id": m.get("id"),
+            "owner": m.get("owned_by"),
+            "context_window": m.get("context_window"),
+            "active": m.get("active"),
+        }
+        for m in data.get("data", [])
+    ]
+```
+
+- [ ] **Step 4: Run, expect PASS**
+
+Run: `cd /opt/origami/backend && uv run pytest tests/test_llm.py -v`
+Expected: PASS. The existing tests still pass: `pinned_settings` gives them default models and empty keys, so `_kw` adds no kwargs to their fakes, whatever the developer's `.env` holds.
+
+- [ ] **Step 5: Write the failing CLI tests**
+
+Append to `backend/tests/test_cli.py`:
+
+```python
+def test_list_models_prints_sorted_table(monkeypatch, capsys):
+    from app.services import llm
+
+    monkeypatch.setattr(llm, "model_provider", lambda: "groq")
+    monkeypatch.setattr(
+        llm,
+        "list_models",
+        lambda: [
+            {"id": "whisper-large-v3", "owner": None, "context_window": None, "active": None},
+            {"id": "openai/gpt-oss-120b", "owner": "OpenAI", "context_window": 131072, "active": True},
+            {"id": "llama-old", "owner": "Meta", "context_window": 8192, "active": False},
+        ],
+    )
+    run_cli(monkeypatch, "list-models")
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == "Provider: groq"
+    assert lines[1].split() == ["ID", "OWNER", "CONTEXT", "ACTIVE"]
+    assert [line.split()[0] for line in lines[2:]] == ["llama-old", "openai/gpt-oss-120b", "whisper-large-v3"]
+    assert lines[3].split() == ["openai/gpt-oss-120b", "OpenAI", "131072", "yes"]
+    assert lines[2].split() == ["llama-old", "Meta", "8192", "no"]
+    assert lines[4].split() == ["whisper-large-v3"]
+
+
+def test_list_models_error_exits_1(monkeypatch, capsys):
+    from app.services import llm
+
+    def unsupported():
+        raise ValueError("Model listing not supported for provider 'ollama'")
+
+    monkeypatch.setattr(llm, "model_provider", lambda: "ollama")
+    monkeypatch.setattr(llm, "list_models", unsupported)
+    with pytest.raises(SystemExit) as exc:
+        run_cli(monkeypatch, "list-models")
+    assert exc.value.code == 1
+    assert "Model listing not supported for provider 'ollama'" in capsys.readouterr().out
+```
+
+- [ ] **Step 6: Run, expect FAIL**
+
+Run: `cd /opt/origami/backend && uv run pytest tests/test_cli.py -k list_models -v`
+Expected: FAIL with argparse `invalid choice: 'list-models'` (`SystemExit: 2`).
+
+- [ ] **Step 7: Implement the command**
+
+In `backend/app/cli.py`, add after `send_test_email`:
+
+```python
+def print_models() -> None:
+    from app.services import llm  # imports litellm: only load it for this command
+
+    provider = llm.model_provider()
+    try:
+        models = llm.list_models()
+    except Exception as exc:
+        print(f"Cannot list models: {exc}")
+        raise SystemExit(1)
+    print(f"Provider: {provider}")
+    headers = ("ID", "OWNER", "CONTEXT", "ACTIVE")
+    rows = [
+        (
+            m["id"] or "",
+            m["owner"] or "",
+            "" if m["context_window"] is None else str(m["context_window"]),
+            "" if m["active"] is None else ("yes" if m["active"] else "no"),
+        )
+        for m in sorted(models, key=lambda m: m["id"] or "")
+    ]
+    widths = [max([len(h), *(len(r[i]) for r in rows)]) for i, h in enumerate(headers)]
+    for row in [headers, *rows]:
+        print("  ".join(cell.ljust(w) for cell, w in zip(row, widths)).rstrip())
+```
+
+In `main`, register the subcommand next to `test-email`:
+
+```python
+    sub.add_parser("list-models", help="list the models offered by the LLM_MODEL provider")
+```
+
+and dispatch it:
+
+```python
+    elif args.command == "list-models":
+        print_models()
+```
+
+- [ ] **Step 8: Document the settings**
+
+In `/opt/origami/.env.example`, insert directly after the line `LLM_API_BASE=` (leave `.env.example.save` alone and do not stage it):
+
+```bash
+# Vision (image descriptions) may use another provider than text; empty = LLM_API_KEY / LLM_API_BASE.
+VISION_API_KEY=
+VISION_API_BASE=
+# Example: text on Groq, vision and embeddings on Gemini
+#   LLM_MODEL=groq/openai/gpt-oss-120b            LLM_API_KEY=<groq key>
+#   VISION_MODEL=gemini/gemini-2.5-flash          VISION_API_KEY=<google key>
+#   EMBEDDING_MODEL=gemini/gemini-embedding-001   EMBEDDING_API_KEY=<google key>
+# See what the text provider offers: cd backend && uv run python -m app.cli list-models
+```
+
+- [ ] **Step 9: Run, expect PASS**
+
+Run: `cd /opt/origami/backend && uv run pytest tests/test_llm.py tests/test_cli.py -v && uv run pytest -q`
+Expected: PASS, full suite green.
+
+- [ ] **Step 10: Commit**
+
+```bash
+cd /opt/origami
+git add backend/app/config.py backend/app/services/llm.py backend/app/cli.py \
+  backend/tests/test_llm.py backend/tests/test_cli.py .env.example
+git commit -m "feat: separate vision credentials and add list-models command
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
+### Task 9: Full verification, deploy and manual checks
 
 **Files:**
 - No code changes expected. If a manual check finds a bug, fix it with a failing test first, in the task that owns the code, and commit separately.
@@ -2108,6 +2518,10 @@ cd /opt/origami/backend && uv run python -m app.cli test-email
 ```
 
 Expected: `Email of '<username>' set to <email>`, then `Test email sent to <email>`, and the message arrives with subject `[Origami] Test email`.
+
+- [ ] **Step 3b: Model listing and vision credentials (human action)**
+
+Run `cd /opt/origami/backend && uv run python -m app.cli list-models`. Expected: `Provider: groq` (or the current provider), then a table that includes `openai/gpt-oss-120b`. If the user moved text to Groq, check that `.env` has `VISION_API_KEY=<google key>`, restart, and upload a photo with OCR turned off: the vision summary still appears. The Groq key is no longer sent to Gemini.
 
 - [ ] **Step 4: Watch retries and the failure email (human action)**
 
