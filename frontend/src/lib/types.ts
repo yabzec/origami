@@ -15,6 +15,16 @@ export type DocType = "scan" | "pdf" | "text" | "image" | "video";
 export const DOC_TYPES: DocType[] = ["scan", "pdf", "text", "image", "video"];
 export type DocStatus = "pending" | "processing" | "ready" | "failed";
 
+export type TranslationStatus = "pending" | "done" | "failed";
+
+export interface ActiveJob {
+  type: string;
+  attempts: number;
+  max_attempts: number;
+  run_at: string;
+  last_error: string | null;
+}
+
 export interface Document {
   id: string;
   title: string;
@@ -26,7 +36,7 @@ export interface Document {
   ocr_enabled: boolean;
   document_date: string;
   detected_language: string | null;
-  translation_status: "done" | "failed" | null;
+  translation_status: TranslationStatus | null;
   ocr_applied: boolean | null;
   status: DocStatus;
   error_message: string | null;
@@ -38,13 +48,14 @@ export interface Document {
   created_at: string;
   updated_at: string;
   tags: Tag[];
+  active_job: ActiveJob | null;
 }
 
 export interface DocumentText {
   summary: string | null;
   variant: "content" | "translation";
   detected_language: string | null;
-  translation_status: "done" | "failed" | null;
+  translation_status: TranslationStatus | null;
   translation_language: string;
   chunks: { chunk_index: number; page_number: number | null; content: string }[];
 }

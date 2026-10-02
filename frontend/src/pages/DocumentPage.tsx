@@ -9,11 +9,13 @@ import { FolderPicker } from "@/components/FolderPicker";
 import { Textarea } from "@/components/ui/textarea";
 import { STATUS_VARIANTS } from "@/components/DocumentCard";
 import { OcrLanguageSelect } from "@/components/OcrLanguageSelect";
+import { useNow } from "@/hooks/useNow";
 import { useTags } from "@/hooks/useTags";
 import { api, ApiError, fileUrl } from "@/lib/api";
 import { isAiDescription, nextDescription } from "@/lib/description";
 import { DEFAULT_OCR_LANGUAGES } from "@/lib/ocrLanguages";
-import { languageLabel, textVariants, type TextVariant } from "@/lib/translation";
+import { processingRetryMessage, shouldPollDocument } from "@/lib/retry";
+import { languageLabel, textVariants, translationNote, type TextVariant } from "@/lib/translation";
 import type { Document, DocumentText } from "@/lib/types";
 import { viewerKind } from "@/lib/viewer";
 
@@ -29,6 +31,8 @@ function Viewer({ doc }: { doc: Document }) {
 }
 
 function TextView({ doc }: { doc: Document }) {
+  const now = useNow();
+  const note = translationNote(doc, now);
   const variants = textVariants(doc);
   const [variant, setVariant] = useState<TextVariant>("content");
   const active = variants.includes(variant) ? variant : "content";
@@ -54,9 +58,7 @@ function TextView({ doc }: { doc: Document }) {
             ))}
           </div>
         )}
-        {data.translation_status === "failed" && (
-          <span className="text-xs text-amber-700">Translation failed — re-process to retry.</span>
-        )}
+        {note && <span className="text-xs text-amber-700">{note}</span>}
       </div>
       {data.summary && (
         <div className="rounded border border-zinc-200 bg-zinc-50 p-3 text-sm">
@@ -84,8 +86,7 @@ export function DocumentPage() {
   const { data: doc } = useQuery({
     queryKey: ["document", id],
     queryFn: () => api.get<Document>(`/api/documents/${id}`),
-    refetchInterval: (q) =>
-      q.state.data && ["pending", "processing"].includes(q.state.data.status) ? 4000 : false,
+    refetchInterval: (q) => (q.state.data && shouldPollDocument(q.state.data) ? 4000 : false),
   });
   const { data: tags } = useTags();
 
@@ -98,6 +99,8 @@ export function DocumentPage() {
   const [ocrLanguages, setOcrLanguages] = useState(DEFAULT_OCR_LANGUAGES);
   const [ocrEnabled, setOcrEnabled] = useState(true);
   const lastStatus = useRef<string | null>(null);
+  const lastTranslation = useRef<string | null>(null);
+  const now = useNow();
 
   const hydratedForDocId = useRef<string | null>(null);
   const serverDescription = useRef<string | null>(null);
@@ -123,10 +126,12 @@ export function DocumentPage() {
 
   useEffect(() => {
     if (!doc) return;
-    // re-process finished: refetch extracted/translated text
-    if (lastStatus.current && lastStatus.current !== "ready" && doc.status === "ready")
-      qc.invalidateQueries({ queryKey: ["document-text", doc.id] });
+    // re-process finished, or the translation job finished: refetch extracted/translated text
+    const processed = lastStatus.current && lastStatus.current !== "ready" && doc.status === "ready";
+    const translated = lastTranslation.current === "pending" && doc.translation_status === "done";
+    if (processed || translated) qc.invalidateQueries({ queryKey: ["document-text", doc.id] });
     lastStatus.current = doc.status;
+    lastTranslation.current = doc.translation_status;
   }, [doc, qc]);
 
   const save = useMutation({
@@ -173,6 +178,7 @@ export function DocumentPage() {
   };
 
   if (!doc) return <div className="p-8 text-zinc-400">Loading…</div>;
+  const retryMessage = processingRetryMessage(doc, now);
 
   return (
     <div className="flex gap-6 p-6">
@@ -192,6 +198,11 @@ export function DocumentPage() {
         {doc.status === "failed" && (
           <div className="mb-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             Processing failed: {doc.error_message}
+          </div>
+        )}
+        {retryMessage && (
+          <div className="mb-3 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            {retryMessage}
           </div>
         )}
         <div className="mb-3 flex gap-2 border-b border-zinc-200">

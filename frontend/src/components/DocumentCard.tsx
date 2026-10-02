@@ -2,6 +2,7 @@ import { Link } from "react-router";
 import { DocTypeIcon } from "@/components/DocTypeIcon";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/dates";
+import { badgeTitle } from "@/lib/retry";
 import type { Document } from "@/lib/types";
 
 export const STATUS_VARIANTS = {
@@ -18,7 +19,7 @@ export function DocumentCard({ doc, onDelete }: { doc: Document; onDelete: (id: 
         <div className="mb-2 flex items-center gap-2">
           <DocTypeIcon doc={doc} />
           <span className="flex-1 truncate font-medium">{doc.title}</span>
-          <Badge variant={STATUS_VARIANTS[doc.status]} title={doc.error_message ?? undefined}>
+          <Badge variant={STATUS_VARIANTS[doc.status]} title={badgeTitle(doc, new Date())}>
             {doc.status}
           </Badge>
         </div>
