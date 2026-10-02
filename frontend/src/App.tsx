@@ -1,4 +1,4 @@
-import { Route, Routes } from "react-router";
+import { createBrowserRouter, RouterProvider } from "react-router";
 import { RequireAuth } from "@/auth";
 import { Layout } from "@/components/Layout";
 import { LoginPage } from "@/pages/LoginPage";
@@ -8,19 +8,26 @@ import { ScanPage } from "@/pages/ScanPage";
 import { SearchPage } from "@/pages/SearchPage";
 import { ChatPage } from "@/pages/ChatPage";
 
+// Data router: required by useBlocker (scan page leave guard).
+const router = createBrowserRouter([
+  { path: "/login", element: <LoginPage /> },
+  {
+    element: <RequireAuth />,
+    children: [
+      {
+        element: <Layout />,
+        children: [
+          { path: "/", element: <BrowsePage /> },
+          { path: "/documents/:id", element: <DocumentPage /> },
+          { path: "/scan", element: <ScanPage /> },
+          { path: "/search", element: <SearchPage /> },
+          { path: "/chat", element: <ChatPage /> },
+        ],
+      },
+    ],
+  },
+]);
+
 export default function App() {
-  return (
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route element={<RequireAuth />}>
-        <Route element={<Layout />}>
-          <Route path="/" element={<BrowsePage />} />
-          <Route path="/documents/:id" element={<DocumentPage />} />
-          <Route path="/scan" element={<ScanPage />} />
-          <Route path="/search" element={<SearchPage />} />
-          <Route path="/chat" element={<ChatPage />} />
-        </Route>
-      </Route>
-    </Routes>
-  );
+  return <RouterProvider router={router} />;
 }
