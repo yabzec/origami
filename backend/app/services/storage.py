@@ -37,6 +37,12 @@ class Storage:
             shutil.copyfileobj(fileobj, out)
         return f"files/{name}", path.stat().st_size
 
+    def store_preview(self, document_id: uuid.UUID, data: bytes) -> str:
+        """Viewing-only PDF next to the original upload; returns its relative path."""
+        name = f"{document_id}.preview.pdf"
+        (self.files_dir / name).write_bytes(data)
+        return f"files/{name}"
+
     def delete_document_file(self, rel: str | None) -> None:
         if rel:
             self.abs_path(rel).unlink(missing_ok=True)

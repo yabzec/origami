@@ -362,3 +362,70 @@ def test_summary_keeps_user_description(session, pipeline_storage, llm_stub):
     assert doc.description == "Lettera del notaio"
     metadata = chunks_by_source(session, doc)[ChunkSource.metadata]
     assert [c.content for c in metadata] == ["Brief\n\nLettera del notaio"]
+
+
+def _office_doc(session, pipeline_storage, tmp_path, ext):
+    from tests.helpers import make_docx, make_odt
+
+    if ext == ".docx":
+        src = make_docx(tmp_path / "src.docx", ["CONTRATTO DI LOCAZIONE", "Seconda pagina"])
+    else:
+        src = make_odt(tmp_path / "src.odt", "VERBALE ASSEMBLEA")
+    doc = make_doc(session, doc_type=DocType.text, title="Contratto", original_filename=f"contratto{ext}")
+    rel, _ = pipeline_storage.store_file(doc.id, ext, src.read_bytes())
+    doc.file_path = rel
+    session.commit()
+    return doc
+
+
+def test_docx_gets_pdf_preview_and_page_numbers(session, pipeline_storage, llm_stub, tmp_path):
+    doc = _office_doc(session, pipeline_storage, tmp_path, ".docx")
+    original = doc.file_path
+    doc = run(session, doc)
+    assert doc.status == DocStatus.ready
+    assert doc.file_path == original  # download keeps the .docx
+    assert doc.preview_path == f"files/{doc.id}.preview.pdf"
+    assert pipeline_storage.abs_path(doc.preview_path).read_bytes().startswith(b"%PDF")
+    assert doc.page_count == 2
+    content = chunks_by_source(session, doc)[ChunkSource.content]
+    assert {c.page_number for c in content} == {1, 2}
+    assert "CONTRATTO" in " ".join(c.content for c in content)
+
+
+def test_docx_conversion_failure_falls_back_to_text(session, pipeline_storage, llm_stub, tmp_path, break_soffice):
+    break_soffice()
+    doc = run(session, _office_doc(session, pipeline_storage, tmp_path, ".docx"))
+    assert doc.status == DocStatus.ready
+    assert doc.preview_path is None
+    content = chunks_by_source(session, doc)[ChunkSource.content]
+    assert [c.page_number for c in content] == [None]
+    assert "CONTRATTO" in content[0].content
+
+
+def test_odt_conversion_failure_fails_document(session, pipeline_storage, llm_stub, tmp_path, break_soffice):
+    from app.services.convert import ConversionError
+
+    break_soffice()
+    doc = _office_doc(session, pipeline_storage, tmp_path, ".odt")
+    with pytest.raises(ConversionError):
+        pipeline.process_document(session, {"document_id": str(doc.id)})
+    session.refresh(doc)
+    assert doc.status == DocStatus.failed
+    assert "Office conversion failed" in doc.error_message
+    assert doc.preview_path is None
+
+
+def test_reprocess_reuses_existing_preview(session, pipeline_storage, llm_stub, tmp_path, break_soffice):
+    doc = run(session, _office_doc(session, pipeline_storage, tmp_path, ".odt"))
+    assert doc.preview_path is not None
+    for chunk in session.exec(select(Chunk).where(Chunk.document_id == doc.id)).all():
+        session.delete(chunk)
+    doc.summary = None
+    session.commit()
+
+    break_soffice()  # a second conversion would now fail the .odt
+    doc = run(session, doc)
+    assert doc.status == DocStatus.ready
+    content = chunks_by_source(session, doc)[ChunkSource.content]
+    assert [c.page_number for c in content] == [1]
+    assert "VERBALE" in content[0].content

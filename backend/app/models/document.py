@@ -47,6 +47,7 @@ class Document(SQLModel, table=True):
     error_message: str | None = None
     original_filename: str | None = None
     file_path: str | None = None  # relative to STORAGE_PATH
+    preview_path: str | None = None  # relative PDF used only for viewing (converted office documents)
     page_count: int | None = None
     file_size: int | None = None
     created_at: datetime = Field(default_factory=utcnow)

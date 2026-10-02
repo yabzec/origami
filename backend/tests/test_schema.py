@@ -40,3 +40,8 @@ def test_document_language_columns(engine):
     assert {"document_date", "detected_language", "translation_status", "ocr_applied"} <= set(cols)
     assert cols["document_date"]["nullable"] is False
     assert cols["ocr_applied"]["nullable"] is True
+
+
+def test_document_preview_path_column(engine):
+    cols = {c["name"]: c for c in inspect(engine).get_columns("documents")}
+    assert cols["preview_path"]["nullable"] is True

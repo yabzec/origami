@@ -100,3 +100,8 @@ def test_upload_with_document_date(auth_client, session, storage):
     )
     assert resp.status_code == 201
     assert resp.json()["document_date"] == "2018-12-01"
+
+
+def test_upload_office_formats_are_text(auth_client, session, storage):
+    for name in ("lettera.odt", "vecchio.doc", "nota.rtf", "contratto.docx"):
+        assert upload(auth_client, name).json()["doc_type"] == DocType.text

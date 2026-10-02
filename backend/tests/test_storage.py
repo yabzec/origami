@@ -37,3 +37,11 @@ def test_store_fileobj_streams_and_sizes(tmp_path):
     assert rel == f"files/{doc_id}.mp4"
     assert size == 10
     assert storage.abs_path(rel).read_bytes() == b"0123456789"
+
+
+def test_store_preview_writes_pdf_next_to_original(tmp_path):
+    storage = Storage(tmp_path)
+    doc_id = uuid.uuid4()
+    rel = storage.store_preview(doc_id, b"%PDF-1.7")
+    assert rel == f"files/{doc_id}.preview.pdf"
+    assert storage.abs_path(rel).read_bytes() == b"%PDF-1.7"

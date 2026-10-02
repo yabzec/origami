@@ -1,11 +1,13 @@
 import logging
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from sqlmodel import Session, select
 
 from app.config import get_primary_language, get_settings
 from app.models import Chunk, ChunkSource, DocStatus, DocType, Document, TranslationStatus
 from app.services.chunking import chunk_pages
+from app.services.convert import OFFICE_EXTENSIONS, ConversionError, office_to_pdf
 from app.services.extract import (
     extract_docx,
     extract_pdf_text,
@@ -89,8 +91,9 @@ def _extract_content(
     path = storage.abs_path(doc.file_path)
 
     if doc.doc_type == DocType.text:
-        text = extract_docx(path) if path.suffix == ".docx" else extract_text_file(path)
-        return [(None, text)]
+        if path.suffix in OFFICE_EXTENSIONS:
+            return _extract_office(session, doc, storage, path)
+        return [(None, extract_text_file(path))]
 
     if doc.doc_type == DocType.image:
         if not doc.ocr_enabled:
@@ -114,6 +117,29 @@ def _extract_content(
         return pages
 
     raise ValueError(f"Unknown doc_type {doc.doc_type!r}")
+
+
+def _extract_office(
+    session: Session, doc: Document, storage: Storage, path: Path
+) -> list[tuple[int | None, str]]:
+    """Office files are viewed and indexed through a LibreOffice PDF; the original stays the download."""
+    preview = storage.abs_path(doc.preview_path) if doc.preview_path else None
+    if preview is None or not preview.is_file():
+        try:
+            pdf_bytes = office_to_pdf(path)
+        except ConversionError:
+            if path.suffix != ".docx":
+                raise  # no other parser for .doc/.odt/.rtf: the document ends failed
+            log.warning("Office conversion failed for %s; using python-docx text", doc.id, exc_info=True)
+            doc.preview_path = None
+            session.commit()
+            return [(None, extract_docx(path))]
+        doc.preview_path = storage.store_preview(doc.id, pdf_bytes)
+        preview = storage.abs_path(doc.preview_path)
+    pages = extract_pdf_text(preview)
+    doc.page_count = len(pages)
+    session.commit()
+    return pages
 
 
 def _reocr_pdf(session: Session, doc: Document, storage: Storage) -> list[tuple[int | None, str]]:
