@@ -22,6 +22,35 @@ get_settings.cache_clear()
 from app.db import get_session  # noqa: E402
 from app.main import app  # noqa: E402
 
+class FakeSMTP:
+    """Records SMTP sessions instead of opening network connections."""
+
+    instances: list["FakeSMTP"] = []
+
+    def __init__(self, host, port, timeout=None):
+        self.host, self.port, self.timeout = host, port, timeout
+        self.calls: list = []
+        self.messages: list = []
+        FakeSMTP.instances.append(self)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.calls.append("quit")
+        return False
+
+    def starttls(self):
+        self.calls.append("starttls")
+
+    def login(self, user, password):
+        self.calls.append(("login", user, password))
+
+    def send_message(self, msg):
+        self.calls.append("send_message")
+        self.messages.append(msg)
+
+
 ADMIN_URL = "postgresql+psycopg://origami:origami@localhost:5432/postgres"
 TEST_URL = "postgresql+psycopg://origami:origami@localhost:5432/origami_test"
 
@@ -105,7 +134,7 @@ def fake_scanner(client):
 
 @pytest.fixture
 def llm_stub(monkeypatch):
-    """Stub the ONLY sanctioned mock boundary: app.services.llm."""
+    """Stub the LLM mock boundary: app.services.llm (the other one is smtplib.SMTP)."""
     from app.services.llm import Description
 
     calls = {"embed": [], "describe": [], "translate": [], "language": "it", "translate_error": None}
@@ -141,3 +170,36 @@ def break_soffice(monkeypatch):
 
     yield _break
     get_settings.cache_clear()  # monkeypatch restores the env afterwards; next call re-reads it
+
+
+@pytest.fixture(autouse=True)
+def smtp_stub(monkeypatch):
+    """Second sanctioned mock boundary: smtplib.SMTP (external network).
+
+    Autouse, so no test can ever send a real email, even with SMTP creds in the developer's .env.
+    """
+    FakeSMTP.instances = []
+    monkeypatch.setattr("smtplib.SMTP", FakeSMTP)
+    return FakeSMTP.instances
+
+
+@pytest.fixture
+def smtp_settings(monkeypatch):
+    """Point app.services.notify at explicit settings instead of the real .env."""
+    from app.config import Settings
+
+    def apply(**overrides):
+        values = {
+            "smtp_host": "smtp.gmail.com",
+            "smtp_port": 587,
+            "smtp_user": "",
+            "smtp_app_password": "",
+            "smtp_from": "",
+            "app_base_url": "",
+            **overrides,
+        }
+        settings = Settings(_env_file=None, **values)
+        monkeypatch.setattr("app.services.notify.get_settings", lambda: settings)
+        return settings
+
+    return apply

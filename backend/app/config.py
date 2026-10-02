@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     rag_top_k: int = 8
     rag_relevance_floor: float = 0.35
     cors_origins: str = "*"
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_app_password: str = ""  # Gmail: an app password (needs 2-step verification)
+    smtp_from: str = ""  # empty → smtp_user
+    app_base_url: str = ""  # e.g. http://origami.lan:8000 — adds document links to emails
     soffice_path: str = "soffice"  # LibreOffice binary used to convert office documents to PDF
 
 
