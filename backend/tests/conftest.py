@@ -6,8 +6,17 @@ from sqlalchemy import create_engine as sa_create_engine
 from sqlalchemy import text
 from sqlmodel import Session, SQLModel, create_engine
 
-from app.db import get_session
-from app.main import app
+from app.config import Settings, get_settings
+
+# Keep the developer's ../.env out of the test run: Settings() should see only
+# code defaults plus real environment variables (monkeypatch.setenv still works).
+# pydantic-settings reads model_config["env_file"] at instantiation, so this must
+# run before anything caches a Settings instance (hence before importing app.main).
+Settings.model_config["env_file"] = None
+get_settings.cache_clear()
+
+from app.db import get_session  # noqa: E402
+from app.main import app  # noqa: E402
 
 ADMIN_URL = "postgresql+psycopg://origami:origami@localhost:5432/postgres"
 TEST_URL = "postgresql+psycopg://origami:origami@localhost:5432/origami_test"
