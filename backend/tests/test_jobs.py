@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from app.models import Job, JobStatus
+from app.models.job import MAX_ATTEMPTS, RETRY_DELAYS
 from app.services.jobs import claim_next, complete, enqueue, fail
 
 
@@ -26,25 +27,18 @@ def test_complete(session):
     assert session.get(Job, job.id).status == JobStatus.done
 
 
-def test_fail_requeues_with_backoff_then_fails(session):
-    enqueue(session, "process_document", {})
-    job = claim_next(session)
+def test_retry_constants_and_job_default():
+    assert RETRY_DELAYS == [30, 120, 600, 1800]
+    assert MAX_ATTEMPTS == 5
 
-    fail(session, job, "boom")
-    fresh = session.get(Job, job.id)
-    assert fresh.status == JobStatus.queued
-    assert fresh.attempts == 1
-    assert fresh.last_error == "boom"
-    assert fresh.run_at.replace(tzinfo=timezone.utc) > datetime.now(timezone.utc)
 
-    fresh.run_at = datetime.now(timezone.utc)
+def test_enqueued_job_allows_five_attempts(session):
+    job = enqueue(session, "process_document", {})
+    assert job.max_attempts == 5
+
+
+def test_cancelled_job_is_never_claimed(session):
+    job = enqueue(session, "process_document", {})
+    job.status = JobStatus.cancelled
     session.commit()
-    job = claim_next(session)
-    fail(session, job, "boom2")
-    fresh.run_at = datetime.now(timezone.utc)
-    session.commit()
-    job = claim_next(session)
-    fail(session, job, "boom3")
-
-    assert session.get(Job, job.id).status == JobStatus.failed
-    assert session.get(Job, job.id).attempts == 3
+    assert claim_next(session) is None

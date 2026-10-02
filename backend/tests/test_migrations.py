@@ -87,3 +87,33 @@ def test_summary_backfills_empty_description(engine):
         command.upgrade(cfg, "head")
         with engine.begin() as conn:
             conn.execute(text("DELETE FROM documents WHERE title LIKE 'Backfill%'"))
+
+
+RETRY_REVISION = "e5a1c7d93b20"
+
+
+def test_retry_migration_raises_max_attempts_of_open_jobs_only(engine):
+    from alembic.script import ScriptDirectory
+
+    cfg = _cfg()
+    previous = ScriptDirectory.from_config(cfg).get_revision(RETRY_REVISION).down_revision
+    command.downgrade(cfg, previous)
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "INSERT INTO jobs (type, payload, status, attempts, max_attempts, run_at, "
+                "created_at, updated_at) VALUES "
+                "('mig_queued', '{}', 'queued', 1, 3, now(), now(), now()), "
+                "('mig_running', '{}', 'running', 0, 3, now(), now(), now()), "
+                "('mig_done', '{}', 'done', 1, 3, now(), now(), now())"
+            ))
+        command.upgrade(cfg, "head")
+        with engine.begin() as conn:
+            rows = dict(conn.execute(
+                text("SELECT type, max_attempts FROM jobs WHERE type LIKE 'mig_%'")
+            ).all())
+        assert rows == {"mig_queued": 5, "mig_running": 5, "mig_done": 3}
+    finally:
+        command.upgrade(cfg, "head")
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM jobs WHERE type LIKE 'mig_%'"))

@@ -45,3 +45,11 @@ def test_document_language_columns(engine):
 def test_document_preview_path_column(engine):
     cols = {c["name"]: c for c in inspect(engine).get_columns("documents")}
     assert cols["preview_path"]["nullable"] is True
+
+
+def test_user_email_and_job_max_attempts_default(engine):
+    inspector = inspect(engine)
+    user_cols = {c["name"]: c for c in inspector.get_columns("users")}
+    assert user_cols["email"]["nullable"] is True
+    job_cols = {c["name"]: c for c in inspector.get_columns("jobs")}
+    assert job_cols["max_attempts"]["default"] == "5"
