@@ -135,9 +135,8 @@ def test_pipeline_resumes_after_embedding_failure(session, pipeline_storage, llm
     assert len(llm_stub["describe"]) == describe_calls_after_first_run  # summary not regenerated
 
 
-def test_unknown_document_id_raises(session, pipeline_storage):
-    with pytest.raises(ValueError):
-        pipeline.process_document(session, {"document_id": str(uuid.uuid4())})
+def test_unknown_document_id_is_noop(session, pipeline_storage):
+    pipeline.process_document(session, {"document_id": str(uuid.uuid4())})  # must not raise
 
 
 def test_no_ocr_image_skips_ocr_and_has_no_content(session, pipeline_storage, llm_stub, tmp_path):
@@ -517,6 +516,12 @@ def test_translate_document_adds_embedded_translation_chunks(session, pipeline_s
     assert [t.page_number for t in translated] == [c.page_number for c in content]
     assert translated[0].content.startswith("[it] ")
     assert all(t.embedding is not None for t in translated)
+
+
+def test_translate_noop_clears_pending_status(session, pipeline_storage):
+    doc = make_doc(session, detected_language="it", translation_status="pending")
+    doc = translate(session, doc)
+    assert doc.translation_status is None
 
 
 def test_translation_error_before_final_attempt_stays_pending(session, pipeline_storage, llm_stub):

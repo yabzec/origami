@@ -287,3 +287,35 @@ def test_list_fetches_active_jobs_in_one_query(auth_client, session, engine):
         event.remove(engine, "before_cursor_execute", record)
     assert len(job_queries) == 1
     assert [d["active_job"]["attempts"] for d in body] == [1, 1, 1]
+
+
+def test_delete_cancels_queued_retry_and_late_run_sends_no_email(
+    auth_client, session, engine, smtp_settings, smtp_stub
+):
+    from app.models import User
+    from app.worker import runner
+    import app.worker.pipeline  # noqa: F401  (registers the handler)
+
+    smtp_settings(smtp_user="origami@gmail.com", smtp_app_password="abcd efgh ijkl mnop")
+    session.add(User(username="mail-user", password_hash="x", email="me@example.com"))
+    doc = make_document(session)
+    job = Job(
+        type="process_document",
+        payload={"document_id": str(doc.id)},
+        attempts=1,
+        run_at=datetime.now(timezone.utc),
+    )
+    session.add(job)
+    session.commit()
+
+    assert auth_client.delete(f"/api/documents/{doc.id}").status_code == 204
+    session.refresh(job)
+    assert job.status == JobStatus.cancelled
+
+    job.status = JobStatus.queued  # a worker that had already claimed it would still run it
+    job.run_at = datetime.now(timezone.utc)
+    session.commit()
+    assert runner.run_once(engine) is True
+    session.refresh(job)
+    assert job.status == JobStatus.done
+    assert smtp_stub == []

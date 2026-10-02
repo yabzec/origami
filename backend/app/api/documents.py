@@ -210,6 +210,7 @@ def delete_document(
 ) -> None:
     doc = get_doc_or_404(session, document_id)
     rel_paths = [doc.file_path, doc.preview_path]
+    _cancel_queued_jobs(session, doc)
     session.delete(doc)  # chunks and document_tags cascade via FK
     session.commit()
     for rel in rel_paths:
@@ -243,6 +244,8 @@ def reprocess_document(
             raise api_error(409, "no_source", "The original scanned pages are no longer available")
         payload["scan_session_id"] = scan_session_id
     session.refresh(doc, with_for_update=True)  # serialize with translate_document's writes
+    if doc.status in (DocStatus.pending, DocStatus.processing):
+        raise api_error(409, "document_busy", "Document is still being processed")
     _cancel_queued_jobs(session, doc)
     for chunk in session.exec(
         select(Chunk).where(

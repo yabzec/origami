@@ -39,7 +39,8 @@ def get_pipeline_storage() -> Storage:
 def process_document(session: Session, payload: dict) -> None:
     doc = session.get(Document, payload["document_id"])
     if doc is None:
-        raise ValueError(f"Document {payload['document_id']} not found")
+        log.info("process_document: document %s no longer exists", payload["document_id"])
+        return
     storage = get_pipeline_storage()
     try:
         doc.status = DocStatus.processing
@@ -342,7 +343,10 @@ def translate_document(session: Session, payload: dict) -> None:
         log.info("translate_document: document %s no longer exists", payload["document_id"])
         return
     if not doc.detected_language or doc.detected_language == get_primary_language():
-        return  # nothing to translate (e.g. the document was re-processed since queueing)
+        # nothing to translate (e.g. the document was re-processed since queueing)
+        if doc.translation_status == TranslationStatus.pending:
+            _finish_translation(session, doc, None)  # stop the UI polling "pending"
+        return
     if doc.translation_status == TranslationStatus.done and _has_chunks(
         session, doc, ChunkSource.translation
     ):
