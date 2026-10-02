@@ -2,6 +2,7 @@ import { NavLink, Outlet, useNavigate, useSearchParams } from "react-router";
 import { useAuth } from "@/auth";
 import { FolderTree } from "@/components/FolderTree";
 import { TagManager } from "@/components/TagManager";
+import { browseSearch, parseSort } from "@/lib/sorting";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -18,7 +19,7 @@ export function Layout() {
   const selectedFolder = searchParams.get("folder") ? Number(searchParams.get("folder")) : null;
 
   const selectFolder = (id: number | null) => {
-    navigate(id === null ? "/" : `/?folder=${id}`);
+    navigate(`/${browseSearch(id, parseSort(searchParams.get("sort")))}`);
   };
 
   return (

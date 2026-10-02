@@ -6,14 +6,16 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { useDeleteDocument, useDocuments } from "@/hooks/useDocuments";
 import { useTags } from "@/hooks/useTags";
+import { browseSearch, parseSort, SORT_OPTIONS } from "@/lib/sorting";
 import { DOC_TYPES } from "@/lib/types";
 
 export function BrowsePage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const folderId = searchParams.get("folder") ? Number(searchParams.get("folder")) : null;
+  const sort = parseSort(searchParams.get("sort"));
   const [tagId, setTagId] = useState<number | null>(null);
   const [docType, setDocType] = useState<string | null>(null);
-  const { data: docs, isLoading } = useDocuments({ folderId, tagId, docType });
+  const { data: docs, isLoading } = useDocuments({ folderId, tagId, docType, sort });
   const { data: tags } = useTags();
   const deleteDoc = useDeleteDocument();
 
@@ -45,6 +47,18 @@ export function BrowsePage() {
       )}
       <div className="mb-4 flex items-center gap-3">
         <h2 className="flex-1 text-lg font-semibold">Documents</h2>
+        <Select
+          className="w-52"
+          aria-label="Order by"
+          value={sort}
+          onChange={(e) => setSearchParams(new URLSearchParams(browseSearch(folderId, parseSort(e.target.value))))}
+        >
+          {SORT_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </Select>
         <Select
           className="w-40"
           value={tagId ?? ""}

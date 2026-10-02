@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { DEFAULT_SORT, type DocumentSort } from "@/lib/sorting";
 import type { Document } from "@/lib/types";
 
 export interface DocumentFilters {
   folderId: number | null;
   tagId: number | null;
   docType: string | null;
+  sort?: DocumentSort;
 }
 
 export function documentsQueryString(filters: DocumentFilters): string {
@@ -13,6 +15,7 @@ export function documentsQueryString(filters: DocumentFilters): string {
   if (filters.folderId !== null) params.set("folder_id", String(filters.folderId));
   if (filters.tagId !== null) params.set("tag_id", String(filters.tagId));
   if (filters.docType !== null) params.set("doc_type", filters.docType);
+  if (filters.sort && filters.sort !== DEFAULT_SORT) params.set("sort", filters.sort);
   const qs = params.toString();
   return qs ? `?${qs}` : "";
 }

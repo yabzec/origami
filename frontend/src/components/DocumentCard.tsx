@@ -1,4 +1,5 @@
 import { Link } from "react-router";
+import { DocTypeIcon } from "@/components/DocTypeIcon";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/dates";
 import type { Document } from "@/lib/types";
@@ -10,20 +11,12 @@ export const STATUS_VARIANTS = {
   failed: "red",
 } as const;
 
-const TYPE_ICONS: Record<Document["doc_type"], string> = {
-  scan: "🖨",
-  pdf: "📄",
-  text: "📝",
-  image: "🖼",
-  video: "🎬",
-};
-
 export function DocumentCard({ doc, onDelete }: { doc: Document; onDelete: (id: string) => void }) {
   return (
     <div className="group relative rounded-lg border border-zinc-200 bg-white p-4 hover:shadow">
       <Link to={`/documents/${doc.id}`} className="block">
         <div className="mb-2 flex items-center gap-2">
-          <span>{TYPE_ICONS[doc.doc_type]}</span>
+          <DocTypeIcon doc={doc} />
           <span className="flex-1 truncate font-medium">{doc.title}</span>
           <Badge variant={STATUS_VARIANTS[doc.status]} title={doc.error_message ?? undefined}>
             {doc.status}

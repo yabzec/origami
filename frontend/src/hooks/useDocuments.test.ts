@@ -24,4 +24,11 @@ describe("documentsQueryString", () => {
       "?folder_id=3&tag_id=2&doc_type=pdf",
     );
   });
+
+  it("passes a non-default sort", () => {
+    expect(documentsQueryString({ folderId: null, tagId: null, docType: null, sort: "title_asc" })).toBe(
+      "?sort=title_asc",
+    );
+    expect(documentsQueryString({ folderId: 3, tagId: null, docType: null, sort: "date_desc" })).toBe("?folder_id=3");
+  });
 });
