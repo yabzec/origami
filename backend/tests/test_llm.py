@@ -245,6 +245,15 @@ def test_vision_call_falls_back_to_llm_credentials(monkeypatch, tmp_path):
     assert captured[0]["api_key"] == "shared-key"
 
 
+def test_vision_call_falls_back_to_llm_key_and_base(monkeypatch, tmp_path):
+    _use_settings(monkeypatch, llm_api_key="shared-key", llm_api_base="http://llm.local/v1")
+    captured = []
+    monkeypatch.setattr(litellm, "completion", _capturing_completion(captured))
+    llm.describe(image_path=_image(tmp_path))
+    assert captured[0]["api_key"] == "shared-key"
+    assert captured[0]["api_base"] == "http://llm.local/v1"
+
+
 def test_text_call_never_gets_vision_key(monkeypatch):
     _use_settings(monkeypatch, llm_api_key="groq-key", vision_api_key="gemini-key")
     captured = []
