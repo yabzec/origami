@@ -133,7 +133,8 @@ export function DocumentPage() {
     mutationFn: () =>
       api.patch<Document>(`/api/documents/${id}`, {
         title,
-        description,
+        // only send the description if the user changed it, so a just-arrived AI text is not erased
+        ...(description !== serverDescription.current ? { description } : {}),
         folder_id: folderId,
         tag_ids: tagIds,
         document_date: documentDate || null,
