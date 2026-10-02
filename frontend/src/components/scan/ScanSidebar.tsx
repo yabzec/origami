@@ -1,11 +1,11 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
+import { FolderPicker } from "@/components/FolderPicker";
 import { Textarea } from "@/components/ui/textarea";
 import { todayIso } from "@/lib/dates";
 import type { ScanPhase } from "@/lib/scanWizard";
-import type { Folder, Tag } from "@/lib/types";
+import type { Tag } from "@/lib/types";
 
 export interface ScanFormFields {
   title: string;
@@ -22,7 +22,6 @@ export function emptyScanForm(): ScanFormFields {
 export function ScanSidebar({
   fields,
   onChange,
-  folders,
   tags,
   phase,
   pageCount,
@@ -34,7 +33,6 @@ export function ScanSidebar({
 }: {
   fields: ScanFormFields;
   onChange: (patch: Partial<ScanFormFields>) => void;
-  folders: Folder[];
   tags: Tag[];
   phase: ScanPhase;
   pageCount: number;
@@ -71,18 +69,7 @@ export function ScanSidebar({
       </div>
       <div>
         <Label htmlFor="scan-folder">Folder</Label>
-        <Select
-          id="scan-folder"
-          value={fields.folderId ?? ""}
-          onChange={(e) => onChange({ folderId: e.target.value ? Number(e.target.value) : null })}
-        >
-          <option value="">(root)</option>
-          {folders.map((f) => (
-            <option key={f.id} value={f.id}>
-              {f.name}
-            </option>
-          ))}
-        </Select>
+        <FolderPicker id="scan-folder" value={fields.folderId} onChange={(folderId) => onChange({ folderId })} />
       </div>
       {tags.length > 0 && (
         <div>

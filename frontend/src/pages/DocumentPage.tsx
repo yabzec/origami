@@ -5,11 +5,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
+import { FolderPicker } from "@/components/FolderPicker";
 import { Textarea } from "@/components/ui/textarea";
 import { STATUS_VARIANTS } from "@/components/DocumentCard";
 import { OcrLanguageSelect } from "@/components/OcrLanguageSelect";
-import { useFolders } from "@/hooks/useFolders";
 import { useTags } from "@/hooks/useTags";
 import { api, ApiError, fileUrl } from "@/lib/api";
 import { isAiDescription, nextDescription } from "@/lib/description";
@@ -88,7 +87,6 @@ export function DocumentPage() {
     refetchInterval: (q) =>
       q.state.data && ["pending", "processing"].includes(q.state.data.status) ? 4000 : false,
   });
-  const { data: folders } = useFolders();
   const { data: tags } = useTags();
 
   const [tab, setTab] = useState<"preview" | "text">("preview");
@@ -226,18 +224,7 @@ export function DocumentPage() {
         </div>
         <div>
           <Label htmlFor="d-folder">Folder</Label>
-          <Select
-            id="d-folder"
-            value={folderId ?? ""}
-            onChange={(e) => setFolderId(e.target.value ? Number(e.target.value) : null)}
-          >
-            <option value="">(root)</option>
-            {(folders ?? []).map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.name}
-              </option>
-            ))}
-          </Select>
+          <FolderPicker id="d-folder" value={folderId} onChange={setFolderId} />
         </div>
         <div>
           <Label>Tags</Label>

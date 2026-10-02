@@ -3,8 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
-import { useFolders } from "@/hooks/useFolders";
+import { FolderPicker } from "@/components/FolderPicker";
 import { useTags } from "@/hooks/useTags";
 import { useUploadDocument } from "@/hooks/useDocuments";
 import { ApiError } from "@/lib/api";
@@ -24,7 +23,6 @@ export function UploadDialog({
   onClose: () => void;
   initialFolderId?: number | null;
 }) {
-  const { data: folders } = useFolders();
   const { data: tags } = useTags();
   const upload = useUploadDocument();
   const [title, setTitle] = useState("");
@@ -73,18 +71,7 @@ export function UploadDialog({
         </div>
         <div>
           <Label htmlFor="up-folder">Folder</Label>
-          <Select
-            id="up-folder"
-            value={folderId ?? ""}
-            onChange={(e) => setFolderId(e.target.value ? Number(e.target.value) : null)}
-          >
-            <option value="">(root)</option>
-            {(folders ?? []).map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.name}
-              </option>
-            ))}
-          </Select>
+          <FolderPicker id="up-folder" value={folderId} onChange={setFolderId} />
         </div>
         <div>
           <Label>Tags</Label>

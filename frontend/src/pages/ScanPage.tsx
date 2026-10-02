@@ -6,7 +6,6 @@ import { PageCarousel } from "@/components/scan/PageCarousel";
 import { ScanPreview } from "@/components/scan/ScanPreview";
 import { emptyScanForm, ScanSidebar, type ScanFormFields } from "@/components/scan/ScanSidebar";
 import { ScanToolbar } from "@/components/scan/ScanToolbar";
-import { useFolders } from "@/hooks/useFolders";
 import { useLeaveGuard } from "@/hooks/useLeaveGuard";
 import { useTags } from "@/hooks/useTags";
 import { api, ApiError, getToken } from "@/lib/api";
@@ -33,7 +32,6 @@ export function ScanPage() {
     queryKey: ["scan-devices"],
     queryFn: () => api.get<{ devices: ScanDevice[]; default: string | null }>("/api/scan/devices"),
   });
-  const { data: folders } = useFolders();
   const { data: tags } = useTags();
 
   const [device, setDevice] = useState<string | null>(null);
@@ -254,7 +252,6 @@ export function ScanPage() {
           <ScanSidebar
             fields={fields}
             onChange={(patch) => setFields((prev) => ({ ...prev, ...patch }))}
-            folders={folders ?? []}
             tags={tags ?? []}
             phase={state.phase}
             pageCount={state.pages.length}
