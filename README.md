@@ -7,7 +7,7 @@ Self-hosted document management system: scan, upload, OCR, semantic search, and 
 ### System dependencies
 
 ```bash
-sudo apt install tesseract-ocr tesseract-ocr-ita tesseract-ocr-eng
+sudo apt install tesseract-ocr tesseract-ocr-ita tesseract-ocr-eng tesseract-ocr-deu
 ```
 
 Required for OCR (Italian + English). Also needed on the host:
@@ -19,7 +19,7 @@ Required for OCR (Italian + English). Also needed on the host:
 Verify:
 
 ```bash
-tesseract --list-langs   # must include ita and eng
+tesseract --list-langs   # must include ita, eng and deu
 pdftoppm -v
 scanimage --version
 ```

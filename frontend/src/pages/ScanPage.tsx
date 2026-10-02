@@ -17,6 +17,7 @@ import {
   scanWizardReducer,
 } from "@/lib/scanWizard";
 import type { Document, ScanDevice, ScanPageInfo, ScanStatus } from "@/lib/types";
+import { OcrLanguageSelect } from "@/components/OcrLanguageSelect";
 
 function Thumbnail({
   page,
@@ -184,15 +185,11 @@ export function ScanPage() {
           {ocrEnabled && (
             <div>
               <Label htmlFor="scan-lang">OCR language</Label>
-              <Select
+              <OcrLanguageSelect
                 id="scan-lang"
                 value={state.languages}
                 onChange={(e) => dispatch({ type: "SET_LANGUAGES", languages: e.target.value })}
-              >
-                <option value="ita+eng">Italian + English</option>
-                <option value="ita">Italian</option>
-                <option value="eng">English</option>
-              </Select>
+              />
             </div>
           )}
           {scanDeviceHint(devices) === "none" && (

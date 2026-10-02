@@ -9,6 +9,8 @@ import { useTags } from "@/hooks/useTags";
 import { useUploadDocument } from "@/hooks/useDocuments";
 import { ApiError } from "@/lib/api";
 import { buildUploadForm, fileStem } from "@/lib/upload";
+import { OcrLanguageSelect } from "@/components/OcrLanguageSelect";
+import { DEFAULT_OCR_LANGUAGES } from "@/lib/ocrLanguages";
 
 export function UploadDialog({
   file,
@@ -27,7 +29,7 @@ export function UploadDialog({
   const [title, setTitle] = useState("");
   const [folderId, setFolderId] = useState<number | null>(initialFolderId ?? null);
   const [tagIds, setTagIds] = useState<number[]>([]);
-  const [languages, setLanguages] = useState("ita+eng");
+  const [languages, setLanguages] = useState(DEFAULT_OCR_LANGUAGES);
   const [ocrEnabled, setOcrEnabled] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -102,11 +104,7 @@ export function UploadDialog({
         {ocrEnabled && (
           <div>
             <Label htmlFor="up-lang">OCR language</Label>
-            <Select id="up-lang" value={languages} onChange={(e) => setLanguages(e.target.value)}>
-              <option value="ita+eng">Italian + English</option>
-              <option value="ita">Italian</option>
-              <option value="eng">English</option>
-            </Select>
+            <OcrLanguageSelect id="up-lang" value={languages} onChange={(e) => setLanguages(e.target.value)} />
           </div>
         )}
         {error && <p className="text-sm text-red-600">{error}</p>}

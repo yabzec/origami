@@ -1,5 +1,7 @@
 import io
 
+import pytesseract
+import pytest
 from pypdf import PdfReader
 
 from app.services.ocr import images_to_searchable_pdf, ocr_image, pdf_to_searchable_pdf
@@ -46,3 +48,10 @@ def test_images_to_pdf_has_pages_but_no_text(tmp_path):
     assert len(reader.pages) == 2
     # image-only: no extractable text layer
     assert (reader.pages[0].extract_text() or "").strip() == ""
+
+
+@pytest.mark.skipif("deu" not in pytesseract.get_languages(config=""), reason="tesseract-ocr-deu not installed")
+def test_ocr_image_german(tmp_path):
+    img = make_text_image(tmp_path / "de.png", "RECHNUNG STRASSE", size=(1600, 400))
+    _, text = ocr_image(img, "deu")
+    assert "RECHNUNG" in text.upper()
