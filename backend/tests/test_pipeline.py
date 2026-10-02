@@ -451,3 +451,54 @@ def test_reprocess_reuses_existing_preview(session, pipeline_storage, llm_stub, 
     content = chunks_by_source(session, doc)[ChunkSource.content]
     assert [c.page_number for c in content] == [1]
     assert "VERBALE" in content[0].content
+
+
+def _failing_text_doc(session, pipeline_storage, monkeypatch):
+    doc = make_doc(session, doc_type=DocType.text, title="Nota")
+    rel, _ = pipeline_storage.store_file(doc.id, ".txt", b"Testo di prova.")
+    doc.file_path = rel
+    session.commit()
+    boom = RuntimeError("embedding API down")
+    monkeypatch.setattr(pipeline, "llm_embed", lambda texts: (_ for _ in ()).throw(boom))
+    return doc
+
+
+def test_non_final_failure_leaves_document_pending_with_retry_message(
+    session, pipeline_storage, llm_stub, monkeypatch
+):
+    doc = _failing_text_doc(session, pipeline_storage, monkeypatch)
+    with pytest.raises(RuntimeError):
+        pipeline.process_document(
+            session, {"document_id": str(doc.id), "_attempt": 1, "_final_attempt": False}
+        )
+    session.refresh(doc)
+    assert doc.status == DocStatus.pending
+    assert doc.error_message == "Retrying: embedding API down"
+
+
+def test_final_failure_marks_document_failed(session, pipeline_storage, llm_stub, monkeypatch):
+    doc = _failing_text_doc(session, pipeline_storage, monkeypatch)
+    with pytest.raises(RuntimeError):
+        pipeline.process_document(
+            session, {"document_id": str(doc.id), "_attempt": 5, "_final_attempt": True}
+        )
+    session.refresh(doc)
+    assert doc.status == DocStatus.failed
+    assert doc.error_message == "embedding API down"
+
+
+def test_failed_attempt_via_runner_requeues_and_keeps_document_pending(
+    engine, session, pipeline_storage, llm_stub, monkeypatch
+):
+    from app.models import Job, JobStatus
+    from app.services.jobs import enqueue
+    from app.worker.runner import run_once
+
+    doc = _failing_text_doc(session, pipeline_storage, monkeypatch)
+    enqueue(session, "process_document", {"document_id": str(doc.id)})
+    assert run_once(engine) is True
+    session.expire_all()
+    assert session.get(Document, doc.id).status == DocStatus.pending
+    job = session.exec(select(Job)).one()
+    assert (job.status, job.attempts) == (JobStatus.queued, 1)
+    assert job.payload == {"document_id": str(doc.id)}

@@ -20,7 +20,7 @@ from app.services.llm import embed as llm_embed
 from app.services.llm import translate as llm_translate
 from app.services.ocr import images_to_pdf, images_to_searchable_pdf, ocr_image, pdf_to_searchable_pdf
 from app.services.storage import Storage
-from app.worker.runner import register
+from app.worker.runner import is_final_attempt, register
 
 log = logging.getLogger("origami.pipeline")
 
@@ -56,8 +56,13 @@ def process_document(session: Session, payload: dict) -> None:
         session.commit()
     except Exception as exc:
         session.rollback()
-        doc.status = DocStatus.failed
-        doc.error_message = str(exc)[:2000]
+        if is_final_attempt(payload):
+            doc.status = DocStatus.failed
+            doc.error_message = str(exc)[:2000]
+        else:
+            # more attempts follow: show "waiting", not "failed"
+            doc.status = DocStatus.pending
+            doc.error_message = "Retrying: " + str(exc)[:2000]
         session.commit()
         raise
 
