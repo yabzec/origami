@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 
 from sqlmodel import Field, SQLModel
@@ -22,6 +22,11 @@ class DocStatus(StrEnum):
     failed = "failed"
 
 
+class TranslationStatus(StrEnum):
+    done = "done"
+    failed = "failed"
+
+
 class Document(SQLModel, table=True):
     __tablename__ = "documents"
 
@@ -33,6 +38,11 @@ class Document(SQLModel, table=True):
     doc_type: str  # DocType
     ocr_languages: str = "ita+eng"
     ocr_enabled: bool = True
+    document_date: date = Field(default_factory=lambda: utcnow().date())
+    detected_language: str | None = None  # ISO 639-1, set by the summary step
+    translation_status: str | None = None  # TranslationStatus; None = not needed / not yet processed
+    # True: stored PDF text layer produced by Tesseract; False: original file kept; None: unknown (legacy)
+    ocr_applied: bool | None = None
     status: str = DocStatus.pending  # DocStatus
     error_message: str | None = None
     original_filename: str | None = None

@@ -13,6 +13,7 @@ class ChunkSource(StrEnum):
     content = "content"
     summary = "summary"
     metadata = "metadata"
+    translation = "translation"
 
 
 class Chunk(SQLModel, table=True):

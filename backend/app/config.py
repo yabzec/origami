@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     embedding_api_key: str = ""
     embedding_api_base: str = ""
     default_ocr_languages: str = "ita+eng"
+    primary_language: str = "it"
     rag_top_k: int = 8
     rag_relevance_floor: float = 0.35
     cors_origins: str = "*"
@@ -29,3 +30,11 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def get_primary_language() -> str:
+    """Target language (ISO 639-1) for summaries and translations.
+
+    Single lookup point: a future per-user profile setting replaces this body.
+    """
+    return get_settings().primary_language

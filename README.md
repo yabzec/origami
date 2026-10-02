@@ -29,6 +29,7 @@ scanimage --version
 ```bash
 cd backend
 cp ../.env.example ../.env   # edit STORAGE_PATH, GEMINI_API_KEY, JWT_SECRET
+# optional: PRIMARY_LANGUAGE (ISO 639-1, default "it") - language for AI summaries and translations
 uv sync
 docker compose up -d db
 uv run alembic upgrade head

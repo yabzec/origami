@@ -121,3 +121,16 @@ def test_document_text_endpoint(auth_client, session):
     assert body["summary"] == "Riassunto."
     assert [c["content"] for c in body["chunks"]] == ["Pagina uno.", "Pagina due."]
     assert body["chunks"][0]["page_number"] == 1
+
+
+def test_new_document_defaults_and_serialization(auth_client, session):
+    from datetime import date
+
+    from tests.helpers import seed_document
+
+    doc = seed_document(session, "Fresh", [])
+    body = auth_client.get(f"/api/documents/{doc.id}").json()
+    assert body["document_date"] == date.today().isoformat()
+    assert body["detected_language"] is None
+    assert body["translation_status"] is None
+    assert body["ocr_applied"] is None
