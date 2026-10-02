@@ -153,10 +153,11 @@ def delete_document(
     storage: Storage = Depends(get_storage),
 ) -> None:
     doc = get_doc_or_404(session, document_id)
-    rel_path = doc.file_path
+    rel_paths = [doc.file_path, doc.preview_path]
     session.delete(doc)  # chunks and document_tags cascade via FK
     session.commit()
-    storage.delete_document_file(rel_path)
+    for rel in rel_paths:
+        storage.delete_document_file(rel)
 
 
 class ReprocessRequest(BaseModel):

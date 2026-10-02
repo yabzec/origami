@@ -64,3 +64,51 @@ def test_file_response_is_not_cached(auth_client, session, storage):
     doc = stored_doc(session, storage)
     resp = auth_client.get(f"/api/documents/{doc.id}/file")
     assert resp.headers["cache-control"] == "no-cache"
+
+
+def office_doc(session, storage):
+    doc = seed_document(session, "Contratto", [{"content": "c"}], original_filename="contratto.docx")
+    rel, _ = storage.store_file(doc.id, ".docx", b"PK original docx")
+    doc.file_path = rel
+    doc.preview_path = storage.store_preview(doc.id, b"%PDF-1.7 preview")
+    session.commit()
+    return doc
+
+
+def test_preview_param_serves_preview_pdf_inline(auth_client, session, storage):
+    doc = office_doc(session, storage)
+    resp = auth_client.get(f"/api/documents/{doc.id}/file?preview=1")
+    assert resp.status_code == 200
+    assert resp.content == b"%PDF-1.7 preview"
+    assert resp.headers["content-type"] == "application/pdf"
+    assert resp.headers["content-disposition"].startswith("inline")
+
+
+def test_without_preview_param_serves_original(auth_client, session, storage):
+    doc = office_doc(session, storage)
+    resp = auth_client.get(f"/api/documents/{doc.id}/file")
+    assert resp.content == b"PK original docx"
+
+
+def test_download_always_serves_original(auth_client, session, storage):
+    doc = office_doc(session, storage)
+    resp = auth_client.get(f"/api/documents/{doc.id}/file?download=1&preview=1")
+    assert resp.status_code == 200
+    assert resp.content == b"PK original docx"
+    assert resp.headers["content-disposition"].startswith("attachment")
+    assert "contratto.docx" in resp.headers["content-disposition"]
+
+
+def test_preview_param_without_preview_serves_file(auth_client, session, storage):
+    doc = stored_doc(session, storage)
+    resp = auth_client.get(f"/api/documents/{doc.id}/file?preview=1")
+    assert resp.status_code == 200
+    assert resp.content == b"%PDF-1.7 x"
+
+
+def test_preview_missing_on_disk_falls_back_to_file(auth_client, session, storage):
+    doc = office_doc(session, storage)
+    storage.abs_path(doc.preview_path).unlink()
+    resp = auth_client.get(f"/api/documents/{doc.id}/file?preview=1")
+    assert resp.status_code == 200
+    assert resp.content == b"PK original docx"

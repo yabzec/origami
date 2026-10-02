@@ -179,3 +179,16 @@ def test_document_text_translation_variant(auth_client, session):
     translated = auth_client.get(f"/api/documents/{doc.id}/text?variant=translation").json()
     assert [c["content"] for c in translated["chunks"]] == ["Ciao mondo"]
     assert auth_client.get(f"/api/documents/{doc.id}/text?variant=bogus").status_code == 422
+
+
+def test_delete_removes_preview(auth_client, session, storage):
+    doc = make_document(session, doc_type=DocType.text)
+    rel, _ = storage.store_file(doc.id, ".docx", b"PK")
+    doc.file_path = rel
+    doc.preview_path = storage.store_preview(doc.id, b"%PDF")
+    session.commit()
+    original, preview = storage.abs_path(rel), storage.abs_path(doc.preview_path)
+
+    assert auth_client.delete(f"/api/documents/{doc.id}").status_code == 204
+    assert not original.exists()
+    assert not preview.exists()
