@@ -1,6 +1,6 @@
 from sqlmodel import select
 
-from app.models import Chunk, ChunkSource, DocStatus, DocType, Job
+from app.models import Chunk, ChunkSource, DocStatus, DocType, Job, JobStatus
 from app.services.ocr import ocr_image
 from app.worker import pipeline
 from tests.helpers import make_text_image, seed_document
@@ -250,3 +250,26 @@ def test_reprocess_scan_without_any_source_is_409(
     assert doc.error_message == "tesseract crashed"
     assert len(session.exec(select(Chunk).where(Chunk.document_id == doc.id)).all()) == chunk_count
     assert len(session.exec(select(Job).where(Job.type == "process_document")).all()) == 1
+
+
+def test_reprocess_cancels_queued_jobs_of_this_document_only(auth_client, session):
+    doc = _ready_doc(session, doc_type=DocType.pdf)
+    other = _ready_doc(session, doc_type=DocType.pdf)
+    session.add_all([
+        Job(type="translate_document", payload={"document_id": str(doc.id)}, attempts=2),
+        Job(type="translate_document", payload={"document_id": str(other.id)}),
+        Job(type="translate_document", payload={"document_id": str(doc.id)}, status=JobStatus.running),
+        Job(type="sweep_scan_sessions", payload={}),
+    ])
+    session.commit()
+
+    assert auth_client.post(f"/api/documents/{doc.id}/reprocess", json={"ocr_languages": "ita"}).status_code == 200
+    session.expire_all()
+    jobs = session.exec(select(Job).order_by(Job.id)).all()
+    assert [(j.type, j.status) for j in jobs] == [
+        ("translate_document", JobStatus.cancelled),
+        ("translate_document", JobStatus.queued),   # other document
+        ("translate_document", JobStatus.running),  # left alone
+        ("sweep_scan_sessions", JobStatus.queued),
+        ("process_document", JobStatus.queued),     # the new run
+    ]

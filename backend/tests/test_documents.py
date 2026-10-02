@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime, timezone
 
-from app.models import Document, DocStatus, DocType, DocumentTag, Tag
+from app.models import Document, DocStatus, DocType, DocumentTag, Job, JobStatus, Tag
 
 
 def make_document(session, **kwargs):
@@ -222,3 +223,67 @@ def test_list_sort_orders(auth_client, session):
 
 def test_list_bad_sort_is_422(auth_client, session):
     assert auth_client.get("/api/documents", params={"sort": "size"}).status_code == 422
+
+
+def test_active_job_reports_queued_retry(auth_client, session):
+    doc = make_document(session, status=DocStatus.pending)
+    session.add(Job(type="process_document", payload={"document_id": str(doc.id)}, status=JobStatus.done))
+    session.add(
+        Job(
+            type="process_document",
+            payload={"document_id": str(doc.id)},
+            attempts=2,
+            last_error="Traceback...\nRuntimeError: down",
+            run_at=datetime(2026, 10, 3, 10, 0, tzinfo=timezone.utc),
+        )
+    )
+    session.commit()
+    body = auth_client.get(f"/api/documents/{doc.id}").json()
+    assert body["active_job"] == {
+        "type": "process_document",
+        "attempts": 2,
+        "max_attempts": 5,
+        "run_at": "2026-10-03T10:00:00+00:00",
+        "last_error": "Traceback...\nRuntimeError: down",
+    }
+
+
+def test_active_job_is_null_without_open_job(auth_client, session):
+    doc = make_document(session)
+    other = make_document(session, title="Other")
+    session.add(Job(type="translate_document", payload={"document_id": str(doc.id)}, status=JobStatus.failed))
+    session.add(Job(type="translate_document", payload={"document_id": str(doc.id)}, status=JobStatus.cancelled))
+    session.add(Job(type="translate_document", payload={"document_id": str(other.id)}))
+    session.commit()
+    assert auth_client.get(f"/api/documents/{doc.id}").json()["active_job"] is None
+
+
+def test_active_job_prefers_newest_open_job(auth_client, session):
+    doc = make_document(session)
+    session.add(Job(type="process_document", payload={"document_id": str(doc.id)}, status=JobStatus.running))
+    session.add(Job(type="translate_document", payload={"document_id": str(doc.id)}))
+    session.commit()
+    assert auth_client.get(f"/api/documents/{doc.id}").json()["active_job"]["type"] == "translate_document"
+
+
+def test_list_fetches_active_jobs_in_one_query(auth_client, session, engine):
+    from sqlalchemy import event
+
+    docs = [make_document(session, title=f"D{i}") for i in range(3)]
+    for d in docs:
+        session.add(Job(type="translate_document", payload={"document_id": str(d.id)}, attempts=1))
+    session.commit()
+
+    job_queries = []
+
+    def record(conn, cursor, statement, parameters, context, executemany):
+        if "FROM jobs" in statement:
+            job_queries.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        body = auth_client.get("/api/documents").json()
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+    assert len(job_queries) == 1
+    assert [d["active_job"]["attempts"] for d in body] == [1, 1, 1]

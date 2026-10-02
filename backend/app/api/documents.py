@@ -19,6 +19,7 @@ from app.models import (
     DocumentTag,
     Folder,
     Job,
+    JobStatus,
     ScanPage,
     Tag,
 )
@@ -46,8 +47,49 @@ def doc_tags(session: Session, doc: Document) -> list[Tag]:
     )
 
 
-def serialize(session: Session, doc: Document) -> dict:
-    return {**doc.model_dump(), "tags": [t.model_dump() for t in doc_tags(session, doc)]}
+DOCUMENT_JOB_TYPES = ("process_document", "translate_document")
+
+
+def _utc_iso(value: datetime) -> str:
+    # job timestamps are stored naive in UTC; an explicit offset stops browsers reading local time
+    return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).isoformat()
+
+
+def active_jobs_for(session: Session, doc_ids: list[uuid.UUID]) -> dict[str, dict]:
+    """Newest queued/running job per document, fetched in one query."""
+    if not doc_ids:
+        return {}
+    jobs = session.exec(
+        select(Job)
+        .where(
+            Job.status.in_([JobStatus.queued, JobStatus.running]),
+            Job.payload["document_id"].astext.in_([str(i) for i in doc_ids]),
+        )
+        .order_by(Job.id.desc())
+    ).all()
+    active: dict[str, dict] = {}
+    for job in jobs:
+        active.setdefault(
+            job.payload["document_id"],
+            {
+                "type": job.type,
+                "attempts": job.attempts,
+                "max_attempts": job.max_attempts,
+                "run_at": _utc_iso(job.run_at),
+                "last_error": job.last_error,
+            },
+        )
+    return active
+
+
+def serialize(session: Session, doc: Document, active_jobs: dict[str, dict] | None = None) -> dict:
+    if active_jobs is None:
+        active_jobs = active_jobs_for(session, [doc.id])
+    return {
+        **doc.model_dump(),
+        "tags": [t.model_dump() for t in doc_tags(session, doc)],
+        "active_job": active_jobs.get(str(doc.id)),
+    }
 
 
 def get_doc_or_404(session: Session, document_id: uuid.UUID) -> Document:
@@ -88,7 +130,9 @@ def list_documents(
             DocumentTag.tag_id == tag_id
         )
     query = query.order_by(*SORT_ORDER[sort])
-    return [serialize(session, d) for d in session.exec(query)]
+    docs = list(session.exec(query))
+    active_jobs = active_jobs_for(session, [d.id for d in docs])
+    return [serialize(session, d, active_jobs) for d in docs]
 
 
 @router.get("/{document_id}")
@@ -199,6 +243,7 @@ def reprocess_document(
             raise api_error(409, "no_source", "The original scanned pages are no longer available")
         payload["scan_session_id"] = scan_session_id
     session.refresh(doc, with_for_update=True)  # serialize with translate_document's writes
+    _cancel_queued_jobs(session, doc)
     for chunk in session.exec(
         select(Chunk).where(
             Chunk.document_id == doc.id,
@@ -223,6 +268,19 @@ def reprocess_document(
     session.commit()
     session.refresh(doc)
     return serialize(session, doc)
+
+
+def _cancel_queued_jobs(session: Session, doc: Document) -> None:
+    """Re-process supersedes queued work; a running job finishes and its results get replaced."""
+    for job in session.exec(
+        select(Job).where(
+            Job.type.in_(DOCUMENT_JOB_TYPES),
+            Job.status == JobStatus.queued,
+            Job.payload["document_id"].astext == str(doc.id),
+        )
+    ):
+        job.status = JobStatus.cancelled
+        job.updated_at = datetime.now(timezone.utc)
 
 
 def _scan_session_with_pages(session: Session, storage: Storage, doc: Document) -> int | None:
