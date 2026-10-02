@@ -1,6 +1,8 @@
 import pytest
 
+from app.models import ChunkSource
 from app.services import rag
+from app.services.search import QUERY_MAX_CHARS
 from tests.helpers import basis_vector, seed_document
 
 
@@ -84,3 +86,39 @@ def test_stream_answer_event_sequence(session, rag_llm):
     assert meta["sources"][0]["n"] == 1
     assert isinstance(meta["sources"][0]["document_id"], str)
     assert events[1][1]["text"] == "Ecco "
+
+
+def test_retrieve_restricted_to_document_ids(session, rag_llm):
+    inside = seed_document(
+        session, "Dentro",
+        [
+            {"content": "Riassunto dentro.", "embedding": basis_vector(0), "source": ChunkSource.summary},
+            {"content": "Testo dentro.", "embedding": basis_vector(0), "page_number": 1},
+        ],
+    )
+    seed_document(session, "Fuori", [{"content": "Testo fuori.", "embedding": basis_vector(0)}])
+
+    sources, grounded = rag.retrieve(session, "testo", [inside.id])
+    assert grounded is True
+    assert {s.document_id for s in sources} == {inside.id}
+    assert len(sources) == 2  # every chunk source of a context document is searchable
+
+
+def test_retrieve_empty_document_ids_skips_search(session, rag_llm):
+    seed_document(session, "Doc", [{"content": "Contenuto.", "embedding": basis_vector(0)}])
+    assert rag.retrieve(session, "qualsiasi", []) == ([], False)
+    assert rag_llm["embed"] == []
+
+
+def test_retrieve_grounded_only_by_context_documents(session, rag_llm):
+    seed_document(session, "Fuori", [{"content": "molto simile", "embedding": basis_vector(0)}])
+    inside = seed_document(session, "Dentro", [{"content": "poco simile", "embedding": basis_vector(9)}])
+    sources, grounded = rag.retrieve(session, "domanda", [inside.id])
+    assert [s.title for s in sources] == ["Dentro"]
+    assert grounded is False
+
+
+def test_retrieve_truncates_long_query(session, rag_llm):
+    doc = seed_document(session, "Bolletta", [{"content": "bolletta", "embedding": basis_vector(0)}])
+    rag.retrieve(session, "bolletta " * 3000, [doc.id])
+    assert len(rag_llm["embed"][0][0]) == QUERY_MAX_CHARS

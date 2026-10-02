@@ -8,7 +8,7 @@ from app.config import get_settings
 from app.models import Chunk, Document
 from app.services.llm import complete as llm_complete
 from app.services.llm import embed as llm_embed
-from app.services.search import keyword_search, rrf_fuse, semantic_search
+from app.services.search import QUERY_MAX_CHARS, keyword_search, rrf_fuse, semantic_search
 
 SYSTEM_PROMPT = (
     "You are Origami, a personal document archive assistant. Answer the user's "
@@ -32,11 +32,21 @@ class RetrievedChunk:
     content: str
 
 
-def retrieve(session: Session, question: str) -> tuple[list[RetrievedChunk], bool]:
+def retrieve(
+    session: Session, query: str, document_ids: list[uuid.UUID] | None = None
+) -> tuple[list[RetrievedChunk], bool]:
+    """Hybrid chunk search inside `document_ids` (all chunk sources); [] → no search.
+
+    None searches the whole archive (kept only for the single-turn stream_answer).
+    """
+    if document_ids is not None and not document_ids:
+        return [], False
     settings = get_settings()
-    query_vector = llm_embed([question])[0]
-    semantic_hits = semantic_search(session, query_vector, limit=CANDIDATE_POOL)
-    keyword_hits = keyword_search(session, question, limit=CANDIDATE_POOL)
+    query = query[:QUERY_MAX_CHARS]
+    doc_ids = list(document_ids) if document_ids is not None else None
+    query_vector = llm_embed([query])[0]
+    semantic_hits = semantic_search(session, query_vector, limit=CANDIDATE_POOL, doc_ids=doc_ids)
+    keyword_hits = keyword_search(session, query, limit=CANDIDATE_POOL, doc_ids=doc_ids)
     ordered = rrf_fuse(
         [[h.chunk_id for h in semantic_hits], [h.chunk_id for h in keyword_hits]]
     )[: settings.rag_top_k]
