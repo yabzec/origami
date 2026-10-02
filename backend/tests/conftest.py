@@ -16,6 +16,7 @@ from app.config import Settings, get_settings
 # run before anything caches a Settings instance (hence before importing app.main).
 Settings.model_config["env_file"] = None
 os.environ.setdefault("LITELLM_MODE", "PRODUCTION")  # litellm loads ../.env into os.environ on import in DEV mode
+os.environ.setdefault("JWT_SECRET", "test-secret-" + "x" * 32)  # >=32 bytes: avoids InsecureKeyLengthWarning
 get_settings.cache_clear()
 
 from app.db import get_session  # noqa: E402
