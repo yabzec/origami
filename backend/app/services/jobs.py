@@ -1,11 +1,14 @@
+import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import text
 from sqlmodel import Session
 
 from app.models import Job, JobStatus
+from app.models.job import MAX_ATTEMPTS, RETRY_DELAYS  # noqa: F401  (re-exported policy)
+from app.services.notify import notify_job_failed
 
-BACKOFF_BASE_SECONDS = 30
+log = logging.getLogger("origami.jobs")
 
 CLAIM_SQL = text(
     """
@@ -48,15 +51,24 @@ def complete(session: Session, job: Job) -> None:
     session.commit()
 
 
+def retry_delay(attempts: int) -> timedelta:
+    """Wait before the next try after `attempts` failures (1-based); the last step repeats."""
+    return timedelta(seconds=RETRY_DELAYS[min(attempts - 1, len(RETRY_DELAYS) - 1)])
+
+
 def fail(session: Session, job: Job, error: str) -> None:
+    now = datetime.now(timezone.utc)
     job.attempts += 1
     job.last_error = error
-    job.updated_at = datetime.now(timezone.utc)
+    job.updated_at = now
     if job.attempts < job.max_attempts:
         job.status = JobStatus.queued
-        job.run_at = datetime.now(timezone.utc) + timedelta(
-            seconds=BACKOFF_BASE_SECONDS * 2**job.attempts
-        )
-    else:
-        job.status = JobStatus.failed
+        job.run_at = now + retry_delay(job.attempts)
+        session.commit()
+        return
+    job.status = JobStatus.failed
     session.commit()
+    try:
+        notify_job_failed(session, job)
+    except Exception:  # email problems must never crash or re-queue the worker
+        log.exception("Failure notification for job %s raised", job.id)

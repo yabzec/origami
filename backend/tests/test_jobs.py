@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.models import Job, JobStatus
 from app.models.job import MAX_ATTEMPTS, RETRY_DELAYS
+from app.services import jobs
 from app.services.jobs import claim_next, complete, enqueue, fail
 
 
@@ -42,3 +43,52 @@ def test_cancelled_job_is_never_claimed(session):
     job.status = JobStatus.cancelled
     session.commit()
     assert claim_next(session) is None
+
+
+def _claim_now(session, job_id):
+    job = session.get(Job, job_id)
+    job.run_at = datetime.now(timezone.utc)
+    session.commit()
+    return claim_next(session)
+
+
+def test_fail_retries_with_growing_delays_then_fails_and_notifies(session, monkeypatch):
+    notified = []
+    monkeypatch.setattr(jobs, "notify_job_failed", lambda s, j: notified.append(j.id))
+    job_id = enqueue(session, "process_document", {}).id
+    claimed = claim_next(session)
+
+    delays = []
+    for n in range(1, 5):
+        fail(session, claimed, f"boom{n}")
+        fresh = session.get(Job, job_id)
+        assert (fresh.status, fresh.attempts, fresh.last_error) == (JobStatus.queued, n, f"boom{n}")
+        # run_at and updated_at come from the same "now" inside fail()
+        delays.append((fresh.run_at - fresh.updated_at).total_seconds())
+        claimed = _claim_now(session, job_id)
+    assert delays == [30, 120, 600, 1800]
+    assert notified == []
+
+    fail(session, claimed, "boom5")
+    fresh = session.get(Job, job_id)
+    assert (fresh.status, fresh.attempts) == (JobStatus.failed, 5)
+    assert notified == [job_id]
+
+
+def test_retry_delay_caps_at_last_step():
+    assert jobs.retry_delay(1) == timedelta(seconds=30)
+    assert jobs.retry_delay(4) == timedelta(seconds=1800)
+    assert jobs.retry_delay(9) == timedelta(seconds=1800)  # jobs with a larger max_attempts
+
+
+def test_fail_survives_notification_error(session, monkeypatch):
+    def explode(s, j):
+        raise RuntimeError("smtp exploded")
+
+    monkeypatch.setattr(jobs, "notify_job_failed", explode)
+    enqueue(session, "process_document", {})
+    job = claim_next(session)
+    job.attempts = job.max_attempts - 1
+    session.commit()
+    fail(session, job, "last")  # must not raise
+    assert session.get(Job, job.id).status == JobStatus.failed

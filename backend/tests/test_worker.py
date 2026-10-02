@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import pytest
 from sqlalchemy import text
 from sqlmodel import Session
@@ -24,7 +26,7 @@ def test_run_once_dispatches_and_completes(engine, session):
 
     enqueue(session, "echo", {"v": 1})
     assert runner.run_once(engine) is True
-    assert calls == [{"v": 1}]
+    assert calls == [{"v": 1, "_attempt": 1, "_final_attempt": False}]
     with Session(engine) as s:
         assert s.get(Job, 1).status == JobStatus.done
 
@@ -78,3 +80,34 @@ def test_recover_resets_running(engine, session):
     assert runner.recover(engine) == 1
     with Session(engine) as s:
         assert s.get(Job, 1).status == JobStatus.queued
+
+
+def test_run_once_passes_attempt_info_without_storing_it(engine, session):
+    seen = []
+
+    @runner.register("peek")
+    def handle_peek(s: Session, payload: dict) -> None:
+        seen.append(dict(payload))
+        raise RuntimeError("again")
+
+    enqueue(session, "peek", {"v": 1})
+    runner.run_once(engine)
+    assert seen == [{"v": 1, "_attempt": 1, "_final_attempt": False}]
+    with Session(engine) as s:
+        job = s.get(Job, 1)
+        assert job.payload == {"v": 1}
+        job.attempts = job.max_attempts - 1  # the next run is the last one
+        job.run_at = datetime.now(timezone.utc)
+        s.commit()
+
+    runner.run_once(engine)
+    assert seen[-1] == {"v": 1, "_attempt": 5, "_final_attempt": True}
+    with Session(engine) as s:
+        job = s.get(Job, 1)
+        assert job.payload == {"v": 1}
+        assert job.status == JobStatus.failed
+
+
+def test_is_final_attempt_defaults_to_true_for_direct_calls():
+    assert runner.is_final_attempt({}) is True
+    assert runner.is_final_attempt({"_final_attempt": False}) is False

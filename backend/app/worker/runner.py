@@ -21,6 +21,11 @@ def register(job_type: str):
     return decorator
 
 
+def is_final_attempt(payload: dict) -> bool:
+    """True on the job's last try. Direct calls without runner info (tests, scripts) count as final."""
+    return payload.get("_final_attempt", True)
+
+
 def run_once(engine) -> bool:
     with Session(engine) as session:
         job = claim_next(session)
@@ -30,8 +35,14 @@ def run_once(engine) -> bool:
         if handler is None:
             fail(session, job, f"No handler for job type {job.type!r}")
             return True
+        # handlers see attempt info in a copy; the stored payload stays untouched
+        payload = {
+            **job.payload,
+            "_attempt": job.attempts + 1,
+            "_final_attempt": job.attempts + 1 >= job.max_attempts,
+        }
         try:
-            handler(session, job.payload)
+            handler(session, payload)
         except Exception:
             session.rollback()
             log.exception("Job %s failed", job.id)
