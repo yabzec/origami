@@ -93,7 +93,9 @@ def fake_scanner(client):
 @pytest.fixture
 def llm_stub(monkeypatch):
     """Stub the ONLY sanctioned mock boundary: app.services.llm."""
-    calls = {"embed": [], "describe": []}
+    from app.services.llm import Description
+
+    calls = {"embed": [], "describe": [], "translate": [], "language": "it", "translate_error": None}
 
     def fake_embed(texts):
         calls["embed"].append(list(texts))
@@ -101,8 +103,15 @@ def llm_stub(monkeypatch):
 
     def fake_describe(text=None, image_path=None):
         calls["describe"].append({"text": text, "image_path": image_path})
-        return "Descrizione generata."
+        return Description("Descrizione generata.", calls["language"])
+
+    def fake_translate(text, target_language):
+        calls["translate"].append((text, target_language))
+        if calls["translate_error"] is not None:
+            raise calls["translate_error"]
+        return f"[{target_language}] {text}"
 
     monkeypatch.setattr("app.worker.pipeline.llm_embed", fake_embed)
     monkeypatch.setattr("app.worker.pipeline.llm_describe", fake_describe)
+    monkeypatch.setattr("app.worker.pipeline.llm_translate", fake_translate)
     return calls

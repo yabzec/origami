@@ -63,12 +63,12 @@ def test_worker_compiles_scan_end_to_end(
     assert doc.page_count == 2
     assert doc.file_path == f"files/{doc.id}.pdf"
     assert storage.abs_path(doc.file_path).exists()
-    assert doc.summary is None  # scans get no LLM summary
+    assert doc.summary == "Descrizione generata."  # scans with OCR text are summarized
     session.expire_all()
     assert session.get(ScanSession, sid).status == ScanSessionStatus.done
     assert not (storage.tmp_scans_dir / str(sid)).exists()
     sources = {c.source for c in session.exec(select(Chunk).where(Chunk.document_id == doc.id))}
-    assert sources == {ChunkSource.content, ChunkSource.metadata}
+    assert sources == {ChunkSource.content, ChunkSource.summary, ChunkSource.metadata}
 
 
 def test_sweep_purges_old_sessions(session, storage, engine, monkeypatch):

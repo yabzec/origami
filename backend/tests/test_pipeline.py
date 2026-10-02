@@ -238,3 +238,74 @@ def test_image_summary_falls_back_to_vision_when_little_text(session, pipeline_s
 
     pipeline._ensure_summary(session, doc, pipeline_storage)
     assert llm_stub["describe"][-1]["image_path"] is not None  # vision fallback
+
+
+def _text_doc(session, pipeline_storage, body="Erster Absatz.\n\nZweiter Absatz."):
+    doc = make_doc(session, doc_type=DocType.text, title="Brief")
+    rel, _ = pipeline_storage.store_file(doc.id, ".md", body.encode())
+    doc.file_path = rel
+    session.commit()
+    return doc
+
+
+def test_italian_document_is_not_translated(session, pipeline_storage, llm_stub):
+    doc = run(session, _text_doc(session, pipeline_storage))
+    assert doc.detected_language == "it"
+    assert doc.translation_status is None
+    assert llm_stub["translate"] == []
+    assert ChunkSource.translation not in chunks_by_source(session, doc)
+
+
+def test_german_document_gets_translation_chunks(session, pipeline_storage, llm_stub):
+    llm_stub["language"] = "de"
+    doc = run(session, _text_doc(session, pipeline_storage))
+    assert doc.status == DocStatus.ready
+    assert doc.detected_language == "de"
+    assert doc.translation_status == "done"
+    by_source = chunks_by_source(session, doc)
+    content = sorted(by_source[ChunkSource.content], key=lambda c: c.chunk_index)
+    translated = sorted(by_source[ChunkSource.translation], key=lambda c: c.chunk_index)
+    assert len(translated) == len(content)
+    assert [t.page_number for t in translated] == [c.page_number for c in content]
+    assert translated[0].content.startswith("[it] ")
+    assert all(t.embedding is not None for t in translated)
+
+
+def test_translation_failure_is_not_fatal(session, pipeline_storage, llm_stub):
+    llm_stub["language"] = "de"
+    llm_stub["translate_error"] = RuntimeError("provider down")
+    doc = run(session, _text_doc(session, pipeline_storage))
+    assert doc.status == DocStatus.ready
+    assert doc.translation_status == "failed"
+    assert ChunkSource.translation not in chunks_by_source(session, doc)
+
+
+def test_unknown_language_skips_translation(session, pipeline_storage, llm_stub):
+    llm_stub["language"] = None  # e.g. describe() got non-JSON and fell back to raw text
+    doc = run(session, _text_doc(session, pipeline_storage))
+    assert doc.status == DocStatus.ready
+    assert doc.summary == "Descrizione generata."
+    assert doc.detected_language is None
+    assert llm_stub["translate"] == []
+
+
+def test_scan_with_ocr_text_gets_summary_and_language(
+    auth_client, fake_scanner, storage, session, engine, llm_stub, monkeypatch
+):
+    from app.worker.runner import run_once
+
+    monkeypatch.setattr(pipeline, "get_pipeline_storage", lambda: storage)
+    fake_scanner._labels = iter(["RECHNUNG NUMMER 123 FUER HERRN MUELLER"] * 2)
+    llm_stub["language"] = "de"
+    sid = auth_client.post("/api/scan/sessions", json={"ocr_languages": "eng"}).json()["id"]
+    auth_client.post(f"/api/scan/sessions/{sid}/pages", json={})
+    doc_id = auth_client.post(f"/api/scan/sessions/{sid}/compile", json={"title": "Rechnung"}).json()["id"]
+
+    assert run_once(engine) is True
+    doc = session.get(Document, doc_id)
+    session.refresh(doc)
+    assert doc.status == DocStatus.ready
+    assert ChunkSource.content in chunks_by_source(session, doc)
+    assert doc.summary == "Descrizione generata."
+    assert doc.detected_language == "de"
+    assert doc.translation_status == "done"

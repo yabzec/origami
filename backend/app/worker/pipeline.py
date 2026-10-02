@@ -3,8 +3,8 @@ from datetime import datetime, timedelta, timezone
 
 from sqlmodel import Session, select
 
-from app.config import get_settings
-from app.models import Chunk, ChunkSource, DocStatus, DocType, Document
+from app.config import get_primary_language, get_settings
+from app.models import Chunk, ChunkSource, DocStatus, DocType, Document, TranslationStatus
 from app.services.chunking import chunk_pages
 from app.services.extract import (
     extract_docx,
@@ -14,6 +14,7 @@ from app.services.extract import (
 )
 from app.services.llm import describe as llm_describe
 from app.services.llm import embed as llm_embed
+from app.services.llm import translate as llm_translate
 from app.services.ocr import images_to_pdf, images_to_searchable_pdf, ocr_image, pdf_to_searchable_pdf
 from app.services.storage import Storage
 from app.worker.runner import register
@@ -42,6 +43,7 @@ def process_document(session: Session, payload: dict) -> None:
         pages = _extract_content(session, doc, storage, payload)
         _ensure_content_chunks(session, doc, pages)
         _ensure_summary(session, doc, storage)
+        _ensure_translation(session, doc)
         _ensure_metadata_chunk(session, doc)
         _embed_pending_chunks(session, doc)
 
@@ -155,40 +157,71 @@ def _ensure_content_chunks(
     session.commit()
 
 
+def _content_chunks(session: Session, doc: Document) -> list[Chunk]:
+    return list(
+        session.exec(
+            select(Chunk)
+            .where(Chunk.document_id == doc.id, Chunk.source == ChunkSource.content)
+            .order_by(Chunk.chunk_index)
+        ).all()
+    )
+
+
 def _ensure_summary(session: Session, doc: Document, storage: Storage) -> None:
-    if doc.doc_type in (DocType.video, DocType.scan) or doc.summary is not None:
+    if doc.doc_type == DocType.video or doc.summary is not None:
         return
-    if doc.doc_type == DocType.image:
-        content_chunks = session.exec(
-            select(Chunk)
-            .where(Chunk.document_id == doc.id, Chunk.source == ChunkSource.content)
-            .order_by(Chunk.chunk_index)
-        ).all()
-        ocr_text = "\n\n".join(c.content for c in content_chunks).strip()
-        if len(ocr_text) >= IMAGE_SUMMARY_TEXT_THRESHOLD:
-            summary = llm_describe(text=ocr_text[:SUMMARY_INPUT_CHARS])
-        else:
-            # No usable extracted text (a photo, or no-OCR) — send the file to vision.
-            summary = llm_describe(image_path=storage.abs_path(doc.file_path))
+    text = "\n\n".join(c.content for c in _content_chunks(session, doc)).strip()
+    if doc.doc_type == DocType.image and len(text) < IMAGE_SUMMARY_TEXT_THRESHOLD:
+        # No usable extracted text (a photo, or no-OCR) — send the file to vision.
+        result = llm_describe(image_path=storage.abs_path(doc.file_path))
+    elif text:
+        result = llm_describe(text=text[:SUMMARY_INPUT_CHARS])
     else:
-        content_chunks = session.exec(
-            select(Chunk)
-            .where(Chunk.document_id == doc.id, Chunk.source == ChunkSource.content)
-            .order_by(Chunk.chunk_index)
-        ).all()
-        text = "\n\n".join(c.content for c in content_chunks)[:SUMMARY_INPUT_CHARS]
-        if not text.strip():
-            return
-        summary = llm_describe(text=text)
-    doc.summary = summary
+        return  # nothing to summarize (e.g. a no-OCR scan or an empty PDF)
+    doc.summary = result.summary
+    doc.detected_language = result.language
     session.add(
         Chunk(
             document_id=doc.id,
             chunk_index=_next_chunk_index(session, doc),
             source=ChunkSource.summary,
-            content=summary,
+            content=result.summary,
         )
     )
+    session.commit()
+
+
+def _ensure_translation(session: Session, doc: Document) -> None:
+    target = get_primary_language()
+    if not doc.detected_language or doc.detected_language == target:
+        return
+    if doc.translation_status == TranslationStatus.done and _has_chunks(
+        session, doc, ChunkSource.translation
+    ):
+        return
+    content_chunks = _content_chunks(session, doc)
+    if not content_chunks:
+        return
+    try:
+        # translate everything first so a failure never leaves partial translation chunks
+        translated = [(c, llm_translate(c.content, target)) for c in content_chunks]
+    except Exception:
+        log.exception("Translation failed for document %s", doc.id)
+        doc.translation_status = TranslationStatus.failed
+        session.commit()
+        return
+    next_index = _next_chunk_index(session, doc)
+    for offset, (chunk, text) in enumerate(translated):
+        session.add(
+            Chunk(
+                document_id=doc.id,
+                chunk_index=next_index + offset,
+                page_number=chunk.page_number,
+                source=ChunkSource.translation,
+                content=text,
+            )
+        )
+    doc.translation_status = TranslationStatus.done
     session.commit()
 
 

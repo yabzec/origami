@@ -17,19 +17,27 @@ def test_embed_returns_vectors_in_input_order(monkeypatch):
     assert vectors == [[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]]
 
 
-def test_describe_text(monkeypatch):
-    captured = {}
-
+def _completion_returning(content, captured):
     def fake_completion(model, messages):
         captured["model"] = model
         captured["content"] = messages[0]["content"]
-        msg = SimpleNamespace(content="  Una fattura del 2026.  ")
+        msg = SimpleNamespace(content=content)
         return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
 
-    monkeypatch.setattr(litellm, "completion", fake_completion)
+    return fake_completion
+
+
+def test_describe_text(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        litellm,
+        "completion",
+        _completion_returning('{"summary": " Una fattura del 2026. ", "language": "DE"}', captured),
+    )
     result = llm.describe(text="FATTURA n. 42 del 2026...")
-    assert result == "Una fattura del 2026."
+    assert result == llm.Description("Una fattura del 2026.", "de")
     assert "FATTURA n. 42" in captured["content"]
+    assert "Italian" in captured["content"]  # summary requested in the primary language
     assert captured["model"] == "gemini/gemini-2.5-flash"
 
 
@@ -37,19 +45,33 @@ def test_describe_image(monkeypatch, tmp_path):
     img = tmp_path / "photo.png"
     img.write_bytes(b"\x89PNG fake")
     captured = {}
-
-    def fake_completion(model, messages):
-        captured["model"] = model
-        captured["parts"] = messages[0]["content"]
-        msg = SimpleNamespace(content="A receipt photo.")
-        return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
-
-    monkeypatch.setattr(litellm, "completion", fake_completion)
+    monkeypatch.setattr(
+        litellm, "completion", _completion_returning('{"summary": "Uno scontrino.", "language": "it"}', captured)
+    )
     result = llm.describe(image_path=img)
-    assert result == "A receipt photo."
-    kinds = [p["type"] for p in captured["parts"]]
+    assert result == llm.Description("Uno scontrino.", "it")
+    kinds = [p["type"] for p in captured["content"]]
     assert kinds == ["text", "image_url"]
-    assert captured["parts"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert captured["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+def test_parse_description_handles_fenced_json():
+    raw = '```json\n{"summary": "Contratto di affitto.", "language": "it"}\n```'
+    assert llm.parse_description(raw) == llm.Description("Contratto di affitto.", "it")
+
+
+def test_parse_description_falls_back_to_raw_text():
+    assert llm.parse_description("  Just prose, no JSON.  ") == llm.Description("Just prose, no JSON.", None)
+    assert llm.parse_description('{"summary": ""}') == llm.Description('{"summary": ""}', None)
+    assert llm.parse_description('["not", "an", "object"]').language is None
+
+
+def test_translate(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(litellm, "completion", _completion_returning("  Fattura numero 5  ", captured))
+    assert llm.translate("Rechnung Nummer 5", "it") == "Fattura numero 5"
+    assert "Italian" in captured["content"]
+    assert "Rechnung Nummer 5" in captured["content"]
 
 
 def test_complete_non_stream(monkeypatch):
