@@ -1,61 +1,25 @@
-import { useReducer, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Dialog } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
+import { PageCarousel } from "@/components/scan/PageCarousel";
+import { ScanPreview } from "@/components/scan/ScanPreview";
+import { emptyScanForm, ScanSidebar, type ScanFormFields } from "@/components/scan/ScanSidebar";
+import { ScanToolbar } from "@/components/scan/ScanToolbar";
 import { useFolders } from "@/hooks/useFolders";
+import { useLeaveGuard } from "@/hooks/useLeaveGuard";
 import { useTags } from "@/hooks/useTags";
-import { usePreviewImage } from "@/hooks/usePreviewImage";
 import { api, ApiError, getToken } from "@/lib/api";
-import { scanDeviceHint } from "@/lib/scanDevices";
-import {
-  initialScanState,
-  scannerMessage,
-  scanWizardReducer,
-} from "@/lib/scanWizard";
+import { DEFAULT_OCR_LANGUAGES } from "@/lib/ocrLanguages";
+import { initialScanState, scannerMessage, scanWizardReducer, shouldBlockLeave } from "@/lib/scanWizard";
 import type { Document, ScanDevice, ScanPageInfo, ScanStatus } from "@/lib/types";
-import { OcrLanguageSelect } from "@/components/OcrLanguageSelect";
 
-function Thumbnail({
-  page,
-  onDelete,
-  onMove,
-  isFirst,
-  isLast,
-}: {
-  page: ScanPageInfo;
-  onDelete: () => void;
-  onMove: (direction: -1 | 1) => void;
-  isFirst: boolean;
-  isLast: boolean;
-}) {
-  const url = usePreviewImage(page.id);
-  return (
-    <div className="w-36 rounded border border-zinc-200 bg-white p-2">
-      {url ? (
-        <img src={url} alt={`Page ${page.page_number}`} className="h-40 w-full rounded object-cover" />
-      ) : (
-        <div className="flex h-40 items-center justify-center text-zinc-300">…</div>
-      )}
-      <div className="mt-1 flex items-center justify-between text-xs text-zinc-500">
-        <span>p. {page.page_number}</span>
-        <span className="flex gap-1">
-          <button disabled={isFirst} onClick={() => onMove(-1)} title="Move up/left">
-            ←
-          </button>
-          <button disabled={isLast} onClick={() => onMove(1)} title="Move down/right">
-            →
-          </button>
-          <button onClick={onDelete} title="Delete page" className="text-red-500">
-            ×
-          </button>
-        </span>
-      </div>
-    </div>
-  );
+const LEAVE_MESSAGE = "You have unsaved scanned pages. Leave and discard them?";
+
+function errorInfo(err: unknown): { code: string; message: string } {
+  return err instanceof ApiError
+    ? { code: err.code, message: err.message }
+    : { code: "unknown", message: "Unexpected error" };
 }
 
 export function ScanPage() {
@@ -65,55 +29,94 @@ export function ScanPage() {
     queryFn: () => api.get<ScanStatus>("/api/scan/status"),
     refetchInterval: 10_000,
   });
-  const { data: folders } = useFolders();
-  const { data: tags } = useTags();
   const { data: deviceData } = useQuery({
     queryKey: ["scan-devices"],
     queryFn: () => api.get<{ devices: ScanDevice[]; default: string | null }>("/api/scan/devices"),
   });
-  const devices = deviceData?.devices ?? [];
+  const { data: folders } = useFolders();
+  const { data: tags } = useTags();
+
   const [device, setDevice] = useState<string | null>(null);
   const chosenDevice = device ?? deviceData?.default ?? null;
-
+  const [languages, setLanguages] = useState(DEFAULT_OCR_LANGUAGES);
   const [ocrEnabled, setOcrEnabled] = useState(true);
+  const [fields, setFields] = useState<ScanFormFields>(emptyScanForm);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
+  const startInFlight = useRef(false); // StrictMode re-runs effects: create exactly one session
 
-  const [compileOpen, setCompileOpen] = useState(false);
-  const [title, setTitle] = useState("");
-  const [folderId, setFolderId] = useState<number | null>(null);
-  const [tagIds, setTagIds] = useState<number[]>([]);
+  const clearPreview = useCallback(() => {
+    setPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+  }, []);
 
-  const fail = (kind: "SCAN_FAILED" | "COMPILE_FAILED") => (err: unknown) => {
-    const code = err instanceof ApiError ? err.code : "unknown";
-    const message = err instanceof ApiError ? err.message : "Unexpected error";
-    dispatch({ type: kind, code, message });
-  };
-
-  const startSession = async () => {
-    try {
-      const session = await api.post<{ id: number }>("/api/scan/sessions", {
-        ocr_languages: state.languages,
+  useEffect(() => {
+    if (state.phase !== "starting" || state.error !== null || startInFlight.current) return;
+    startInFlight.current = true;
+    api
+      .post<{ id: number }>("/api/scan/sessions", {
+        ocr_languages: languages,
         ocr_enabled: ocrEnabled,
         device: chosenDevice,
+      })
+      .then((session) => dispatch({ type: "SESSION_STARTED", sessionId: session.id }))
+      .catch((err) => dispatch({ type: "SESSION_FAILED", ...errorInfo(err) }))
+      .finally(() => {
+        startInFlight.current = false;
       });
-      dispatch({ type: "SESSION_STARTED", sessionId: session.id });
-    } catch (err) {
-      fail("SCAN_FAILED")(err);
+    // languages/ocrEnabled/device are only defaults here; compile and page scans send the current values
+  }, [state.phase, state.error]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const leaveSession = useCallback(() => {
+    if (state.sessionId !== null) api.del(`/api/scan/sessions/${state.sessionId}`).catch(() => {});
+  }, [state.sessionId]);
+  useLeaveGuard(shouldBlockLeave(state), LEAVE_MESSAGE, leaveSession);
+
+  const preview = async () => {
+    setPreviewing(true);
+    try {
+      const resp = await fetch("/api/scan/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        body: JSON.stringify({ device: chosenDevice }),
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => null);
+        dispatch({
+          type: "SCAN_FAILED",
+          code: data?.error?.code ?? "unknown",
+          message: data?.error?.message ?? "Preview failed",
+        });
+        return;
+      }
+      const url = URL.createObjectURL(await resp.blob());
+      setPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return url;
+      });
+    } finally {
+      setPreviewing(false);
     }
   };
 
   const scanPage = async () => {
+    clearPreview();
     dispatch({ type: "SCAN_STARTED" });
     try {
-      const page = await api.post<ScanPageInfo & { preview_url: string }>(
-        `/api/scan/sessions/${state.sessionId}/pages`,
-        {},
-      );
+      const page = await api.post<ScanPageInfo>(`/api/scan/sessions/${state.sessionId}/pages`, {
+        device: chosenDevice,
+      });
       dispatch({ type: "PAGE_SCANNED", page: { id: page.id, page_number: page.page_number } });
     } catch (err) {
-      fail("SCAN_FAILED")(err);
+      dispatch({ type: "SCAN_FAILED", ...errorInfo(err) });
     }
+  };
+
+  const selectPage = (pageId: number) => {
+    clearPreview();
+    dispatch({ type: "SELECT_PAGE", pageId });
   };
 
   const deletePage = async (pageId: number) => {
@@ -121,7 +124,7 @@ export function ScanPage() {
       await api.del(`/api/scan/pages/${pageId}`);
       dispatch({ type: "PAGE_DELETED", pageId });
     } catch (err) {
-      fail("SCAN_FAILED")(err);
+      dispatch({ type: "SCAN_FAILED", ...errorInfo(err) });
     }
   };
 
@@ -130,174 +133,74 @@ export function ScanPage() {
     const target = index + direction;
     [order[index], order[target]] = [order[target], order[index]];
     try {
-      const resp = await api.post<{ pages: ScanPageInfo[] }>(
-        `/api/scan/sessions/${state.sessionId}/reorder`,
-        { page_ids: order },
-      );
+      const resp = await api.post<{ pages: ScanPageInfo[] }>(`/api/scan/sessions/${state.sessionId}/reorder`, {
+        page_ids: order,
+      });
       dispatch({ type: "PAGES_REORDERED", pages: resp.pages });
     } catch (err) {
-      fail("SCAN_FAILED")(err);
+      dispatch({ type: "SCAN_FAILED", ...errorInfo(err) });
     }
   };
 
-  const compile = async () => {
-    setCompileOpen(false);
+  const finish = async () => {
     dispatch({ type: "COMPILE_STARTED" });
     try {
       const doc = await api.post<Document>(`/api/scan/sessions/${state.sessionId}/compile`, {
-        title,
-        folder_id: folderId,
-        tag_ids: tagIds,
+        title: fields.title.trim(),
+        description: fields.description,
+        document_date: fields.documentDate || null,
+        folder_id: fields.folderId,
+        tag_ids: fields.tagIds,
+        ocr_languages: languages,
+        ocr_enabled: ocrEnabled,
       });
+      clearPreview();
       dispatch({ type: "COMPILED", document: doc });
     } catch (err) {
-      fail("COMPILE_FAILED")(err);
+      dispatch({ type: "COMPILE_FAILED", ...errorInfo(err) });
     }
   };
 
-  const cancel = async () => {
+  const startOver = () => {
+    clearPreview();
+    setFields(emptyScanForm());
+    dispatch({ type: "RESET" }); // phase "starting" → effect creates a new session
+  };
+
+  const discard = async () => {
+    if (state.pages.length > 0 && !window.confirm("Discard all scanned pages?")) return;
     if (state.sessionId !== null) await api.del(`/api/scan/sessions/${state.sessionId}`).catch(() => {});
-    dispatch({ type: "RESET" });
+    startOver();
   };
 
   return (
-    <div className="p-6">
-      <h2 className="mb-2 text-lg font-semibold">Scan</h2>
-      {status && (
-        <p className="mb-4 text-sm">
-          Scanner:{" "}
-          {status.available ? (
-            <span className="text-green-700">available{status.busy ? " (busy)" : ""}</span>
-          ) : (
-            <span className="text-red-600">not detected — check power and USB</span>
-          )}
-        </p>
-      )}
+    <div className="flex flex-col gap-4 p-6">
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 className="text-lg font-semibold">Scan</h2>
+        <div className="ml-auto">
+          <ScanToolbar
+            status={status}
+            devices={deviceData?.devices ?? []}
+            device={chosenDevice}
+            onDeviceChange={setDevice}
+            languages={languages}
+            onLanguagesChange={setLanguages}
+            ocrEnabled={ocrEnabled}
+            onOcrEnabledChange={setOcrEnabled}
+          />
+        </div>
+      </div>
+
       {state.error && (
-        <div className="mb-4 flex items-center justify-between rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="flex items-center justify-between rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           <span>{scannerMessage(state.error.code, state.error.message)}</span>
-          <button onClick={() => dispatch({ type: "DISMISS_ERROR" })}>×</button>
+          <button onClick={() => dispatch({ type: "DISMISS_ERROR" })}>
+            {state.phase === "starting" ? "Retry" : "×"}
+          </button>
         </div>
       )}
 
-      {state.phase === "setup" && (
-        <div className="max-w-sm space-y-3">
-          {ocrEnabled && (
-            <div>
-              <Label htmlFor="scan-lang">OCR language</Label>
-              <OcrLanguageSelect
-                id="scan-lang"
-                value={state.languages}
-                onChange={(e) => dispatch({ type: "SET_LANGUAGES", languages: e.target.value })}
-              />
-            </div>
-          )}
-          {scanDeviceHint(devices) === "none" && (
-            <p className="text-sm text-red-600">No scanner detected — check power and USB.</p>
-          )}
-          {scanDeviceHint(devices) === "single" && (
-            <p className="text-sm text-zinc-600">Scanner: {devices[0].name}</p>
-          )}
-          {scanDeviceHint(devices) === "multiple" && (
-            <div>
-              <Label htmlFor="scan-device">Scanner</Label>
-              <Select
-                id="scan-device"
-                value={chosenDevice ?? ""}
-                onChange={(e) => setDevice(e.target.value || null)}
-              >
-                {devices.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          )}
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={ocrEnabled} onChange={(e) => setOcrEnabled(e.target.checked)} />
-            Run OCR (extract text)
-          </label>
-          <div>
-            <Button
-              variant="outline"
-              disabled={previewing}
-              onClick={async () => {
-                setPreviewing(true);
-                try {
-                  const resp = await fetch("/api/scan/preview", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
-                    body: JSON.stringify({ device: chosenDevice }),
-                  });
-                  if (resp.ok) {
-                    if (previewUrl) URL.revokeObjectURL(previewUrl);
-                    setPreviewUrl(URL.createObjectURL(await resp.blob()));
-                  }
-                } finally {
-                  setPreviewing(false);
-                }
-              }}
-            >
-              {previewing ? "Previewing…" : "Preview"}
-            </Button>
-            {previewUrl && (
-              <div className="mt-2">
-                <img src={previewUrl} alt="scan preview" className="max-h-64 rounded border" />
-                <button
-                  className="mt-1 block text-xs text-zinc-500"
-                  onClick={() => {
-                    URL.revokeObjectURL(previewUrl);
-                    setPreviewUrl(null);
-                  }}
-                >
-                  clear preview
-                </button>
-              </div>
-            )}
-          </div>
-          <Button onClick={startSession}>Start scan session</Button>
-        </div>
-      )}
-
-      {(state.phase === "ready" || state.phase === "scanning" || state.phase === "compiling") && (
-        <div>
-          <div className="mb-4 flex flex-wrap gap-3">
-            {state.pages.map((p, index) => (
-              <Thumbnail
-                key={p.id}
-                page={p}
-                isFirst={index === 0}
-                isLast={index === state.pages.length - 1}
-                onDelete={() => deletePage(p.id)}
-                onMove={(direction) => movePage(index, direction)}
-              />
-            ))}
-            {state.pages.length === 0 && <p className="text-zinc-400">No pages yet — scan the first one.</p>}
-          </div>
-          <div className="flex gap-2">
-            <Button onClick={scanPage} disabled={state.phase !== "ready"}>
-              {state.phase === "scanning" ? "Scanning…" : state.pages.length === 0 ? "Scan first page" : "Scan next page"}
-            </Button>
-            <Button
-              variant="outline"
-              disabled={state.pages.length === 0 || state.phase !== "ready"}
-              onClick={() => {
-                setTitle("");
-                setCompileOpen(true);
-              }}
-            >
-              Finish & compile
-            </Button>
-            <Button variant="ghost" onClick={cancel}>
-              Cancel
-            </Button>
-          </div>
-          {state.phase === "compiling" && <p className="mt-3 text-sm text-zinc-500">Compiling document…</p>}
-        </div>
-      )}
-
-      {state.phase === "done" && state.document && (
+      {state.phase === "done" && state.document ? (
         <div className="space-y-3">
           <p>
             Document created:{" "}
@@ -306,58 +209,43 @@ export function ScanPage() {
             </Link>{" "}
             (processing in the background)
           </p>
-          <Button onClick={() => dispatch({ type: "RESET" })}>Scan another document</Button>
+          <Button onClick={startOver}>Scan another document</Button>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-6 lg:flex-row">
+          <div className="min-w-0 flex-1 space-y-3">
+            <ScanPreview
+              pageId={state.selectedPageId}
+              previewUrl={previewUrl}
+              scanning={state.phase === "scanning"}
+            />
+            <PageCarousel
+              pages={state.pages}
+              selectedPageId={state.selectedPageId}
+              disabled={state.phase !== "ready"}
+              onSelect={selectPage}
+              onMove={movePage}
+              onDelete={deletePage}
+            />
+            {state.phase === "starting" && !state.error && (
+              <p className="text-sm text-zinc-500">Starting scan session…</p>
+            )}
+          </div>
+          <ScanSidebar
+            fields={fields}
+            onChange={(patch) => setFields((prev) => ({ ...prev, ...patch }))}
+            folders={folders ?? []}
+            tags={tags ?? []}
+            phase={state.phase}
+            pageCount={state.pages.length}
+            previewing={previewing}
+            onPreview={preview}
+            onScan={scanPage}
+            onFinish={finish}
+            onDiscard={discard}
+          />
         </div>
       )}
-
-      <Dialog open={compileOpen} onClose={() => setCompileOpen(false)} title="Compile document">
-        <div className="space-y-3">
-          <div>
-            <Label htmlFor="c-title">Title</Label>
-            <Input id="c-title" value={title} onChange={(e) => setTitle(e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="c-folder">Folder</Label>
-            <Select
-              id="c-folder"
-              value={folderId ?? ""}
-              onChange={(e) => setFolderId(e.target.value ? Number(e.target.value) : null)}
-            >
-              <option value="">(root)</option>
-              {(folders ?? []).map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.name}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label>Tags</Label>
-            <div className="flex flex-wrap gap-2">
-              {(tags ?? []).map((tag) => (
-                <label key={tag.id} className="flex items-center gap-1 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={tagIds.includes(tag.id)}
-                    onChange={(e) =>
-                      setTagIds(e.target.checked ? [...tagIds, tag.id] : tagIds.filter((x) => x !== tag.id))
-                    }
-                  />
-                  {tag.name}
-                </label>
-              ))}
-            </div>
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setCompileOpen(false)}>
-              Back
-            </Button>
-            <Button onClick={compile} disabled={!title.trim()}>
-              Compile
-            </Button>
-          </div>
-        </div>
-      </Dialog>
     </div>
   );
 }
