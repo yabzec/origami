@@ -153,3 +153,29 @@ def test_patch_null_document_date_is_ignored(auth_client, session):
     assert resp.status_code == 200
     assert resp.json()["document_date"] == "2019-03-04"
     assert resp.json()["title"] == "T2"
+
+
+def test_document_text_translation_variant(auth_client, session):
+    from app.models import ChunkSource
+    from tests.helpers import seed_document
+
+    doc = seed_document(
+        session,
+        "Brief",
+        [
+            {"content": "Hallo Welt", "page_number": 1},
+            {"content": "Ciao mondo", "page_number": 1, "source": ChunkSource.translation},
+        ],
+        detected_language="de",
+        translation_status="done",
+    )
+    original = auth_client.get(f"/api/documents/{doc.id}/text").json()
+    assert [c["content"] for c in original["chunks"]] == ["Hallo Welt"]
+    assert original["variant"] == "content"
+    assert original["detected_language"] == "de"
+    assert original["translation_status"] == "done"
+    assert original["translation_language"] == "it"
+
+    translated = auth_client.get(f"/api/documents/{doc.id}/text?variant=translation").json()
+    assert [c["content"] for c in translated["chunks"]] == ["Ciao mondo"]
+    assert auth_client.get(f"/api/documents/{doc.id}/text?variant=bogus").status_code == 422

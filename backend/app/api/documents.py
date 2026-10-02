@@ -1,11 +1,13 @@
 import uuid
 from datetime import date, datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.api.deps import api_error, get_current_user
+from app.config import get_primary_language
 from app.db import get_session
 from app.models import Chunk, ChunkSource, Document, DocumentTag, Folder, Tag
 from app.services.storage import Storage, get_storage
@@ -72,15 +74,24 @@ def get_document(document_id: uuid.UUID, session: Session = Depends(get_session)
 
 
 @router.get("/{document_id}/text")
-def document_text(document_id: uuid.UUID, session: Session = Depends(get_session)) -> dict:
+def document_text(
+    document_id: uuid.UUID,
+    variant: Literal["content", "translation"] = "content",
+    session: Session = Depends(get_session),
+) -> dict:
     doc = get_doc_or_404(session, document_id)
+    source = ChunkSource.translation if variant == "translation" else ChunkSource.content
     chunks = session.exec(
         select(Chunk)
-        .where(Chunk.document_id == doc.id, Chunk.source == ChunkSource.content)
+        .where(Chunk.document_id == doc.id, Chunk.source == source)
         .order_by(Chunk.chunk_index)
     ).all()
     return {
         "summary": doc.summary,
+        "variant": variant,
+        "detected_language": doc.detected_language,
+        "translation_status": doc.translation_status,
+        "translation_language": get_primary_language(),
         "chunks": [
             {"chunk_index": c.chunk_index, "page_number": c.page_number, "content": c.content}
             for c in chunks
