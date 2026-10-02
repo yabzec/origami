@@ -1,5 +1,6 @@
 import { Link } from "react-router";
 import { Badge } from "@/components/ui/badge";
+import { formatDate } from "@/lib/dates";
 import type { Document } from "@/lib/types";
 
 export const STATUS_VARIANTS = {
@@ -40,8 +41,9 @@ export function DocumentCard({ doc, onDelete }: { doc: Document; onDelete: (id: 
           ))}
         </div>
         <p className="mt-2 text-xs text-zinc-400">
-          {doc.page_count ? `${doc.page_count} pages · ` : ""}
-          {doc.file_size ? `${Math.round(doc.file_size / 1024)} KB` : ""}
+          {formatDate(doc.document_date)}
+          {doc.page_count ? ` · ${doc.page_count} pages` : ""}
+          {doc.file_size ? ` · ${Math.round(doc.file_size / 1024)} KB` : ""}
         </p>
       </Link>
       <button

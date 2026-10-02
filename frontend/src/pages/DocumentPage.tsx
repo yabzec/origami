@@ -8,9 +8,12 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { STATUS_VARIANTS } from "@/components/DocumentCard";
+import { OcrLanguageSelect } from "@/components/OcrLanguageSelect";
 import { useFolders } from "@/hooks/useFolders";
 import { useTags } from "@/hooks/useTags";
-import { api, fileUrl } from "@/lib/api";
+import { api, ApiError, fileUrl } from "@/lib/api";
+import { DEFAULT_OCR_LANGUAGES } from "@/lib/ocrLanguages";
+import { languageLabel, textVariants, type TextVariant } from "@/lib/translation";
 import type { Document, DocumentText } from "@/lib/types";
 import { viewerKind } from "@/lib/viewer";
 
@@ -22,17 +25,39 @@ function Viewer({ doc }: { doc: Document }) {
   if (kind === "pdf") return <iframe title="preview" src={src} className="h-[75vh] w-full rounded border" />;
   if (kind === "image") return <img src={src} alt={doc.title} className="max-h-[75vh] rounded border" />;
   if (kind === "video") return <video controls src={src} className="max-h-[75vh] w-full rounded border" />;
-  return <TextView documentId={doc.id} />;
+  return <TextView doc={doc} />;
 }
 
-function TextView({ documentId }: { documentId: string }) {
+function TextView({ doc }: { doc: Document }) {
+  const variants = textVariants(doc);
+  const [variant, setVariant] = useState<TextVariant>("content");
+  const active = variants.includes(variant) ? variant : "content";
   const { data } = useQuery({
-    queryKey: ["document-text", documentId],
-    queryFn: () => api.get<DocumentText>(`/api/documents/${documentId}/text`),
+    queryKey: ["document-text", doc.id, active],
+    queryFn: () => api.get<DocumentText>(`/api/documents/${doc.id}/text?variant=${active}`),
   });
   if (!data) return <p className="text-zinc-400">Loading…</p>;
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        {data.detected_language && <Badge variant="blue">Detected: {data.detected_language.toUpperCase()}</Badge>}
+        {variants.length > 1 && (
+          <div className="inline-flex overflow-hidden rounded-md border border-zinc-300 text-sm">
+            {variants.map((v) => (
+              <button
+                key={v}
+                onClick={() => setVariant(v)}
+                className={active === v ? "bg-zinc-900 px-3 py-1 text-white" : "px-3 py-1 hover:bg-zinc-100"}
+              >
+                {v === "content" ? "Original" : languageLabel(data.translation_language)}
+              </button>
+            ))}
+          </div>
+        )}
+        {data.translation_status === "failed" && (
+          <span className="text-xs text-amber-700">Translation failed — re-process to retry.</span>
+        )}
+      </div>
       {data.summary && (
         <div className="rounded border border-zinc-200 bg-zinc-50 p-3 text-sm">
           <span className="font-medium">Summary: </span>
@@ -70,6 +95,10 @@ export function DocumentPage() {
   const [description, setDescription] = useState("");
   const [folderId, setFolderId] = useState<number | null>(null);
   const [tagIds, setTagIds] = useState<number[]>([]);
+  const [documentDate, setDocumentDate] = useState("");
+  const [ocrLanguages, setOcrLanguages] = useState(DEFAULT_OCR_LANGUAGES);
+  const [ocrEnabled, setOcrEnabled] = useState(true);
+  const lastStatus = useRef<string | null>(null);
 
   const hydratedForDocId = useRef<string | null>(null);
 
@@ -79,9 +108,20 @@ export function DocumentPage() {
       setDescription(doc.description);
       setFolderId(doc.folder_id);
       setTagIds(doc.tags.map((t) => t.id));
+      setDocumentDate(doc.document_date);
+      setOcrLanguages(doc.ocr_languages);
+      setOcrEnabled(doc.ocr_enabled);
       hydratedForDocId.current = doc.id;
     }
   }, [doc]);
+
+  useEffect(() => {
+    if (!doc) return;
+    // re-process finished: refetch extracted/translated text
+    if (lastStatus.current && lastStatus.current !== "ready" && doc.status === "ready")
+      qc.invalidateQueries({ queryKey: ["document-text", doc.id] });
+    lastStatus.current = doc.status;
+  }, [doc, qc]);
 
   const save = useMutation({
     mutationFn: () =>
@@ -90,6 +130,7 @@ export function DocumentPage() {
         description,
         folder_id: folderId,
         tag_ids: tagIds,
+        document_date: documentDate || null,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["document", id] });
@@ -103,6 +144,26 @@ export function DocumentPage() {
       navigate("/");
     },
   });
+
+  const reprocess = useMutation({
+    mutationFn: () =>
+      api.post<Document>(`/api/documents/${id}/reprocess`, {
+        ocr_languages: ocrLanguages,
+        ocr_enabled: ocrEnabled,
+      }),
+    onSuccess: (updated) => {
+      qc.setQueryData(["document", id], updated);
+      qc.invalidateQueries({ queryKey: ["documents"] });
+    },
+  });
+  const confirmReprocess = () => {
+    const base = "Re-run OCR and AI processing? Extracted text, summary and translation will be replaced.";
+    const pdfNote =
+      doc && (doc.doc_type === "pdf" || doc.doc_type === "scan") && ocrEnabled && doc.ocr_applied !== false
+        ? " The PDF is rebuilt from page images."
+        : "";
+    if (window.confirm(base + pdfNote)) reprocess.mutate();
+  };
 
   if (!doc) return <div className="p-8 text-zinc-400">Loading…</div>;
 
@@ -139,7 +200,7 @@ export function DocumentPage() {
             </button>
           ))}
         </div>
-        {tab === "preview" ? <Viewer doc={doc} /> : <TextView documentId={doc.id} />}
+        {tab === "preview" ? <Viewer doc={doc} /> : <TextView doc={doc} />}
       </div>
       <aside className="w-72 space-y-3">
         <div>
@@ -149,6 +210,10 @@ export function DocumentPage() {
         <div>
           <Label htmlFor="d-desc">Description</Label>
           <Textarea id="d-desc" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
+        </div>
+        <div>
+          <Label htmlFor="d-date">Document date</Label>
+          <Input id="d-date" type="date" value={documentDate} onChange={(e) => setDocumentDate(e.target.value)} />
         </div>
         <div>
           <Label htmlFor="d-folder">Folder</Label>
@@ -195,6 +260,35 @@ export function DocumentPage() {
         >
           Delete
         </Button>
+        {doc.doc_type !== "video" && (
+          <div className="space-y-2 border-t border-zinc-200 pt-3">
+            <p className="text-sm font-medium">OCR</p>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={ocrEnabled} onChange={(e) => setOcrEnabled(e.target.checked)} />
+              Run OCR
+            </label>
+            {ocrEnabled && (
+              <OcrLanguageSelect
+                aria-label="OCR language"
+                value={ocrLanguages}
+                onChange={(e) => setOcrLanguages(e.target.value)}
+              />
+            )}
+            <Button
+              variant="outline"
+              className="w-full"
+              disabled={reprocess.isPending || doc.status === "pending" || doc.status === "processing"}
+              onClick={confirmReprocess}
+            >
+              {reprocess.isPending ? "Starting…" : "Re-process"}
+            </Button>
+            {reprocess.isError && (
+              <p className="text-xs text-red-600">
+                {reprocess.error instanceof ApiError ? reprocess.error.message : "Re-process failed"}
+              </p>
+            )}
+          </div>
+        )}
       </aside>
     </div>
   );
