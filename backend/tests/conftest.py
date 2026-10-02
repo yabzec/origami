@@ -1,3 +1,5 @@
+import os
+
 import pytest
 from alembic import command
 from alembic.config import Config
@@ -13,6 +15,7 @@ from app.config import Settings, get_settings
 # pydantic-settings reads model_config["env_file"] at instantiation, so this must
 # run before anything caches a Settings instance (hence before importing app.main).
 Settings.model_config["env_file"] = None
+os.environ.setdefault("LITELLM_MODE", "PRODUCTION")  # litellm loads ../.env into os.environ on import in DEV mode
 get_settings.cache_clear()
 
 from app.db import get_session  # noqa: E402
@@ -132,9 +135,8 @@ def break_soffice(monkeypatch):
     from app.config import get_settings
 
     def _break(path: str = "/bin/false") -> None:
-        # Patch the service's settings lookup instead of the env + get_settings cache: clearing the
-        # cache would re-read an environment that importing litellm has filled from ../.env.
-        patched = get_settings().model_copy(update={"soffice_path": path})
-        monkeypatch.setattr("app.services.convert.get_settings", lambda: patched)
+        monkeypatch.setenv("SOFFICE_PATH", path)
+        get_settings.cache_clear()
 
-    return _break
+    yield _break
+    get_settings.cache_clear()  # monkeypatch restores the env afterwards; next call re-reads it
