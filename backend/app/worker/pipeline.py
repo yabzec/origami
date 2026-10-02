@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from sqlalchemy import func, update
 from sqlmodel import Session, select
 
 from app.config import get_primary_language, get_settings
@@ -240,8 +241,6 @@ def _ensure_summary(session: Session, doc: Document, storage: Storage) -> None:
         return  # empty LLM reply: never store an empty summary chunk
     doc.summary = result.summary
     doc.detected_language = result.language
-    if not (doc.description or "").strip():
-        doc.description = result.summary  # AI text; the UI labels it until the user edits it
     session.add(
         Chunk(
             document_id=doc.id,
@@ -250,7 +249,15 @@ def _ensure_summary(session: Session, doc: Document, storage: Storage) -> None:
             content=result.summary,
         )
     )
+    # AI text; the UI labels it until the user edits it. Conditional in SQL so a
+    # description the user saved during the LLM call is never overwritten.
+    session.execute(
+        update(Document)
+        .where(Document.id == doc.id, func.btrim(func.coalesce(Document.description, "")) == "")
+        .values(description=result.summary)
+    )
     session.commit()
+    session.refresh(doc)
 
 
 def _ensure_translation(session: Session, doc: Document) -> None:

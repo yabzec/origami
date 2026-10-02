@@ -364,6 +364,28 @@ def test_summary_keeps_user_description(session, pipeline_storage, llm_stub):
     assert [c.content for c in metadata] == ["Brief\n\nLettera del notaio"]
 
 
+def test_summary_does_not_overwrite_description_edited_during_llm_call(
+    session, engine, pipeline_storage, llm_stub, monkeypatch
+):
+    from sqlmodel import Session
+
+    from app.services.llm import Description
+
+    doc = _text_doc(session, pipeline_storage)
+
+    def describe_while_user_edits(text=None, image_path=None):
+        with Session(engine) as other:
+            other_doc = other.get(Document, doc.id)
+            other_doc.description = "Scritta dall'utente"
+            other.commit()
+        return Description("Descrizione generata.", "it")
+
+    monkeypatch.setattr(pipeline, "llm_describe", describe_while_user_edits)
+    doc = run(session, doc)
+    assert doc.description == "Scritta dall'utente"
+    assert doc.summary == "Descrizione generata."
+
+
 def _office_doc(session, pipeline_storage, tmp_path, ext):
     from tests.helpers import make_docx, make_odt
 
