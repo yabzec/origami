@@ -134,10 +134,13 @@ def fake_scanner(client):
 
 @pytest.fixture
 def llm_stub(monkeypatch):
-    """Stub the LLM mock boundary: app.services.llm (the other one is smtplib.SMTP)."""
+    """Stub the LLM mock boundary: app.services.llm (the other one is smtplib.SMTP). select_documents is scripted via calls["select_ids"] / calls["select_error"]."""
     from app.services.llm import Description
 
-    calls = {"embed": [], "describe": [], "translate": [], "language": "it", "translate_error": None}
+    calls = {
+        "embed": [], "describe": [], "translate": [], "language": "it", "translate_error": None,
+        "select": [], "select_ids": None, "select_error": None,
+    }
 
     def fake_embed(texts):
         calls["embed"].append(list(texts))
@@ -156,6 +159,17 @@ def llm_stub(monkeypatch):
     monkeypatch.setattr("app.worker.pipeline.llm_embed", fake_embed)
     monkeypatch.setattr("app.worker.pipeline.llm_describe", fake_describe)
     monkeypatch.setattr("app.worker.pipeline.llm_translate", fake_translate)
+
+    def fake_select_documents(question, history, candidates):
+        calls["select"].append(
+            {"question": question, "history": [dict(m) for m in history],
+             "candidates": [dict(c) for c in candidates]}
+        )
+        if calls["select_error"] is not None:
+            raise calls["select_error"]
+        return list(calls["select_ids"] or [])
+
+    monkeypatch.setattr("app.services.rag.llm_select_documents", fake_select_documents)
     return calls
 
 
