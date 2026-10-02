@@ -5,20 +5,14 @@ import type { ScanPageInfo } from "@/lib/types";
 function Thumb({
   page,
   selected,
-  isFirst,
-  isLast,
   disabled,
   onSelect,
-  onMove,
   onDelete,
 }: {
   page: ScanPageInfo;
   selected: boolean;
-  isFirst: boolean;
-  isLast: boolean;
   disabled: boolean;
   onSelect: () => void;
-  onMove: (direction: -1 | 1) => void;
   onDelete: () => void;
 }) {
   const url = usePreviewImage(page.id);
@@ -38,17 +32,16 @@ function Thumb({
       </button>
       <div className="mt-1 flex items-center justify-between text-xs text-zinc-500">
         <span>p. {page.page_number}</span>
-        <span className="flex gap-1">
-          <button disabled={disabled || isFirst} onClick={() => onMove(-1)} title="Move left">
-            ←
-          </button>
-          <button disabled={disabled || isLast} onClick={() => onMove(1)} title="Move right">
-            →
-          </button>
-          <button disabled={disabled} onClick={onDelete} title="Delete page" className="text-red-500">
-            ×
-          </button>
-        </span>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onDelete}
+          aria-label="Delete page"
+          title="Delete page"
+          className="flex h-6 w-6 items-center justify-center rounded text-base leading-none text-red-600 hover:bg-red-50 disabled:opacity-40"
+        >
+          ×
+        </button>
       </div>
     </div>
   );
@@ -59,29 +52,24 @@ export function PageCarousel({
   selectedPageId,
   disabled,
   onSelect,
-  onMove,
   onDelete,
 }: {
   pages: ScanPageInfo[];
   selectedPageId: number | null;
   disabled: boolean;
   onSelect: (pageId: number) => void;
-  onMove: (index: number, direction: -1 | 1) => void;
   onDelete: (pageId: number) => void;
 }) {
   if (pages.length === 0) return null;
   return (
     <div className="flex gap-3 overflow-x-auto pb-2">
-      {pages.map((page, index) => (
+      {pages.map((page) => (
         <Thumb
           key={page.id}
           page={page}
           selected={page.id === selectedPageId}
-          isFirst={index === 0}
-          isLast={index === pages.length - 1}
           disabled={disabled}
           onSelect={() => onSelect(page.id)}
-          onMove={(direction) => onMove(index, direction)}
           onDelete={() => onDelete(page.id)}
         />
       ))}

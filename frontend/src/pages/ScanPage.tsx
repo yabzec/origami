@@ -142,23 +142,6 @@ export function ScanPage() {
     }
   };
 
-  const movePage = async (index: number, direction: -1 | 1) => {
-    const sessionId = state.sessionId;
-    const order = state.pages.map((p) => p.id);
-    const target = index + direction;
-    [order[index], order[target]] = [order[target], order[index]];
-    try {
-      const resp = await api.post<{ pages: ScanPageInfo[] }>(`/api/scan/sessions/${sessionId}/reorder`, {
-        page_ids: order,
-      });
-      if (!isCurrent(sessionId)) return;
-      dispatch({ type: "PAGES_REORDERED", pages: resp.pages });
-    } catch (err) {
-      if (!isCurrent(sessionId)) return;
-      dispatch({ type: "SCAN_FAILED", ...errorInfo(err) });
-    }
-  };
-
   const finish = async () => {
     dispatch({ type: "COMPILE_STARTED" });
     try {
@@ -242,7 +225,6 @@ export function ScanPage() {
               selectedPageId={state.selectedPageId}
               disabled={state.phase !== "ready"}
               onSelect={selectPage}
-              onMove={movePage}
               onDelete={deletePage}
             />
             {state.phase === "starting" && !state.error && (
