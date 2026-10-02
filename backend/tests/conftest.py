@@ -124,3 +124,17 @@ def llm_stub(monkeypatch):
     monkeypatch.setattr("app.worker.pipeline.llm_describe", fake_describe)
     monkeypatch.setattr("app.worker.pipeline.llm_translate", fake_translate)
     return calls
+
+
+@pytest.fixture
+def break_soffice(monkeypatch):
+    """Call to point SOFFICE_PATH elsewhere (default /bin/false, a real binary that exits 1)."""
+    from app.config import get_settings
+
+    def _break(path: str = "/bin/false") -> None:
+        # Patch the service's settings lookup instead of the env + get_settings cache: clearing the
+        # cache would re-read an environment that importing litellm has filled from ../.env.
+        patched = get_settings().model_copy(update={"soffice_path": path})
+        monkeypatch.setattr("app.services.convert.get_settings", lambda: patched)
+
+    return _break

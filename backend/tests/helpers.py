@@ -1,3 +1,4 @@
+import zipfile
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -50,3 +51,36 @@ def seed_document(session, title: str, chunk_specs: list[dict], **doc_kwargs):
         )
     session.commit()
     return doc
+
+
+_ODT_CONTENT = """<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" office:version="1.2"><office:body><office:text><text:p>{text}</text:p></office:text></office:body></office:document-content>"""
+
+_ODT_MANIFEST = """<?xml version="1.0" encoding="UTF-8"?>
+<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2"><manifest:file-entry manifest:full-path="/" manifest:media-type="application/vnd.oasis.opendocument.text"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/></manifest:manifest>"""
+
+
+def make_docx(path: Path, pages: list[str]) -> Path:
+    """A .docx with one paragraph per entry and a hard page break between entries."""
+    import docx
+
+    document = docx.Document()
+    for index, text in enumerate(pages):
+        if index:
+            document.add_page_break()
+        document.add_paragraph(text)
+    document.save(path)
+    return path
+
+
+def make_odt(path: Path, text: str) -> Path:
+    """A minimal single-paragraph OpenDocument text file (mimetype entry first, stored)."""
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            zipfile.ZipInfo("mimetype"),
+            "application/vnd.oasis.opendocument.text",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr("content.xml", _ODT_CONTENT.format(text=text), compress_type=zipfile.ZIP_DEFLATED)
+        archive.writestr("META-INF/manifest.xml", _ODT_MANIFEST, compress_type=zipfile.ZIP_DEFLATED)
+    return path

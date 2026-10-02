@@ -14,6 +14,7 @@ Required for OCR (Italian, English and German). Also needed on the host:
 
 - `poppler-utils` (`pdftoppm`) — PDF rasterization for OCR fallback. Usually preinstalled; otherwise `sudo apt install poppler-utils`.
 - `sane-utils` (`scanimage`) — flatbed scanner access. Usually preinstalled; otherwise `sudo apt install sane-utils`.
+- `libreoffice-writer` (`soffice`) — converts `.doc`, `.docx`, `.odt` and `.rtf` uploads to PDF for the preview. Usually installed with LibreOffice; otherwise `sudo apt install libreoffice-writer`. Set `SOFFICE_PATH` if the binary is not on the service's `PATH`.
 - `fonts-dejavu` — only needed to run the OCR test suite (renders test fixture images). Usually preinstalled; otherwise `sudo apt install fonts-dejavu`.
 
 Verify:
@@ -22,6 +23,7 @@ Verify:
 tesseract --list-langs   # must include ita, eng and deu
 pdftoppm -v
 scanimage --version
+soffice --version
 ```
 
 ### Backend

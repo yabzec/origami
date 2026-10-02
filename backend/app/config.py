@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     rag_top_k: int = 8
     rag_relevance_floor: float = 0.35
     cors_origins: str = "*"
+    soffice_path: str = "soffice"  # LibreOffice binary used to convert office documents to PDF
 
 
 @lru_cache
