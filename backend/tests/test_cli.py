@@ -75,3 +75,40 @@ def test_test_email_reports_send_failure(session, user, cli_engine, monkeypatch,
     monkeypatch.setattr("smtplib.SMTP", refuse)
     with pytest.raises(SystemExit, match="failed"):
         run_cli(monkeypatch, "test-email")
+
+
+def test_list_models_prints_sorted_table(monkeypatch, capsys):
+    from app.services import llm
+
+    monkeypatch.setattr(llm, "model_provider", lambda: "groq")
+    monkeypatch.setattr(
+        llm,
+        "list_models",
+        lambda: [
+            {"id": "whisper-large-v3", "owner": None, "context_window": None, "active": None},
+            {"id": "openai/gpt-oss-120b", "owner": "OpenAI", "context_window": 131072, "active": True},
+            {"id": "llama-old", "owner": "Meta", "context_window": 8192, "active": False},
+        ],
+    )
+    run_cli(monkeypatch, "list-models")
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == "Provider: groq"
+    assert lines[1].split() == ["ID", "OWNER", "CONTEXT", "ACTIVE"]
+    assert [line.split()[0] for line in lines[2:]] == ["llama-old", "openai/gpt-oss-120b", "whisper-large-v3"]
+    assert lines[3].split() == ["openai/gpt-oss-120b", "OpenAI", "131072", "yes"]
+    assert lines[2].split() == ["llama-old", "Meta", "8192", "no"]
+    assert lines[4].split() == ["whisper-large-v3"]
+
+
+def test_list_models_error_exits_1(monkeypatch, capsys):
+    from app.services import llm
+
+    def unsupported():
+        raise ValueError("Model listing not supported for provider 'ollama'")
+
+    monkeypatch.setattr(llm, "model_provider", lambda: "ollama")
+    monkeypatch.setattr(llm, "list_models", unsupported)
+    with pytest.raises(SystemExit) as exc:
+        run_cli(monkeypatch, "list-models")
+    assert exc.value.code == 1
+    assert "Model listing not supported for provider 'ollama'" in capsys.readouterr().out

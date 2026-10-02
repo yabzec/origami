@@ -47,6 +47,31 @@ def send_test_email() -> None:
     print(f"Test email sent to {', '.join(to)}")
 
 
+def print_models() -> None:
+    from app.services import llm  # imports litellm: only load it for this command
+
+    provider = llm.model_provider()
+    try:
+        models = llm.list_models()
+    except Exception as exc:
+        print(f"Cannot list models: {exc}")
+        raise SystemExit(1)
+    print(f"Provider: {provider}")
+    headers = ("ID", "OWNER", "CONTEXT", "ACTIVE")
+    rows = [
+        (
+            m["id"] or "",
+            m["owner"] or "",
+            "" if m["context_window"] is None else str(m["context_window"]),
+            "" if m["active"] is None else ("yes" if m["active"] else "no"),
+        )
+        for m in sorted(models, key=lambda m: m["id"] or "")
+    ]
+    widths = [max([len(h), *(len(r[i]) for r in rows)]) for i, h in enumerate(headers)]
+    for row in [headers, *rows]:
+        print("  ".join(cell.ljust(w) for cell, w in zip(row, widths)).rstrip())
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="origami")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -56,6 +81,7 @@ def main() -> None:
     p_email.add_argument("username")
     p_email.add_argument("email")
     sub.add_parser("test-email", help="send a test email to every user with an email")
+    sub.add_parser("list-models", help="list the models offered by the LLM_MODEL provider")
     args = parser.parse_args()
     if args.command == "create-user":
         create_user(args.username)
@@ -63,6 +89,8 @@ def main() -> None:
         set_email(args.username, args.email)
     elif args.command == "test-email":
         send_test_email()
+    elif args.command == "list-models":
+        print_models()
 
 
 if __name__ == "__main__":

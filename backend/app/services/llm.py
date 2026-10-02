@@ -1,6 +1,9 @@
 import base64
 import json
+import os
 import re
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import NamedTuple
 
@@ -82,7 +85,6 @@ def embed(texts: list[str]) -> list[list[float]]:
 
 def describe(text: str | None = None, image_path: Path | None = None) -> Description:
     settings = get_settings()
-    kw = _kw(settings.llm_api_key, settings.llm_api_base)
     prompt = _describe_prompt(get_primary_language())
     if image_path is not None:
         suffix = Path(image_path).suffix.lstrip(".").lower() or "png"
@@ -92,9 +94,16 @@ def describe(text: str | None = None, image_path: Path | None = None) -> Descrip
             {"type": "image_url", "image_url": {"url": f"data:image/{suffix};base64,{b64}"}},
         ]
         model = settings.vision_model
+        # A separate vision key means another provider: don't send it the text provider's base URL.
+        fallback_base = "" if settings.vision_api_key else settings.llm_api_base
+        kw = _kw(
+            settings.vision_api_key or settings.llm_api_key,
+            settings.vision_api_base or fallback_base,
+        )
     else:
         content = f"{prompt}\n\n---\n\n{(text or '')[:8000]}"
         model = settings.llm_model
+        kw = _kw(settings.llm_api_key, settings.llm_api_base)
     resp = litellm.completion(model=model, messages=[{"role": "user", "content": content}], **kw)
     return parse_description(resp.choices[0].message.content)
 
@@ -128,3 +137,64 @@ def complete(messages: list[dict], stream: bool = False):
                 yield piece
 
     return deltas()
+
+
+OPENAI_STYLE_MODEL_URLS = {
+    "groq": "https://api.groq.com/openai/v1/models",
+    "openai": "https://api.openai.com/v1/models",
+}
+GEMINI_MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+LIST_MODELS_TIMEOUT_SECONDS = 20
+
+
+def model_provider() -> str:
+    return get_settings().llm_model.split("/", 1)[0]
+
+
+def _models_request() -> tuple[urllib.request.Request, str]:
+    """Build the provider's model-list request; second item is the response shape."""
+    settings = get_settings()
+    provider = model_provider()
+    if settings.llm_api_base:
+        url, key = f"{settings.llm_api_base.rstrip('/')}/models", settings.llm_api_key
+    elif provider in OPENAI_STYLE_MODEL_URLS:
+        url = OPENAI_STYLE_MODEL_URLS[provider]
+        key = settings.llm_api_key or os.environ.get(f"{provider.upper()}_API_KEY", "")
+        if not key:
+            raise ValueError(f"No API key for provider '{provider}': set LLM_API_KEY")
+    elif provider == "gemini":
+        key = settings.llm_api_key or settings.gemini_api_key or os.environ.get("GEMINI_API_KEY", "")
+        if not key:
+            raise ValueError(f"No API key for provider '{provider}': set LLM_API_KEY")
+        query = urllib.parse.urlencode({"key": key, "pageSize": 1000})
+        return urllib.request.Request(f"{GEMINI_MODELS_URL}?{query}"), "gemini"
+    else:
+        raise ValueError(f"Model listing not supported for provider '{provider}'")
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    return urllib.request.Request(url, headers=headers), "openai"
+
+
+def list_models() -> list[dict]:
+    """Models offered by the text provider (LLM_MODEL), normalized to id/owner/context_window/active."""
+    request, shape = _models_request()
+    with urllib.request.urlopen(request, timeout=LIST_MODELS_TIMEOUT_SECONDS) as resp:
+        data = json.load(resp)
+    if shape == "gemini":
+        return [
+            {
+                "id": (m.get("name") or "").removeprefix("models/") or None,
+                "owner": None,
+                "context_window": m.get("inputTokenLimit"),
+                "active": None,
+            }
+            for m in data.get("models", [])
+        ]
+    return [
+        {
+            "id": m.get("id"),
+            "owner": m.get("owned_by"),
+            "context_window": m.get("context_window"),
+            "active": m.get("active"),
+        }
+        for m in data.get("data", [])
+    ]

@@ -108,6 +108,7 @@ def test_complete_passes_api_key_and_base(monkeypatch):
     from app.services import llm
 
     get_settings.cache_clear()
+    monkeypatch.setattr(llm, "get_settings", get_settings)  # env-driven test: undo pinned_settings
     monkeypatch.setenv("LLM_API_KEY", "sk-test")
     monkeypatch.setenv("LLM_API_BASE", "http://localhost:11434")
 
@@ -133,6 +134,7 @@ def test_embed_falls_back_to_llm_key(monkeypatch):
     from app.services import llm
 
     get_settings.cache_clear()
+    monkeypatch.setattr(llm, "get_settings", get_settings)  # env-driven test: undo pinned_settings
     monkeypatch.setenv("LLM_API_KEY", "sk-shared")
     monkeypatch.delenv("EMBEDDING_API_KEY", raising=False)
 
@@ -169,3 +171,155 @@ def test_parse_description_extracts_json_from_prose():
 
 def test_parse_description_none_content():
     assert llm.parse_description(None) == llm.Description("", None)
+
+
+import io
+import json as jsonlib
+import urllib.request
+
+import pytest
+
+from app.config import Settings
+
+
+@pytest.fixture(autouse=True)
+def pinned_settings(monkeypatch):
+    """Default settings without the developer's .env, so a real LLM_API_KEY (e.g. a Groq key)
+    can't leak into the fakes. That would break the older tests whose fakes take no **kw."""
+    settings = Settings(_env_file=None, llm_api_key="", llm_api_base="", gemini_api_key="")
+    monkeypatch.setattr(llm, "get_settings", lambda: settings)
+    return settings
+
+
+def _use_settings(monkeypatch, **values):
+    settings = Settings(
+        _env_file=None,
+        **{
+            "llm_model": "groq/openai/gpt-oss-120b",
+            "vision_model": "gemini/gemini-2.5-flash",
+            "llm_api_key": "",
+            "llm_api_base": "",
+            "vision_api_key": "",
+            "vision_api_base": "",
+            "gemini_api_key": "",
+            **values,
+        },
+    )
+    monkeypatch.setattr(llm, "get_settings", lambda: settings)
+    return settings
+
+
+def _capturing_completion(captured):
+    def fake_completion(model, messages, **kw):
+        captured.append({"model": model, **kw})
+        msg = SimpleNamespace(content='{"summary": "Uno scontrino.", "language": "it"}')
+        return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
+
+    return fake_completion
+
+
+def _image(tmp_path):
+    img = tmp_path / "photo.png"
+    img.write_bytes(b"\x89PNG fake")
+    return img
+
+
+def test_vision_call_uses_vision_credentials(monkeypatch, tmp_path):
+    _use_settings(
+        monkeypatch,
+        llm_api_key="groq-key",
+        llm_api_base="https://api.groq.com/openai/v1",
+        vision_api_key="gemini-key",
+    )
+    captured = []
+    monkeypatch.setattr(litellm, "completion", _capturing_completion(captured))
+    llm.describe(image_path=_image(tmp_path))
+    assert captured == [{"model": "gemini/gemini-2.5-flash", "api_key": "gemini-key"}]
+
+
+def test_vision_call_falls_back_to_llm_credentials(monkeypatch, tmp_path):
+    _use_settings(monkeypatch, llm_api_key="shared-key")
+    captured = []
+    monkeypatch.setattr(litellm, "completion", _capturing_completion(captured))
+    llm.describe(image_path=_image(tmp_path))
+    assert captured[0]["api_key"] == "shared-key"
+
+
+def test_text_call_never_gets_vision_key(monkeypatch):
+    _use_settings(monkeypatch, llm_api_key="groq-key", vision_api_key="gemini-key")
+    captured = []
+    monkeypatch.setattr(litellm, "completion", _capturing_completion(captured))
+    llm.describe(text="Rechnung")
+    assert captured == [{"model": "groq/openai/gpt-oss-120b", "api_key": "groq-key"}]
+
+
+def _fake_urlopen(body, seen):
+    def fake(request, timeout=None):
+        seen.append({"url": request.full_url, "headers": dict(request.header_items()), "timeout": timeout})
+        return io.BytesIO(jsonlib.dumps(body).encode())
+
+    return fake
+
+
+def test_list_models_groq(monkeypatch):
+    _use_settings(monkeypatch, llm_api_key="groq-key")
+    seen = []
+    body = {
+        "object": "list",
+        "data": [
+            {"id": "openai/gpt-oss-120b", "owned_by": "OpenAI", "context_window": 131072, "active": True},
+            {"id": "whisper-large-v3"},
+        ],
+    }
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen(body, seen))
+    assert llm.model_provider() == "groq"
+    assert llm.list_models() == [
+        {"id": "openai/gpt-oss-120b", "owner": "OpenAI", "context_window": 131072, "active": True},
+        {"id": "whisper-large-v3", "owner": None, "context_window": None, "active": None},
+    ]
+    assert seen[0]["url"] == "https://api.groq.com/openai/v1/models"
+    assert seen[0]["headers"]["Authorization"] == "Bearer groq-key"
+    assert seen[0]["timeout"] == 20
+
+
+def test_list_models_groq_key_from_environment(monkeypatch):
+    _use_settings(monkeypatch)
+    monkeypatch.setenv("GROQ_API_KEY", "env-groq-key")
+    seen = []
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen({"data": []}, seen))
+    assert llm.list_models() == []
+    assert seen[0]["headers"]["Authorization"] == "Bearer env-groq-key"
+
+
+def test_list_models_custom_base(monkeypatch):
+    _use_settings(monkeypatch, llm_model="openai/local", llm_api_base="http://localhost:8080/v1/", llm_api_key="k")
+    seen = []
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen({"data": [{"id": "m"}]}, seen))
+    assert [m["id"] for m in llm.list_models()] == ["m"]
+    assert seen[0]["url"] == "http://localhost:8080/v1/models"
+
+
+def test_list_models_gemini(monkeypatch):
+    _use_settings(monkeypatch, llm_model="gemini/gemini-2.5-flash", gemini_api_key="g-key")
+    seen = []
+    body = {"models": [{"name": "models/gemini-2.5-flash", "inputTokenLimit": 1048576, "displayName": "Gemini 2.5 Flash"}]}
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen(body, seen))
+    assert llm.list_models() == [
+        {"id": "gemini-2.5-flash", "owner": None, "context_window": 1048576, "active": None}
+    ]
+    assert seen[0]["url"].startswith("https://generativelanguage.googleapis.com/v1beta/models?")
+    assert "key=g-key" in seen[0]["url"]
+    assert "Authorization" not in seen[0]["headers"]
+
+
+def test_list_models_unsupported_provider(monkeypatch):
+    _use_settings(monkeypatch, llm_model="ollama/llama3.1")
+    with pytest.raises(ValueError, match="Model listing not supported for provider 'ollama'"):
+        llm.list_models()
+
+
+def test_list_models_missing_key(monkeypatch):
+    _use_settings(monkeypatch)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="No API key for provider 'groq'"):
+        llm.list_models()

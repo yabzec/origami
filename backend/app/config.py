@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     llm_api_key: str = ""
     llm_api_base: str = ""
+    vision_api_key: str = ""  # empty → llm_api_key (lets vision run on another provider than text)
+    vision_api_base: str = ""  # empty → llm_api_base (unless vision_api_key is set)
     embedding_api_key: str = ""
     embedding_api_base: str = ""
     default_ocr_languages: str = "ita+eng"
