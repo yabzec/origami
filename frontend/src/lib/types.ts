@@ -102,8 +102,14 @@ export interface ChatSource {
   page_number: number | null;
 }
 
+export interface DocRef {
+  id: string;
+  title: string;
+  document_date: string;
+}
+
 export type ChatEvent =
-  | { type: "meta"; grounded: boolean; sources: ChatSource[] }
+  | { type: "meta"; grounded: boolean; sources: ChatSource[]; auto_documents: DocRef[] }
   | { type: "delta"; text: string }
   | { type: "done" }
   | { type: "error"; code: string; message: string };
