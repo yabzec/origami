@@ -6,7 +6,7 @@ from sqlalchemy import func, update
 from sqlmodel import Session, select
 
 from app.config import get_primary_language, get_settings
-from app.models import Chunk, ChunkSource, DocStatus, DocType, Document, TranslationStatus
+from app.models import Chunk, ChunkSource, DocStatus, DocType, Document, Job, TranslationStatus
 from app.services.chunking import chunk_pages
 from app.services.convert import OFFICE_EXTENSIONS, ConversionError, office_to_pdf
 from app.services.extract import (
@@ -47,12 +47,12 @@ def process_document(session: Session, payload: dict) -> None:
         pages = _extract_content(session, doc, storage, payload)
         _ensure_content_chunks(session, doc, pages)
         _ensure_summary(session, doc, storage)
-        _ensure_translation(session, doc)
         _ensure_metadata_chunk(session, doc)
         _embed_pending_chunks(session, doc)
 
         doc.status = DocStatus.ready
         doc.error_message = None
+        _schedule_translation(session, doc)  # same commit as "ready"
         session.commit()
     except Exception as exc:
         session.rollback()
@@ -265,38 +265,85 @@ def _ensure_summary(session: Session, doc: Document, storage: Storage) -> None:
     session.refresh(doc)
 
 
-def _ensure_translation(session: Session, doc: Document) -> None:
+def _needs_translation(session: Session, doc: Document) -> bool:
+    if not doc.detected_language or doc.detected_language == get_primary_language():
+        return False
+    if doc.translation_status == TranslationStatus.done and _has_chunks(
+        session, doc, ChunkSource.translation
+    ):
+        return False
+    return _has_chunks(session, doc, ChunkSource.content)
+
+
+def _schedule_translation(session: Session, doc: Document) -> None:
+    """Queue translate_document in the caller's transaction (no commit here)."""
+    if not _needs_translation(session, doc):
+        return
+    doc.translation_status = TranslationStatus.pending
+    session.add(
+        Job(
+            type="translate_document",
+            payload={"document_id": str(doc.id)},
+            run_at=datetime.now(timezone.utc),
+        )
+    )
+
+
+def _insert_translation_chunks(session: Session, doc: Document) -> bool:
+    """Translate every content chunk in memory, then insert all translation chunks in one commit.
+
+    Returns False without writing when the document was re-processed meanwhile (translation
+    status reset or content chunks replaced): the new processing run schedules its own job.
+    """
     target = get_primary_language()
-    if not doc.detected_language or doc.detected_language == target:
+    content_chunks = _content_chunks(session, doc)
+    source_ids = [c.id for c in content_chunks]
+    translated = [(c.page_number, llm_translate(c.content, target)) for c in content_chunks]
+    session.refresh(doc)
+    current_ids = [c.id for c in _content_chunks(session, doc)]
+    if not source_ids or current_ids != source_ids or doc.translation_status != TranslationStatus.pending:
+        log.info("Document %s changed during translation; result discarded", doc.id)
+        return False
+    next_index = _next_chunk_index(session, doc)
+    for offset, (page_number, text) in enumerate(translated):
+        session.add(
+            Chunk(
+                document_id=doc.id,
+                chunk_index=next_index + offset,
+                page_number=page_number,
+                source=ChunkSource.translation,
+                content=text,
+            )
+        )
+    session.commit()
+    return True
+
+
+@register("translate_document")
+def translate_document(session: Session, payload: dict) -> None:
+    doc = session.get(Document, payload["document_id"])
+    if doc is None:
+        log.info("translate_document: document %s no longer exists", payload["document_id"])
         return
     if doc.translation_status == TranslationStatus.done and _has_chunks(
         session, doc, ChunkSource.translation
     ):
         return
-    content_chunks = _content_chunks(session, doc)
-    if not content_chunks:
-        return
     try:
-        # translate everything first so a failure never leaves partial translation chunks
-        translated = [(c, llm_translate(c.content, target)) for c in content_chunks]
-    except Exception:
-        log.exception("Translation failed for document %s", doc.id)
-        doc.translation_status = TranslationStatus.failed
+        # a retry after an embedding error reuses the stored translation chunks
+        if not _has_chunks(session, doc, ChunkSource.translation):
+            if not _insert_translation_chunks(session, doc):
+                return
+        _embed_pending_chunks(session, doc)  # only translation chunks are still unembedded
+        doc.translation_status = TranslationStatus.done
         session.commit()
-        return
-    next_index = _next_chunk_index(session, doc)
-    for offset, (chunk, text) in enumerate(translated):
-        session.add(
-            Chunk(
-                document_id=doc.id,
-                chunk_index=next_index + offset,
-                page_number=chunk.page_number,
-                source=ChunkSource.translation,
-                content=text,
-            )
+    except Exception:
+        session.rollback()
+        doc.translation_status = (
+            TranslationStatus.failed if is_final_attempt(payload) else TranslationStatus.pending
         )
-    doc.translation_status = TranslationStatus.done
-    session.commit()
+        session.commit()
+        raise
 
 
 def _ensure_metadata_chunk(session: Session, doc: Document) -> None:

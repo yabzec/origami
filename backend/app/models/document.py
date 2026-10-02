@@ -23,6 +23,7 @@ class DocStatus(StrEnum):
 
 
 class TranslationStatus(StrEnum):
+    pending = "pending"  # translate_document job queued or retrying
     done = "done"
     failed = "failed"
 

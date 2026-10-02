@@ -1,9 +1,9 @@
 import uuid
 
 import pytest
-from sqlmodel import select
+from sqlmodel import Session, select
 
-from app.models import Chunk, ChunkSource, DocStatus, DocType, Document
+from app.models import Chunk, ChunkSource, DocStatus, DocType, Document, Job
 from app.services.storage import Storage
 from app.worker import pipeline
 from tests.helpers import make_text_image
@@ -254,30 +254,7 @@ def test_italian_document_is_not_translated(session, pipeline_storage, llm_stub)
     assert doc.translation_status is None
     assert llm_stub["translate"] == []
     assert ChunkSource.translation not in chunks_by_source(session, doc)
-
-
-def test_german_document_gets_translation_chunks(session, pipeline_storage, llm_stub):
-    llm_stub["language"] = "de"
-    doc = run(session, _text_doc(session, pipeline_storage))
-    assert doc.status == DocStatus.ready
-    assert doc.detected_language == "de"
-    assert doc.translation_status == "done"
-    by_source = chunks_by_source(session, doc)
-    content = sorted(by_source[ChunkSource.content], key=lambda c: c.chunk_index)
-    translated = sorted(by_source[ChunkSource.translation], key=lambda c: c.chunk_index)
-    assert len(translated) == len(content)
-    assert [t.page_number for t in translated] == [c.page_number for c in content]
-    assert translated[0].content.startswith("[it] ")
-    assert all(t.embedding is not None for t in translated)
-
-
-def test_translation_failure_is_not_fatal(session, pipeline_storage, llm_stub):
-    llm_stub["language"] = "de"
-    llm_stub["translate_error"] = RuntimeError("provider down")
-    doc = run(session, _text_doc(session, pipeline_storage))
-    assert doc.status == DocStatus.ready
-    assert doc.translation_status == "failed"
-    assert ChunkSource.translation not in chunks_by_source(session, doc)
+    assert session.exec(select(Job).where(Job.type == "translate_document")).all() == []
 
 
 def test_unknown_language_skips_translation(session, pipeline_storage, llm_stub):
@@ -308,7 +285,11 @@ def test_scan_with_ocr_text_gets_summary_and_language(
     assert ChunkSource.content in chunks_by_source(session, doc)
     assert doc.summary == "Descrizione generata."
     assert doc.detected_language == "de"
+    assert doc.translation_status == "pending"
+    assert run_once(engine) is True  # the queued translate_document job
+    session.refresh(doc)
     assert doc.translation_status == "done"
+    assert ChunkSource.translation in chunks_by_source(session, doc)
 
 
 def test_embedding_is_batched(session, pipeline_storage, llm_stub):
@@ -502,3 +483,115 @@ def test_failed_attempt_via_runner_requeues_and_keeps_document_pending(
     job = session.exec(select(Job)).one()
     assert (job.status, job.attempts) == (JobStatus.queued, 1)
     assert job.payload == {"document_id": str(doc.id)}
+
+
+def _german_doc(session, pipeline_storage, llm_stub):
+    llm_stub["language"] = "de"
+    return run(session, _text_doc(session, pipeline_storage))
+
+
+def translate(session, doc, **extra):
+    pipeline.translate_document(session, {"document_id": str(doc.id), **extra})
+    session.refresh(doc)
+    return doc
+
+
+def test_german_document_queues_translation_job(session, pipeline_storage, llm_stub):
+    doc = _german_doc(session, pipeline_storage, llm_stub)
+    assert doc.status == DocStatus.ready
+    assert doc.detected_language == "de"
+    assert doc.translation_status == "pending"
+    jobs = session.exec(select(Job).where(Job.type == "translate_document")).all()
+    assert [j.payload for j in jobs] == [{"document_id": str(doc.id)}]
+    assert llm_stub["translate"] == []
+    assert ChunkSource.translation not in chunks_by_source(session, doc)
+
+
+def test_translate_document_adds_embedded_translation_chunks(session, pipeline_storage, llm_stub):
+    doc = translate(session, _german_doc(session, pipeline_storage, llm_stub))
+    assert doc.translation_status == "done"
+    by_source = chunks_by_source(session, doc)
+    content = sorted(by_source[ChunkSource.content], key=lambda c: c.chunk_index)
+    translated = sorted(by_source[ChunkSource.translation], key=lambda c: c.chunk_index)
+    assert len(translated) == len(content)
+    assert [t.page_number for t in translated] == [c.page_number for c in content]
+    assert translated[0].content.startswith("[it] ")
+    assert all(t.embedding is not None for t in translated)
+
+
+def test_translation_error_before_final_attempt_stays_pending(session, pipeline_storage, llm_stub):
+    doc = _german_doc(session, pipeline_storage, llm_stub)
+    llm_stub["translate_error"] = RuntimeError("provider down")
+    with pytest.raises(RuntimeError, match="provider down"):
+        pipeline.translate_document(
+            session, {"document_id": str(doc.id), "_attempt": 1, "_final_attempt": False}
+        )
+    session.refresh(doc)
+    assert doc.translation_status == "pending"
+    assert doc.status == DocStatus.ready
+    assert ChunkSource.translation not in chunks_by_source(session, doc)
+
+
+def test_translation_error_on_final_attempt_marks_failed(session, pipeline_storage, llm_stub):
+    doc = _german_doc(session, pipeline_storage, llm_stub)
+    llm_stub["translate_error"] = RuntimeError("provider down")
+    with pytest.raises(RuntimeError):
+        pipeline.translate_document(
+            session, {"document_id": str(doc.id), "_attempt": 5, "_final_attempt": True}
+        )
+    session.refresh(doc)
+    assert doc.translation_status == "failed"
+    assert doc.status == DocStatus.ready
+    assert ChunkSource.translation not in chunks_by_source(session, doc)
+
+
+def test_translate_document_already_done_is_noop(session, pipeline_storage, llm_stub):
+    doc = translate(session, _german_doc(session, pipeline_storage, llm_stub))
+    calls = len(llm_stub["translate"])
+    count = len(chunks_by_source(session, doc)[ChunkSource.translation])
+    doc = translate(session, doc)
+    assert len(llm_stub["translate"]) == calls
+    assert len(chunks_by_source(session, doc)[ChunkSource.translation]) == count
+
+
+def test_translate_document_missing_document_is_noop(session, llm_stub):
+    pipeline.translate_document(session, {"document_id": str(uuid.uuid4())})
+    assert llm_stub["translate"] == []
+
+
+def test_translate_document_retry_embeds_without_retranslating(
+    session, pipeline_storage, llm_stub, monkeypatch
+):
+    doc = _german_doc(session, pipeline_storage, llm_stub)
+    working_embed = pipeline.llm_embed  # the llm_stub fake
+    boom = RuntimeError("embedding API down")
+    monkeypatch.setattr(pipeline, "llm_embed", lambda texts: (_ for _ in ()).throw(boom))
+    with pytest.raises(RuntimeError):
+        pipeline.translate_document(session, {"document_id": str(doc.id), "_final_attempt": False})
+    calls = len(llm_stub["translate"])
+
+    monkeypatch.setattr(pipeline, "llm_embed", working_embed)
+    doc = translate(session, doc)
+    assert doc.translation_status == "done"
+    assert len(llm_stub["translate"]) == calls  # chunks from the first try are reused
+    by_source = chunks_by_source(session, doc)
+    assert len(by_source[ChunkSource.translation]) == len(by_source[ChunkSource.content])
+    assert all(t.embedding is not None for t in by_source[ChunkSource.translation])
+
+
+def test_translation_discarded_when_document_reprocessed_meanwhile(
+    session, engine, pipeline_storage, llm_stub, monkeypatch
+):
+    doc = _german_doc(session, pipeline_storage, llm_stub)
+
+    def translate_during_reprocess(text, target):
+        with Session(engine) as other:  # what reprocess_document commits meanwhile
+            fresh = other.get(Document, doc.id)
+            fresh.translation_status = None
+            other.commit()
+        return f"[{target}] {text}"
+
+    monkeypatch.setattr(pipeline, "llm_translate", translate_during_reprocess)
+    doc = translate(session, doc)
+    assert doc.translation_status is None
+    assert ChunkSource.translation not in chunks_by_source(session, doc)
