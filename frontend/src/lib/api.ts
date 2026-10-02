@@ -51,5 +51,5 @@ export const api = {
   postForm: <T>(path: string, form: FormData) => request<T>("POST", path, undefined, form),
 };
 
-export const fileUrl = (documentId: string): string =>
-  `/api/documents/${documentId}/file?token=${getToken() ?? ""}`;
+export const fileUrl = (documentId: string, opts: { download?: boolean } = {}): string =>
+  `/api/documents/${documentId}/file?token=${getToken() ?? ""}${opts.download ? "&download=1" : ""}`;

@@ -44,3 +44,17 @@ def test_file_404_when_no_file(auth_client, session, storage):
     resp = auth_client.get(f"/api/documents/{doc.id}/file")
     assert resp.status_code == 404
     assert resp.json()["error"]["code"] == "no_file"
+
+
+def test_file_is_inline_by_default(auth_client, session, storage):
+    doc = stored_doc(session, storage)
+    resp = auth_client.get(f"/api/documents/{doc.id}/file")
+    assert resp.status_code == 200
+    assert resp.headers["content-disposition"].startswith("inline")
+
+
+def test_file_is_attachment_when_download_requested(auth_client, session, storage):
+    doc = stored_doc(session, storage)
+    resp = auth_client.get(f"/api/documents/{doc.id}/file?download=1")
+    assert resp.status_code == 200
+    assert resp.headers["content-disposition"].startswith("attachment")

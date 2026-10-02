@@ -111,6 +111,14 @@ export function DocumentPage() {
       <div className="flex-1">
         <div className="mb-3 flex items-center gap-3">
           <h2 className="flex-1 truncate text-lg font-semibold">{doc.title}</h2>
+          {doc.file_path && (
+            <a
+              href={fileUrl(doc.id, { download: true })}
+              className="inline-flex h-8 items-center rounded-md border border-zinc-300 px-3 text-sm hover:bg-zinc-100"
+            >
+              Download
+            </a>
+          )}
           <Badge variant={STATUS_VARIANTS[doc.status]}>{doc.status}</Badge>
         </div>
         {doc.status === "failed" && (

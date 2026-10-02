@@ -20,6 +20,7 @@ router = APIRouter(
 @router.get("/{document_id}/file")
 def document_file(
     document_id: uuid.UUID,
+    download: bool = False,
     session: Session = Depends(get_session),
     storage: Storage = Depends(get_storage),
 ) -> FileResponse:
@@ -30,4 +31,10 @@ def document_file(
     if not path.is_file():
         raise api_error(404, "no_file", "Stored file is missing on disk")
     media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    return FileResponse(path, media_type=media_type, filename=doc.original_filename or path.name)
+    # inline lets the <iframe> render PDFs; attachment only for the explicit Download button
+    return FileResponse(
+        path,
+        media_type=media_type,
+        filename=doc.original_filename or path.name,
+        content_disposition_type="attachment" if download else "inline",
+    )
