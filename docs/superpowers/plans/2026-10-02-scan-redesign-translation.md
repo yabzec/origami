@@ -26,7 +26,8 @@
 ## Deviation from the spec (flagged for review)
 
 - The current pipeline skips the summary for `scan` documents (`_ensure_summary` returns early for `DocType.scan`). Language detection rides on the summary call, so scans — the main German use case — would never be translated. **Task 6 enables the summary for scans that have OCR text.** No-OCR scans still get no summary (they have no content).
-- Re-processing a **born-digital PDF** with OCR enabled rasterizes it (the stored PDF is replaced by an image + OCR text layer), because the system cannot tell an earlier-OCR'd PDF from a native one. The re-process confirm on PDFs says so (Task 14).
+- User-approved addition: `documents.ocr_applied` (nullable boolean) records whether the stored PDF's text layer came from Tesseract. Re-process never rasterizes a born-digital PDF (`ocr_applied = false`) unless its native text layer is poor. Legacy rows (`NULL`) are re-OCR'd, and the confirm on those warns that the PDF is rebuilt (Task 14).
+- Scan summaries approved by the user: the summary is a short wrap-up of the content (2-4 sentences), not a second transcription.
 
 ## Review Focus
 
@@ -300,7 +301,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 - Test: `backend/tests/test_schema.py`, `backend/tests/test_documents.py`
 
 **Interfaces:**
-- Produces: `Document.document_date: date`, `Document.detected_language: str | None`, `Document.translation_status: str | None`; `TranslationStatus(StrEnum)` with `done`, `failed` (exported from `app.models`); `ChunkSource.translation = "translation"`; `Settings.primary_language: str = "it"`; `app.config.get_primary_language() -> str`.
+- Produces: `Document.document_date: date`, `Document.detected_language: str | None`, `Document.translation_status: str | None`, `Document.ocr_applied: bool | None`; `TranslationStatus(StrEnum)` with `done`, `failed` (exported from `app.models`); `ChunkSource.translation = "translation"`; `Settings.primary_language: str = "it"`; `app.config.get_primary_language() -> str`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -311,8 +312,9 @@ def test_document_language_columns(engine):
     from sqlalchemy import inspect
 
     cols = {c["name"]: c for c in inspect(engine).get_columns("documents")}
-    assert {"document_date", "detected_language", "translation_status"} <= set(cols)
+    assert {"document_date", "detected_language", "translation_status", "ocr_applied"} <= set(cols)
     assert cols["document_date"]["nullable"] is False
+    assert cols["ocr_applied"]["nullable"] is True
 ```
 
 Create `backend/tests/test_migrations.py`:
@@ -368,6 +370,7 @@ def test_new_document_defaults_and_serialization(auth_client, session):
     assert body["document_date"] == date.today().isoformat()
     assert body["detected_language"] is None
     assert body["translation_status"] is None
+    assert body["ocr_applied"] is None
 ```
 
 (Use the `seed_document` import already at the top of `test_documents.py`; add `from tests.helpers import seed_document` if missing.)
@@ -388,6 +391,8 @@ Inside `Document`, after `ocr_enabled`:
     document_date: date = Field(default_factory=lambda: utcnow().date())
     detected_language: str | None = None  # ISO 639-1, set by the summary step
     translation_status: str | None = None  # TranslationStatus; None = not needed / not yet processed
+    # True: stored PDF text layer produced by Tesseract; False: original file kept; None: unknown (legacy)
+    ocr_applied: bool | None = None
 ```
 
 `backend/app/models/chunk.py` — `ChunkSource` gains `translation = "translation"` after `metadata`.
@@ -434,10 +439,13 @@ def upgrade() -> None:
     )
     op.add_column("documents", sa.Column("detected_language", sa.String(), nullable=True))
     op.add_column("documents", sa.Column("translation_status", sa.String(), nullable=True))
+    # NULL for existing rows: provenance of their stored PDF is unknown
+    op.add_column("documents", sa.Column("ocr_applied", sa.Boolean(), nullable=True))
 
 
 def downgrade() -> None:
     """Downgrade schema."""
+    op.drop_column("documents", "ocr_applied")
     op.drop_column("documents", "translation_status")
     op.drop_column("documents", "detected_language")
     op.drop_column("documents", "document_date")
@@ -1031,7 +1039,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: `enqueue(session, type, payload)` from `app.services.jobs`; `pdf_to_searchable_pdf`, `extract_pdf_text`.
-- Produces: `POST /api/documents/{id}/reprocess` body `{ocr_languages: str, ocr_enabled: bool = true}` → serialized document with `status: "pending"`; enqueues `process_document` with payload `{"document_id": "<uuid>", "force_ocr": true}`. Errors: 409 `document_busy`, 422 `not_reprocessable` (video).
+- Produces: `POST /api/documents/{id}/reprocess` body `{ocr_languages: str, ocr_enabled: bool = true}` → serialized document with `status: "pending"`; enqueues `process_document` with payload `{"document_id": "<uuid>", "force_ocr": true}`. Errors: 409 `document_busy`, 422 `not_reprocessable` (video). Pipeline maintains `Document.ocr_applied` (Task 3 column) on every pdf/scan run.
 
 - [ ] **Step 1: Write the failing tests** — `backend/tests/test_reprocess.py`:
 
@@ -1099,34 +1107,104 @@ def test_reprocess_video_is_rejected(auth_client, session):
     assert resp.json()["error"]["code"] == "not_reprocessable"
 
 
-def test_force_ocr_reocrs_pdf_with_existing_text_layer(session, tmp_path, monkeypatch, llm_stub):
+LONG_TEXT = "FATTURA NUMERO 12345 DEL 2026 IMPORTO 42 EURO CLIENTE ACME SRL MILANO"
+
+
+def _pdf_doc(session, tmp_path, monkeypatch, ocr_applied, text=LONG_TEXT, status=DocStatus.pending):
+    """A pdf document whose stored file already has a (Tesseract) text layer."""
     from app.services.storage import Storage
 
     storage = Storage(tmp_path / "store")
     monkeypatch.setattr(pipeline, "get_pipeline_storage", lambda: storage)
-    img = make_text_image(tmp_path / "p.png", "FATTURA 2026")
-    pdf_bytes, _ = ocr_image(img, "eng")  # already has a text layer → normal path would not OCR
-
-    doc = seed_document(session, "Pdf", [], doc_type=DocType.pdf, status=DocStatus.pending, ocr_languages="ita")
+    img = make_text_image(tmp_path / "p.png", text, size=(3600, 400))
+    pdf_bytes, _ = ocr_image(img, "eng")
+    doc = seed_document(
+        session, "Pdf", [], doc_type=DocType.pdf, status=status, ocr_languages="ita", ocr_applied=ocr_applied
+    )
     rel, _ = storage.store_file(doc.id, ".pdf", pdf_bytes)
     doc.file_path = rel
     session.commit()
+    return doc
 
+
+def _spy_ocr(monkeypatch):
+    """Pass-through spy on pdf_to_searchable_pdf (real function still runs)."""
     calls = []
     real = pipeline.pdf_to_searchable_pdf
     monkeypatch.setattr(
         pipeline, "pdf_to_searchable_pdf", lambda path, langs: calls.append(langs) or real(path, langs)
     )
+    return calls
+
+
+def _content(session, doc):
+    return " ".join(
+        c.content
+        for c in session.exec(
+            select(Chunk).where(Chunk.document_id == doc.id, Chunk.source == ChunkSource.content)
+        )
+    )
+
+
+def test_force_ocr_reocrs_previously_ocred_pdf(session, tmp_path, monkeypatch, llm_stub):
+    doc = _pdf_doc(session, tmp_path, monkeypatch, ocr_applied=True)
+    calls = _spy_ocr(monkeypatch)
     pipeline.process_document(session, {"document_id": str(doc.id), "force_ocr": True})
     session.refresh(doc)
     assert calls == ["ita"]
     assert doc.status == DocStatus.ready
-    content = " ".join(
-        c.content for c in session.exec(
-            select(Chunk).where(Chunk.document_id == doc.id, Chunk.source == ChunkSource.content)
-        )
-    )
-    assert "FATTURA" in content.upper()
+    assert doc.ocr_applied is True
+    assert "FATTURA" in _content(session, doc).upper()
+
+
+def test_force_ocr_reocrs_legacy_pdf_with_unknown_provenance(session, tmp_path, monkeypatch, llm_stub):
+    doc = _pdf_doc(session, tmp_path, monkeypatch, ocr_applied=None)
+    calls = _spy_ocr(monkeypatch)
+    pipeline.process_document(session, {"document_id": str(doc.id), "force_ocr": True})
+    session.refresh(doc)
+    assert calls == ["ita"]
+    assert doc.ocr_applied is True
+
+
+def test_force_ocr_keeps_born_digital_pdf(session, tmp_path, monkeypatch, llm_stub):
+    doc = _pdf_doc(session, tmp_path, monkeypatch, ocr_applied=False)
+    original = (tmp_path / "store" / doc.file_path).read_bytes()
+    calls = _spy_ocr(monkeypatch)
+    pipeline.process_document(session, {"document_id": str(doc.id), "force_ocr": True})
+    session.refresh(doc)
+    assert calls == []  # good native text layer: never rasterized
+    assert (tmp_path / "store" / doc.file_path).read_bytes() == original
+    assert doc.ocr_applied is False
+    assert doc.status == DocStatus.ready
+    assert "FATTURA" in _content(session, doc).upper()
+
+
+def test_normal_pipeline_records_native_pdf_as_not_ocred(session, tmp_path, monkeypatch, llm_stub):
+    doc = _pdf_doc(session, tmp_path, monkeypatch, ocr_applied=None)
+    calls = _spy_ocr(monkeypatch)
+    pipeline.process_document(session, {"document_id": str(doc.id)})
+    session.refresh(doc)
+    assert calls == []
+    assert doc.ocr_applied is False
+
+
+def test_normal_pipeline_records_ocred_pdf(session, tmp_path, monkeypatch, llm_stub):
+    from PIL import Image as PILImage
+
+    from app.services.storage import Storage
+
+    storage = Storage(tmp_path / "store")
+    monkeypatch.setattr(pipeline, "get_pipeline_storage", lambda: storage)
+    img = make_text_image(tmp_path / "raw.png", LONG_TEXT, size=(3600, 400))
+    raw_pdf = tmp_path / "raw.pdf"
+    PILImage.open(img).convert("RGB").save(raw_pdf, "PDF")  # image-only: no text layer
+    doc = seed_document(session, "Raw", [], doc_type=DocType.pdf, status=DocStatus.pending)
+    rel, _ = storage.store_file(doc.id, ".pdf", raw_pdf.read_bytes())
+    doc.file_path = rel
+    session.commit()
+    pipeline.process_document(session, {"document_id": str(doc.id)})
+    session.refresh(doc)
+    assert doc.ocr_applied is True
 
 
 def test_force_ocr_scan_uses_stored_pdf_without_session(session, tmp_path, monkeypatch, llm_stub):
@@ -1136,7 +1214,7 @@ def test_force_ocr_scan_uses_stored_pdf_without_session(session, tmp_path, monke
     monkeypatch.setattr(pipeline, "get_pipeline_storage", lambda: storage)
     img = make_text_image(tmp_path / "s.png", "VERBALE 9")
     pdf_bytes, _ = ocr_image(img, "eng")
-    doc = seed_document(session, "Scan", [], doc_type=DocType.scan, status=DocStatus.pending)
+    doc = seed_document(session, "Scan", [], doc_type=DocType.scan, status=DocStatus.pending, ocr_applied=True)
     rel, _ = storage.store_file(doc.id, ".pdf", pdf_bytes)
     doc.file_path = rel
     session.commit()
@@ -1205,21 +1283,30 @@ and add:
 
 ```python
 def _reocr_pdf(session: Session, doc: Document, storage: Storage) -> list[tuple[int | None, str]]:
-    """Re-process: OCR the stored PDF again (scan page images are gone after compile)."""
+    """Re-process: OCR the stored PDF again (scan page images are gone after compile).
+
+    A born-digital PDF (ocr_applied False) is never rasterized unless its own text layer is poor;
+    unknown provenance (None, legacy rows) is treated as previously OCR'd.
+    """
     path = storage.abs_path(doc.file_path)
-    if doc.ocr_enabled:
+    pages = extract_pdf_text(path)
+    if doc.ocr_enabled and (doc.ocr_applied is not False or pdf_needs_ocr(pages)):
         pdf_bytes, pages = pdf_to_searchable_pdf(path, doc.ocr_languages)
         rel, size = storage.store_file(doc.id, ".pdf", pdf_bytes)
         doc.file_path = rel
         doc.file_size = size
-    else:
-        pages = extract_pdf_text(path)
+        doc.ocr_applied = True
     doc.page_count = len(pages)
     session.commit()
     return pages
 ```
 
-(Images need no change: their content chunks were deleted, so the normal image branch OCRs again with the new language. Text/docx re-extract normally.)
+Record provenance in the normal paths too:
+- `_extract_content`, pdf branch: inside `if doc.ocr_enabled and pdf_needs_ocr(pages):` add `doc.ocr_applied = True`; add an `else: doc.ocr_applied = False` to that `if` (the original file is kept).
+- `_extract_scan`, the compile branch (`else:` of the retry check): after building the PDF set `doc.ocr_applied = doc.ocr_enabled` (searchable PDF when OCR ran, image-only PDF otherwise — an image-only PDF has a poor text layer, so a later re-process with OCR still OCRs it).
+- Images: leave `ocr_applied` untouched (`None`); it only describes stored PDFs of pdf/scan documents.
+
+(Images need no re-process change: their content chunks were deleted, so the normal image branch OCRs again with the new language. Text/docx re-extract normally.)
 
 - [ ] **Step 5: Run, expect PASS** — `uv run pytest -q`.
 
@@ -1349,7 +1436,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 - Modify: `frontend/src/lib/types.ts`, `frontend/src/lib/upload.ts`, `frontend/src/lib/upload.test.ts`, `frontend/src/components/UploadDialog.tsx`
 
 **Interfaces:**
-- Produces: `todayIso(now?: Date): string` (local date `YYYY-MM-DD`), `formatDate(iso: string): string` (`DD/MM/YYYY`); `Document` gains `ocr_enabled: boolean`, `document_date: string`, `detected_language: string | null`, `translation_status: "done" | "failed" | null`; `DocumentText` gains `variant`, `detected_language`, `translation_status`, `translation_language`; `UploadFields.documentDate?: string`.
+- Produces: `todayIso(now?: Date): string` (local date `YYYY-MM-DD`), `formatDate(iso: string): string` (`DD/MM/YYYY`); `Document` gains `ocr_enabled: boolean`, `document_date: string`, `detected_language: string | null`, `translation_status: "done" | "failed" | null`, `ocr_applied: boolean | null`; `DocumentText` gains `variant`, `detected_language`, `translation_status`, `translation_language`; `UploadFields.documentDate?: string`.
 
 - [ ] **Step 1: Write the failing tests** — `frontend/src/lib/dates.test.ts`:
 
@@ -1403,6 +1490,7 @@ export function formatDate(iso: string): string {
   document_date: string;
   detected_language: string | null;
   translation_status: "done" | "failed" | null;
+  ocr_applied: boolean | null;
 ```
 
 Replace `DocumentText`:
@@ -2555,7 +2643,7 @@ Add the re-process mutation after `remove`:
   const confirmReprocess = () => {
     const base = "Re-run OCR and AI processing? Extracted text, summary and translation will be replaced.";
     const pdfNote =
-      doc && (doc.doc_type === "pdf" || doc.doc_type === "scan") && ocrEnabled
+      doc && (doc.doc_type === "pdf" || doc.doc_type === "scan") && ocrEnabled && doc.ocr_applied !== false
         ? " The PDF is rebuilt from page images."
         : "";
     if (window.confirm(base + pdfNote)) reprocess.mutate();

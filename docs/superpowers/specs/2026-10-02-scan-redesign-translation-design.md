@@ -34,6 +34,7 @@ Frontend: `fileUrl(documentId, opts?: { download?: boolean })` appends `&downloa
 - `documents.document_date DATE NOT NULL` — the date of the original paper document. Server default `CURRENT_DATE`; existing rows backfilled with `created_at::date`. New documents default to today when no date is given.
 - `documents.detected_language TEXT NULL` — ISO 639-1 code returned by the AI (e.g. `de`), `NULL` until processed.
 - `documents.translation_status TEXT NULL` — `NULL` (not needed / not yet processed), `done`, or `failed`.
+- `documents.ocr_applied BOOLEAN NULL` — `true` = the stored PDF's text layer was produced by Tesseract (the pipeline replaced the file); `false` = the stored file is the original (native text layer kept, or no OCR); `NULL` = unknown (documents created before this migration). Set by the pipeline on every run.
 - `ChunkSource.translation = "translation"` — new chunk source. `chunks.source` is a plain string column, so no DB enum change is needed.
 
 `created_at` stays unchanged and keeps driving cleanup and default ordering.
@@ -72,7 +73,8 @@ Runs after the summary step, inside `process_document`:
 - 409 `document_busy` when status is `pending` or `processing`.
 - Updates `ocr_languages` / `ocr_enabled`; deletes `content`, `summary`, and `translation` chunks; clears `summary`, `detected_language`, `translation_status`; keeps the `metadata` chunk; sets status `pending`; enqueues `process_document` with `{document_id, force_ocr: true}`.
 - `force_ocr` in `_extract_content`:
-  - **pdf / scan** with `ocr_enabled` → `pdf_to_searchable_pdf(stored_pdf, languages)` (rasterize + OCR); replaces the stored PDF. Scan session images no longer exist after compile, so the stored PDF is the source.
+  - **pdf / scan** with `ocr_enabled` and `ocr_applied` `true` or `NULL` → `pdf_to_searchable_pdf(stored_pdf, languages)` (rasterize + OCR); replaces the stored PDF; sets `ocr_applied = true`. Scan session images no longer exist after compile, so the stored PDF is the source.
+  - **pdf / scan** with `ocr_enabled` and `ocr_applied = false` (born-digital PDF, or no-OCR scan) → keep the file unless its native text layer is poor (`pdf_needs_ocr`); only then OCR as above. A born-digital PDF is never rasterized.
   - **pdf / scan** with `ocr_enabled = false` → native text layer only (`extract_pdf_text`).
   - **image** → `ocr_image` again (or no text when OCR disabled).
   - **text / docx** → normal extraction (OCR not applicable); summary and translation still refresh.
@@ -178,4 +180,6 @@ Uses `OCR_LANGUAGES`. Adds an optional Date field (default today) sent as `docum
 | Scan session on leave | Always fresh session + leave guard | User choice; guard prevents accidental loss |
 | In-app leave guard | `createBrowserRouter` + `useBlocker` | `useBlocker` needs a data router |
 | Re-process source for scans | Stored PDF, rasterized | Scan page images are deleted after compile |
+| OCR provenance | `ocr_applied` column | Re-process must not rasterize born-digital PDFs; `NULL` for legacy rows falls back to re-OCR with a warning |
+| Scan summaries | Enabled for scans with OCR text | Language detection rides on the summary call; summary is a short wrap-up, not a second transcription |
 | Language/OCR at scan | Sent at compile, editable until Finish | Toolbar is editable at any time |
