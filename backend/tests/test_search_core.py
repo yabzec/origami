@@ -1,6 +1,7 @@
 import pytest
+from sqlmodel import select
 
-from app.models import DocType, DocumentTag, Tag
+from app.models import Chunk, ChunkSource, DocType, DocumentTag, Tag
 from app.services.search import (
     SearchFilters,
     allowed_document_ids,
@@ -82,3 +83,38 @@ def test_allowed_document_ids_filters(session, auth_client):
     by_type = allowed_document_ids(session, SearchFilters(doc_type=DocType.video))
     assert len(by_type) == 1
     assert allowed_document_ids(session, SearchFilters(folder_id=folder_id, tag_ids=[tag.id])) == []
+
+
+def test_semantic_search_sources_filter(session):
+    doc = seed_document(
+        session, "A",
+        [
+            {"content": "corpo", "embedding": basis_vector(0)},
+            {"content": "riassunto", "embedding": basis_vector(0), "source": ChunkSource.summary},
+            {"content": "A", "embedding": basis_vector(0), "source": ChunkSource.metadata},
+        ],
+    )
+    content_chunk = session.exec(
+        select(Chunk).where(Chunk.document_id == doc.id, Chunk.source == ChunkSource.content)
+    ).one()
+
+    hits = semantic_search(
+        session, basis_vector(0), sources=[ChunkSource.summary.value, ChunkSource.metadata.value]
+    )
+    assert len(hits) == 2
+    assert content_chunk.id not in {h.chunk_id for h in hits}
+    assert len(semantic_search(session, basis_vector(0))) == 3  # default: every source
+
+
+def test_keyword_search_sources_filter(session):
+    seed_document(
+        session, "Bolletta",
+        [
+            {"content": "bolletta nel testo"},
+            {"content": "bolletta nel riassunto", "source": ChunkSource.summary},
+        ],
+    )
+    hits = keyword_search(session, "bolletta", sources=[ChunkSource.summary.value])
+    assert len(hits) == 1
+    assert "riassunto" in hits[0].snippet
+    assert len(keyword_search(session, "bolletta")) == 2  # default: every source

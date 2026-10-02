@@ -9,6 +9,7 @@ from app.models import Chunk, Document, DocumentTag, Folder
 from app.services.llm import embed as llm_embed  # noqa: F401  (used by search(); monkeypatched in tests)
 
 RRF_K = 60
+QUERY_MAX_CHARS = 2000  # embedding / keyword query cap: a pasted email must not exceed the embed input limit
 
 
 class SearchFilters(BaseModel):
@@ -63,11 +64,14 @@ def semantic_search(
     query_vector: list[float],
     limit: int = 20,
     doc_ids: list[uuid.UUID] | None = None,
+    sources: list[str] | None = None,
 ) -> list[SemanticHit]:
     distance = Chunk.embedding.cosine_distance(query_vector)
     query = select(Chunk.id, distance.label("distance")).where(Chunk.embedding.is_not(None))
     if doc_ids is not None:
         query = query.where(Chunk.document_id.in_(doc_ids))
+    if sources is not None:
+        query = query.where(Chunk.source.in_([str(s) for s in sources]))
     query = query.order_by(distance).limit(limit)
     return [
         SemanticHit(chunk_id=chunk_id, similarity=1.0 - dist)
@@ -92,12 +96,18 @@ def keyword_search(
     query: str,
     limit: int = 20,
     doc_ids: list[uuid.UUID] | None = None,
+    sources: list[str] | None = None,
 ) -> list[KeywordHit]:
-    doc_filter = "AND c.document_id = ANY(:doc_ids)" if doc_ids is not None else ""
+    filters: list[str] = []
     params: dict = {"query": query, "limit": limit}
     if doc_ids is not None:
+        filters.append("AND c.document_id = ANY(:doc_ids)")
         params["doc_ids"] = doc_ids
-    rows = session.execute(text(KEYWORD_SQL_BASE.format(doc_filter=doc_filter)), params)
+    if sources is not None:
+        filters.append("AND c.source = ANY(:sources)")
+        params["sources"] = [str(s) for s in sources]
+    sql = KEYWORD_SQL_BASE.format(doc_filter="\n".join(filters))
+    rows = session.execute(text(sql), params)
     return [KeywordHit(chunk_id=r[0], rank=r[1], snippet=r[2]) for r in rows]
 
 
