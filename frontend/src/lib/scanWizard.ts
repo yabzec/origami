@@ -35,6 +35,12 @@ export type ScanAction =
   | { type: "DISMISS_ERROR" }
   | { type: "RESET" };
 
+/** A failure with no active session (stale result after Discard/reset) only reports the error. */
+function failed(state: ScanState, action: { code: string; message: string }): ScanState {
+  const error = { code: action.code, message: action.message };
+  return state.sessionId === null ? { ...state, error } : { ...state, phase: "ready", error };
+}
+
 export function scanWizardReducer(state: ScanState, action: ScanAction): ScanState {
   switch (action.type) {
     case "SESSION_STARTED":
@@ -46,7 +52,7 @@ export function scanWizardReducer(state: ScanState, action: ScanAction): ScanSta
     case "PAGE_SCANNED":
       return { ...state, phase: "ready", pages: [...state.pages, action.page], selectedPageId: action.page.id };
     case "SCAN_FAILED":
-      return { ...state, phase: "ready", error: { code: action.code, message: action.message } };
+      return failed(state, action);
     case "SELECT_PAGE":
       return { ...state, selectedPageId: action.pageId };
     case "PAGE_DELETED": {
@@ -64,7 +70,7 @@ export function scanWizardReducer(state: ScanState, action: ScanAction): ScanSta
     case "COMPILED":
       return { ...state, phase: "done", document: action.document };
     case "COMPILE_FAILED":
-      return { ...state, phase: "ready", error: { code: action.code, message: action.message } };
+      return failed(state, action);
     case "DISMISS_ERROR":
       return { ...state, error: null };
     case "RESET":
@@ -72,9 +78,9 @@ export function scanWizardReducer(state: ScanState, action: ScanAction): ScanSta
   }
 }
 
-/** Unsaved scanned pages exist: leaving the page would discard them. */
+/** Unsaved scanned pages exist: leaving the page would discard them (not while they are being saved). */
 export function shouldBlockLeave(state: ScanState): boolean {
-  return state.pages.length > 0 && state.phase !== "done";
+  return state.pages.length > 0 && state.phase !== "done" && state.phase !== "compiling";
 }
 
 export const SCANNER_MESSAGES: Record<string, string> = {

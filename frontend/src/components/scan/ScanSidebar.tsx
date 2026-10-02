@@ -120,7 +120,7 @@ export function ScanSidebar({
         <Button
           variant="ghost"
           className="w-full"
-          disabled={phase === "scanning" || phase === "compiling"}
+          disabled={phase === "scanning" || phase === "compiling" || previewing}
           onClick={onDiscard}
         >
           Discard

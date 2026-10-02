@@ -52,6 +52,7 @@ export function UploadDialog({
         onSuccess: () => {
           setTitle("");
           setTagIds([]);
+          setDocumentDate(todayIso());
           onClose();
         },
         onError: (err) => setError(err instanceof ApiError ? err.message : "Upload failed"),

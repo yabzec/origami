@@ -44,6 +44,12 @@ export function ScanPage() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const startInFlight = useRef(false); // StrictMode re-runs effects: create exactly one session
+  // Async handlers capture the session at call time and drop results once it changed (Discard/reset).
+  const sessionIdRef = useRef(state.sessionId);
+  useEffect(() => {
+    sessionIdRef.current = state.sessionId;
+  }, [state.sessionId]);
+  const isCurrent = (sessionId: number | null) => sessionIdRef.current === sessionId;
 
   const clearPreview = useCallback(() => {
     setPreviewUrl((prev) => {
@@ -75,6 +81,7 @@ export function ScanPage() {
   useLeaveGuard(shouldBlockLeave(state), LEAVE_MESSAGE, leaveSession);
 
   const preview = async () => {
+    const sessionId = state.sessionId;
     setPreviewing(true);
     try {
       const resp = await fetch("/api/scan/preview", {
@@ -84,6 +91,7 @@ export function ScanPage() {
       });
       if (!resp.ok) {
         const data = await resp.json().catch(() => null);
+        if (!isCurrent(sessionId)) return;
         dispatch({
           type: "SCAN_FAILED",
           code: data?.error?.code ?? "unknown",
@@ -91,7 +99,9 @@ export function ScanPage() {
         });
         return;
       }
-      const url = URL.createObjectURL(await resp.blob());
+      const blob = await resp.blob();
+      if (!isCurrent(sessionId)) return;
+      const url = URL.createObjectURL(blob);
       setPreviewUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev);
         return url;
@@ -102,14 +112,17 @@ export function ScanPage() {
   };
 
   const scanPage = async () => {
+    const sessionId = state.sessionId;
     clearPreview();
     dispatch({ type: "SCAN_STARTED" });
     try {
-      const page = await api.post<ScanPageInfo>(`/api/scan/sessions/${state.sessionId}/pages`, {
+      const page = await api.post<ScanPageInfo>(`/api/scan/sessions/${sessionId}/pages`, {
         device: chosenDevice,
       });
+      if (!isCurrent(sessionId)) return;
       dispatch({ type: "PAGE_SCANNED", page: { id: page.id, page_number: page.page_number } });
     } catch (err) {
+      if (!isCurrent(sessionId)) return;
       dispatch({ type: "SCAN_FAILED", ...errorInfo(err) });
     }
   };
@@ -120,24 +133,30 @@ export function ScanPage() {
   };
 
   const deletePage = async (pageId: number) => {
+    const sessionId = state.sessionId;
     try {
       await api.del(`/api/scan/pages/${pageId}`);
+      if (!isCurrent(sessionId)) return;
       dispatch({ type: "PAGE_DELETED", pageId });
     } catch (err) {
+      if (!isCurrent(sessionId)) return;
       dispatch({ type: "SCAN_FAILED", ...errorInfo(err) });
     }
   };
 
   const movePage = async (index: number, direction: -1 | 1) => {
+    const sessionId = state.sessionId;
     const order = state.pages.map((p) => p.id);
     const target = index + direction;
     [order[index], order[target]] = [order[target], order[index]];
     try {
-      const resp = await api.post<{ pages: ScanPageInfo[] }>(`/api/scan/sessions/${state.sessionId}/reorder`, {
+      const resp = await api.post<{ pages: ScanPageInfo[] }>(`/api/scan/sessions/${sessionId}/reorder`, {
         page_ids: order,
       });
+      if (!isCurrent(sessionId)) return;
       dispatch({ type: "PAGES_REORDERED", pages: resp.pages });
     } catch (err) {
+      if (!isCurrent(sessionId)) return;
       dispatch({ type: "SCAN_FAILED", ...errorInfo(err) });
     }
   };
@@ -164,6 +183,7 @@ export function ScanPage() {
   const startOver = () => {
     clearPreview();
     setFields(emptyScanForm());
+    sessionIdRef.current = null; // drop in-flight results of the old session right away
     dispatch({ type: "RESET" }); // phase "starting" → effect creates a new session
   };
 

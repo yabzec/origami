@@ -117,6 +117,30 @@ describe("shouldBlockLeave", () => {
     const done = scanWizardReducer(withPage, { type: "COMPILED", document: { id: "d" } as Document });
     expect(shouldBlockLeave(done)).toBe(false);
   });
+
+  it("does not block while compiling (pages are being saved)", () => {
+    const withPage = reduceAll([
+      { type: "SESSION_STARTED", sessionId: 1 },
+      { type: "PAGE_SCANNED", page: page(1, 1) },
+      { type: "COMPILE_STARTED" },
+    ]);
+    expect(withPage.phase).toBe("compiling");
+    expect(shouldBlockLeave(withPage)).toBe(false);
+  });
+});
+
+describe("stale results without a session", () => {
+  it("SCAN_FAILED with no session keeps phase starting and sets error", () => {
+    const next = scanWizardReducer(initialScanState, { type: "SCAN_FAILED", code: "scanner_busy", message: "busy" });
+    expect(next.phase).toBe("starting");
+    expect(next.error).toEqual({ code: "scanner_busy", message: "busy" });
+  });
+
+  it("COMPILE_FAILED with no session keeps phase starting and sets error", () => {
+    const next = scanWizardReducer(initialScanState, { type: "COMPILE_FAILED", code: "x", message: "y" });
+    expect(next.phase).toBe("starting");
+    expect(next.error).toEqual({ code: "x", message: "y" });
+  });
 });
 
 describe("scannerMessage", () => {
