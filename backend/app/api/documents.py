@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -20,6 +20,7 @@ class DocumentPatch(BaseModel):
     description: str | None = None
     folder_id: int | None = None
     tag_ids: list[int] | None = None
+    document_date: date | None = None
 
 
 def doc_tags(session: Session, doc: Document) -> list[Tag]:
@@ -96,6 +97,9 @@ def update_document(
     doc = get_doc_or_404(session, document_id)
     fields = body.model_dump(exclude_unset=True)
     tag_ids = fields.pop("tag_ids", None)
+
+    if fields.get("document_date", ...) is None:
+        fields.pop("document_date", None)  # column is NOT NULL; an empty date input means "unchanged"
 
     if "folder_id" in fields and fields["folder_id"] is not None:
         if session.get(Folder, fields["folder_id"]) is None:

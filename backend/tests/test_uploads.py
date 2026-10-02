@@ -90,3 +90,13 @@ def test_upload_ocr_enabled_default_true(auth_client, session, storage):
     )
     doc = session.get(Document, resp.json()["id"])
     assert doc.ocr_enabled is True
+
+
+def test_upload_with_document_date(auth_client, session, storage):
+    resp = auth_client.post(
+        "/api/documents/upload",
+        files={"file": ("old.pdf", b"%PDF-1.4 x", "application/pdf")},
+        data={"document_date": "2018-12-01"},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["document_date"] == "2018-12-01"

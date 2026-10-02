@@ -124,13 +124,32 @@ def test_document_text_endpoint(auth_client, session):
 
 
 def test_new_document_defaults_and_serialization(auth_client, session):
-    from datetime import date
-
+    from app.models.user import utcnow
     from tests.helpers import seed_document
 
     doc = seed_document(session, "Fresh", [])
     body = auth_client.get(f"/api/documents/{doc.id}").json()
-    assert body["document_date"] == date.today().isoformat()
+    assert body["document_date"] == utcnow().date().isoformat()
     assert body["detected_language"] is None
     assert body["translation_status"] is None
     assert body["ocr_applied"] is None
+
+
+def test_patch_document_date(auth_client, session):
+    from tests.helpers import seed_document
+
+    doc = seed_document(session, "Dated", [])
+    resp = auth_client.patch(f"/api/documents/{doc.id}", json={"document_date": "2019-03-04"})
+    assert resp.status_code == 200
+    assert resp.json()["document_date"] == "2019-03-04"
+
+
+def test_patch_null_document_date_is_ignored(auth_client, session):
+    from tests.helpers import seed_document
+
+    doc = seed_document(session, "Dated", [])
+    auth_client.patch(f"/api/documents/{doc.id}", json={"document_date": "2019-03-04"})
+    resp = auth_client.patch(f"/api/documents/{doc.id}", json={"document_date": None, "title": "T2"})
+    assert resp.status_code == 200
+    assert resp.json()["document_date"] == "2019-03-04"
+    assert resp.json()["title"] == "T2"

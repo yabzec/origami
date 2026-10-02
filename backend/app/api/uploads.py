@@ -1,3 +1,4 @@
+from datetime import date
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, UploadFile
@@ -44,6 +45,8 @@ def create_pending_document(
     folder_id: int | None,
     tag_ids: list[int],
     original_filename: str | None,
+    description: str = "",
+    document_date: date | None = None,
 ) -> Document:
     """Insert a pending document with validated folder/tags. Reused by scan compile."""
     if folder_id is not None and session.get(Folder, folder_id) is None:
@@ -53,12 +56,15 @@ def create_pending_document(
             raise api_error(404, "not_found", f"Tag {tag_id} not found")
     doc = Document(
         title=title,
+        description=description,
         doc_type=doc_type,
         ocr_languages=ocr_languages,
         ocr_enabled=ocr_enabled,
         folder_id=folder_id,
         original_filename=original_filename,
     )
+    if document_date is not None:
+        doc.document_date = document_date
     session.add(doc)
     session.commit()
     session.refresh(doc)
@@ -85,6 +91,7 @@ def upload_document(
     tag_ids: str | None = Form(default=None),
     ocr_languages: str | None = Form(default=None),
     ocr_enabled: bool = Form(default=True),
+    document_date: date | None = Form(default=None),
     session: Session = Depends(get_session),
     storage: Storage = Depends(get_storage),
 ) -> dict:
@@ -102,6 +109,7 @@ def upload_document(
         folder_id=folder_id,
         tag_ids=parse_tag_ids(tag_ids),
         original_filename=file.filename,
+        document_date=document_date,
     )
     rel, size = storage.store_fileobj(doc.id, ext, file.file)
     doc.file_path = rel
