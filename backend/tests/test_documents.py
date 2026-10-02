@@ -192,3 +192,33 @@ def test_delete_removes_preview(auth_client, session, storage):
     assert auth_client.delete(f"/api/documents/{doc.id}").status_code == 204
     assert not original.exists()
     assert not preview.exists()
+
+
+def _sort_fixture(session):
+    from datetime import date, datetime, timezone
+
+    utc = timezone.utc
+    a = make_document(session, title="Beta", document_date=date(2026, 1, 10), created_at=datetime(2026, 3, 1, tzinfo=utc))
+    b = make_document(session, title="alpha", document_date=date(2026, 2, 1), created_at=datetime(2026, 1, 1, tzinfo=utc))
+    c = make_document(session, title="gamma", document_date=date(2026, 2, 1), created_at=datetime(2026, 2, 1, tzinfo=utc))
+    return a, b, c
+
+
+def _titles(auth_client, **params):
+    resp = auth_client.get("/api/documents", params=params)
+    assert resp.status_code == 200
+    return [d["title"] for d in resp.json()]
+
+
+def test_list_sort_orders(auth_client, session):
+    _sort_fixture(session)
+    # date ties (alpha/gamma share 2026-02-01) break on created_at
+    assert _titles(auth_client) == ["gamma", "alpha", "Beta"]  # default date_desc
+    assert _titles(auth_client, sort="date_desc") == ["gamma", "alpha", "Beta"]
+    assert _titles(auth_client, sort="date_asc") == ["Beta", "alpha", "gamma"]
+    assert _titles(auth_client, sort="added_desc") == ["Beta", "gamma", "alpha"]
+    assert _titles(auth_client, sort="title_asc") == ["alpha", "Beta", "gamma"]  # case-insensitive
+
+
+def test_list_bad_sort_is_422(auth_client, session):
+    assert auth_client.get("/api/documents", params={"sort": "size"}).status_code == 422

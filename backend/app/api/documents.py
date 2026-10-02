@@ -4,6 +4,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.api.deps import api_error, get_current_user
@@ -56,12 +57,23 @@ def get_doc_or_404(session: Session, document_id: uuid.UUID) -> Document:
     return doc
 
 
+DocumentSort = Literal["date_desc", "date_asc", "added_desc", "title_asc"]
+
+SORT_ORDER = {
+    "date_desc": (Document.document_date.desc(), Document.created_at.desc()),
+    "date_asc": (Document.document_date.asc(), Document.created_at.asc()),
+    "added_desc": (Document.created_at.desc(),),
+    "title_asc": (func.lower(Document.title).asc(), Document.created_at.desc()),
+}
+
+
 @router.get("")
 def list_documents(
     folder_id: int | None = None,
     tag_id: int | None = None,
     doc_type: str | None = None,
     status: str | None = None,
+    sort: DocumentSort = "date_desc",
     session: Session = Depends(get_session),
 ) -> list[dict]:
     query = select(Document)
@@ -75,7 +87,7 @@ def list_documents(
         query = query.join(DocumentTag, DocumentTag.document_id == Document.id).where(
             DocumentTag.tag_id == tag_id
         )
-    query = query.order_by(Document.created_at.desc())
+    query = query.order_by(*SORT_ORDER[sort])
     return [serialize(session, d) for d in session.exec(query)]
 
 
