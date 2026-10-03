@@ -15,6 +15,7 @@ describe("buildChatRequest", () => {
       {
         messages: [msg("u1", "user", "Prima?"), msg("a1", "assistant", "Risposta.")],
         pinned: [{ id: "doc-2", title: "Contratto", document_date: "2026-01-10" }],
+        auto: [],
         excluded: ["doc-1"],
       },
       "Seconda?",
@@ -44,6 +45,7 @@ describe("buildChatRequest", () => {
           msg("a4", "assistant", "risposta"),
         ],
         pinned: [],
+        auto: [],
         excluded: [],
       },
       "nuova",
@@ -60,9 +62,18 @@ describe("buildChatRequest", () => {
 
   it("sends at most the last 40 messages", () => {
     const messages = Array.from({ length: 50 }, (_, i) => msg(`m${i}`, i % 2 === 0 ? "user" : "assistant", `m${i}`));
-    const body = buildChatRequest({ messages, pinned: [], excluded: [] }, "ultima");
+    const body = buildChatRequest({ messages, pinned: [], auto: [], excluded: [] }, "ultima");
     expect(body.messages).toHaveLength(40);
     expect(body.messages[0].content).toBe("m11");
     expect(body.messages[39]).toEqual({ role: "user", content: "ultima" });
+  });
+
+  it("sends auto ids after pinned ids, de-duplicated", () => {
+    const doc = (id: string) => ({ id, title: id, document_date: "2026-01-10" });
+    const body = buildChatRequest(
+      { messages: [], pinned: [doc("doc-2")], auto: [doc("doc-1"), doc("doc-2")], excluded: [] },
+      "q",
+    );
+    expect(body.pinned_ids).toEqual(["doc-2", "doc-1"]);
   });
 });

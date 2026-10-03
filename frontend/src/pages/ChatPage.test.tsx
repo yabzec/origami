@@ -7,6 +7,7 @@ import { ChatPage } from "./ChatPage";
 
 const fetchMock = vi.fn();
 beforeEach(() => {
+  window.sessionStorage.clear();
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -35,7 +36,7 @@ function chatBodies() {
 
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
+  return render(
     <QueryClientProvider client={qc}>
       <MemoryRouter>
         <ChatPage />
@@ -124,4 +125,26 @@ it("Stop keeps the partial answer and the next question gets its own reply", asy
     { role: "assistant", content: "Risposta parz" },
     { role: "user", content: "seconda" },
   ]);
+});
+
+it("restores the conversation and chips after the page is left and reopened", async () => {
+  fetchMock.mockImplementation(async () => answer("Hai pagato **42 euro** [1]."));
+  const first = renderPage();
+  await ask("Quanto ho pagato?");
+  await screen.findByText("42 euro");
+  first.unmount();
+  renderPage();
+  expect(screen.getByText("Quanto ho pagato?")).toBeInTheDocument();
+  expect(screen.getByText("42 euro")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Remove Bolletta marzo" })).toBeInTheDocument();
+});
+
+it("sends earlier auto chips with a follow-up", async () => {
+  fetchMock.mockImplementationOnce(async () => answer("Prima [1].")).mockImplementationOnce(async () => answer("Seconda.", []));
+  renderPage();
+  await ask("Quanto ho pagato?");
+  await screen.findByText(/Prima/);
+  await ask("E a febbraio?");
+  await screen.findByText("Seconda.");
+  expect(chatBodies()[1].pinned_ids).toEqual(["doc-1"]);
 });

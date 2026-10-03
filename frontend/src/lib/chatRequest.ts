@@ -10,7 +10,7 @@ export interface ChatRequestBody {
 
 /** Body for POST /api/chat: history plus the new question, without failed or empty replies. */
 export function buildChatRequest(
-  state: Pick<ChatState, "messages" | "pinned" | "excluded">,
+  state: Pick<ChatState, "messages" | "pinned" | "auto" | "excluded">,
   text: string,
 ): ChatRequestBody {
   const history = state.messages
@@ -18,7 +18,8 @@ export function buildChatRequest(
     .map(({ role, content }) => ({ role, content }));
   return {
     messages: [...history, { role: "user" as const, content: text }].slice(-MAX_REQUEST_MESSAGES),
-    pinned_ids: state.pinned.map((d) => d.id),
+    // The chips are the context: pinned first, then auto files from earlier turns.
+    pinned_ids: [...new Set([...state.pinned, ...state.auto].map((d) => d.id))],
     excluded_ids: [...state.excluded],
   };
 }
