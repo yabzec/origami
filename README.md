@@ -2,6 +2,14 @@
 
 Self-hosted document management system: scan, upload, OCR, semantic search, and RAG chat over your own documents.
 
+## Features
+
+- **Upload and scan:** PDF, images, video, text, Markdown and office documents (`.doc`, `.docx`, `.odt`, `.rtf`). Office files get a PDF preview made by headless LibreOffice, and Download still returns the original file.
+- **AI description:** the AI summary fills an empty description and is marked "AI generated" until you edit it. Re-process refreshes an AI description and keeps one you edited.
+- **Browse:** drill-down folder picker (upload, scan and document pages), an order-by menu (document date newest/oldest, date added, title A–Z) kept in the URL, and type icons per document.
+- **Background jobs with retries:** every job is retried after 30 s, 2 min, 10 min and 30 min (5 attempts). Between attempts the document stays `pending` and the UI shows the next attempt. After the last failure every user with an email address gets a notification. Translation runs as its own retried job.
+- **Chat:** multi-turn conversation with Markdown answers and `[n]` citations that link to the documents. Origami shortlists candidate documents locally and asks the LLM which ones you mean. Passages come only from those documents and from files you pin. The files in context show as chips: remove one to keep it out of the conversation, or add one with **+ Add file**. The conversation is kept in the browser tab (session storage) until you press **New chat**.
+
 ## Installation
 
 ### System dependencies
@@ -55,6 +63,8 @@ Run tests (real Postgres, no mocks — `docker compose up -d db` must be running
 ```bash
 uv run pytest
 ```
+
+The tests never read your `.env`: they use the code defaults, a throwaway `origami_test` database, and fake LLM and SMTP clients, so no real API call or email is made.
 
 ### Frontend
 
@@ -114,6 +124,55 @@ uv run python -m app.cli create-user <username>
 ```
 
 You'll be prompted for the password twice.
+
+## AI providers
+
+Text, vision and embeddings can use different providers (model names follow [litellm](https://docs.litellm.ai/docs/providers)). Example `.env` with text on Groq and vision plus embeddings on Gemini:
+
+```bash
+LLM_MODEL=groq/openai/gpt-oss-120b
+LLM_API_KEY=<groq key>
+VISION_MODEL=gemini/gemini-2.5-flash
+VISION_API_KEY=<google key>
+EMBEDDING_MODEL=gemini/gemini-embedding-001
+EMBEDDING_API_KEY=<google key>
+```
+
+`VISION_API_KEY` / `VISION_API_BASE` fall back to `LLM_API_KEY` / `LLM_API_BASE` as a pair: when `VISION_API_KEY` is empty, vision uses both LLM values. When it is set, `VISION_API_BASE` is used on its own (empty means the provider default). `EMBEDDING_API_KEY` and `EMBEDDING_API_BASE` each fall back to the LLM value on their own.
+
+List the models offered by the `LLM_MODEL` provider (Groq, OpenAI, Gemini or an OpenAI-compatible `LLM_API_BASE`):
+
+```bash
+cd backend
+uv run python -m app.cli list-models
+```
+
+## Email notifications
+
+When a background job fails for the 5th time, Origami emails every user that has an email address. Without SMTP settings, nothing is sent and the failure is only logged.
+
+1. Gmail: turn on 2-Step Verification, then create an app password (Google Account › Security › App passwords). The normal account password does not work.
+2. Add to `.env`:
+
+   ```bash
+   SMTP_HOST=smtp.gmail.com
+   SMTP_PORT=587
+   SMTP_USER=<gmail address>
+   SMTP_APP_PASSWORD=<16-character app password>
+   SMTP_FROM=
+   APP_BASE_URL=http://<host>:<port>
+   ```
+
+   `SMTP_FROM` empty means the sender is `SMTP_USER`. `APP_BASE_URL` is optional; when set, emails link to the document.
+
+3. Restart the service, set the recipients and send a test message:
+
+   ```bash
+   sudo systemctl restart origami
+   cd backend
+   uv run python -m app.cli set-email <username> <email>
+   uv run python -m app.cli test-email
+   ```
 
 ## Storage
 
