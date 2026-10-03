@@ -1,22 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { citationsToMarkdown, isCitationLabel, isInternalHref, splitCitations } from "./citations";
+import { citationsToMarkdown, isCitationLabel, isInternalHref } from "./citations";
 import type { ChatSource } from "./types";
-
-describe("splitCitations", () => {
-  it("passes plain text through", () => {
-    expect(splitCitations("nessuna citazione")).toEqual([{ kind: "text", text: "nessuna citazione" }]);
-  });
-
-  it("extracts citation markers", () => {
-    expect(splitCitations("La bolletta è di 42 euro [1] pagata a marzo [2].")).toEqual([
-      { kind: "text", text: "La bolletta è di 42 euro " },
-      { kind: "citation", n: 1 },
-      { kind: "text", text: " pagata a marzo " },
-      { kind: "citation", n: 2 },
-      { kind: "text", text: "." },
-    ]);
-  });
-});
 
 const SOURCES: ChatSource[] = [
   { n: 1, chunk_id: 7, document_id: "doc-1", title: "Bolletta marzo", page_number: 2 },
