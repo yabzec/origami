@@ -90,13 +90,22 @@ One command starts everything (db container, migrations, API on
 - `cd frontend && npm install && npm run build` (the backend serves `frontend/dist`)
 - docker available (the unit runs with the `docker` supplementary group)
 
-Install and start:
+Install and start. `deploy/origami.service` is a template: `@USER@` is the
+account that runs Origami and `@REPO_DIR@` is the absolute path of this repo.
+From the repo root, as that user:
 
 ```bash
-sudo cp deploy/origami.service /etc/systemd/system/
+sed -e "s|@USER@|$USER|g" -e "s|@REPO_DIR@|$PWD|g" deploy/origami.service \
+  | sudo tee /etc/systemd/system/origami.service >/dev/null
 sudo systemctl daemon-reload
 sudo systemctl enable --now origami
 ```
+
+The API address comes from `ORIGAMI_HOST` and `ORIGAMI_PORT`. The unit sets
+`127.0.0.1:8124` (this machine only); set `Environment=ORIGAMI_HOST=0.0.0.0`
+in `/etc/systemd/system/origami.service` to reach it from the LAN, then run
+`sudo systemctl daemon-reload && sudo systemctl restart origami`. Run directly,
+`deploy/origami.sh` defaults to `0.0.0.0:8124`.
 
 Operate:
 
@@ -108,10 +117,9 @@ sudo systemctl stop origami   # stops api+worker; the db container stays up
 docker compose stop db        # stop the db too, when you really want to
 ```
 
-The app is served at `http://127.0.0.1:8124` — front it with cloudflared
-(or edit `--host` in `deploy/origami.sh` to expose it on the LAN). If the
-repo moves, update `WorkingDirectory` and `ExecStart` in the unit file and
-re-run the install commands.
+With the default unit the app is served at `http://127.0.0.1:8124` — front it
+with cloudflared, or set `ORIGAMI_HOST=0.0.0.0` to expose it on the LAN. If the
+repo moves, re-run the install commands from the new location.
 
 ## Create a user
 

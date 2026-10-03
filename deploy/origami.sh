@@ -19,11 +19,14 @@ done
 
 cd "$REPO_DIR/backend"
 
+API_HOST="${ORIGAMI_HOST:-0.0.0.0}"
+API_PORT="${ORIGAMI_PORT:-8124}"
+
 echo "origami: applying migrations"
 .venv/bin/python -m alembic upgrade head
 
-echo "origami: starting api (127.0.0.1:8124) and worker"
-.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8124 &
+echo "origami: starting api ($API_HOST:$API_PORT) and worker"
+.venv/bin/uvicorn app.main:app --host "$API_HOST" --port "$API_PORT" &
 API_PID=$!
 .venv/bin/python -m app.worker &
 WORKER_PID=$!

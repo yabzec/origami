@@ -1,3 +1,8 @@
+# Template unit. Install it with the user and repo path filled in, e.g. from the repo root:
+#   sed -e "s|@USER@|$USER|g" -e "s|@REPO_DIR@|$PWD|g" deploy/origami.service \
+#     | sudo tee /etc/systemd/system/origami.service >/dev/null
+# (see README, "Run as a systemd service").
+
 [Unit]
 Description=Origami DMS (API + worker; ensures db container is up)
 After=network-online.target docker.service
@@ -5,10 +10,14 @@ Wants=network-online.target
 
 [Service]
 Type=exec
-User=mcolpo
+User=@USER@
 SupplementaryGroups=docker
-WorkingDirectory=/home/mcolpo/Developer/Private/origami
-ExecStart=/home/mcolpo/Developer/Private/origami/deploy/origami.sh
+WorkingDirectory=@REPO_DIR@
+ExecStart=@REPO_DIR@/deploy/origami.sh
+# Address the API listens on. 127.0.0.1 = this machine only (e.g. behind cloudflared);
+# 0.0.0.0 = reachable from the LAN.
+Environment=ORIGAMI_HOST=127.0.0.1
+Environment=ORIGAMI_PORT=8124
 Restart=on-failure
 RestartSec=5
 
