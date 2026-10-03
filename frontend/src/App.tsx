@@ -6,7 +6,6 @@ import { BrowsePage } from "@/pages/BrowsePage";
 import { DocumentPage } from "@/pages/DocumentPage";
 import { ScanPage } from "@/pages/ScanPage";
 import { SearchPage } from "@/pages/SearchPage";
-import { ChatPage } from "@/pages/ChatPage";
 
 // Data router: required by useBlocker (scan page leave guard).
 const router = createBrowserRouter([
@@ -21,7 +20,7 @@ const router = createBrowserRouter([
           { path: "/documents/:id", element: <DocumentPage /> },
           { path: "/scan", element: <ScanPage /> },
           { path: "/search", element: <SearchPage /> },
-          { path: "/chat", element: <ChatPage /> },
+          { path: "/chat", lazy: () => import("@/pages/ChatPage").then((m) => ({ Component: m.ChatPage })) },
         ],
       },
     ],
