@@ -39,7 +39,7 @@ export function citationsToMarkdown(text: string, sources: ChatSource[]): string
 
 /** Same-app path (rendered with the router), not a protocol-relative URL. */
 export function isInternalHref(href: string): boolean {
-  return href.startsWith("/") && !href.startsWith("//");
+  return /^\/(?![/\\])/.test(href);
 }
 
 /** Link text produced by citationsToMarkdown, e.g. "[3]". */

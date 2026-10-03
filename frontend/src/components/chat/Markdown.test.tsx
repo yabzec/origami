@@ -43,3 +43,9 @@ it("neutralises javascript: links and opens external links in a new tab", () => 
   expect(external).toHaveAttribute("target", "_blank");
   expect(external).toHaveAttribute("rel", "noopener noreferrer");
 });
+
+it("does not render markdown images, keeping the alt text", () => {
+  const { container } = renderMarkdown("Vedi ![grafico](https://x.example/y.png) qui");
+  expect(container.querySelector("img")).toBeNull();
+  expect(screen.getByText(/grafico/)).toBeInTheDocument();
+});

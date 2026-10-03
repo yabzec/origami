@@ -27,6 +27,8 @@ const components: Components = {
       </a>
     );
   },
+  // Images would fetch external URLs on render (data leak/tracking): show the alt text only.
+  img: ({ alt }) => <span>{alt}</span>,
   p: ({ children }) => <p className="my-2 leading-relaxed first:mt-0 last:mb-0">{children}</p>,
   ul: ({ children }) => <ul className="my-2 list-disc space-y-1 pl-5">{children}</ul>,
   ol: ({ children }) => <ol className="my-2 list-decimal space-y-1 pl-5">{children}</ol>,

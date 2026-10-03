@@ -47,6 +47,7 @@ describe("citationsToMarkdown", () => {
   it("recognises app paths and citation labels", () => {
     expect(isInternalHref("/documents/doc-1")).toBe(true);
     expect(isInternalHref("//evil.example/x")).toBe(false);
+    expect(isInternalHref("/\\evil.com")).toBe(false);
     expect(isInternalHref("https://example.com")).toBe(false);
     expect(isCitationLabel("[12]")).toBe(true);
     expect(isCitationLabel("Contratto")).toBe(false);
