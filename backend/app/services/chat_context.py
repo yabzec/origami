@@ -4,6 +4,7 @@ import uuid
 from collections.abc import Iterable
 from typing import TypedDict
 
+from sqlalchemy import text
 from sqlmodel import Session, select
 
 from app.models import Chunk, ChunkSource, Document
@@ -40,6 +41,11 @@ def shortlist_documents(
     """Up to `limit` documents whose summary/metadata chunks match `query`, best first."""
     query = query[:QUERY_MAX_CHARS]
     query_vector = llm_embed([query])[0]
+    # The source filter is applied after the HNSW index returns ef_search neighbours, so on a large
+    # archive it can leave too few summary/metadata hits; iterative scan keeps pulling until filled.
+    session.exec(  # transaction-local
+        text("SELECT set_config('hnsw.iterative_scan', 'strict_order', true), set_config('hnsw.ef_search', '100', true)")
+    )
     semantic_hits = semantic_search(
         session, query_vector, limit=SHORTLIST_POOL, sources=SHORTLIST_SOURCES
     )

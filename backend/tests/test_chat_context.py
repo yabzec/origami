@@ -1,4 +1,5 @@
 import pytest
+from sqlalchemy import text
 
 from app.models import ChunkSource
 from app.services import chat_context
@@ -104,3 +105,10 @@ def test_shortlist_truncates_long_query(session, embed_calls):
 
 def test_shortlist_empty_archive_returns_empty(session, embed_calls):
     assert shortlist_documents(session, "qualcosa") == []
+
+
+def test_shortlist_enables_iterative_hnsw_scan_for_the_transaction(session, embed_calls):
+    summary_doc(session, "Bolletta luce", basis_vector(0))
+    assert shortlist_documents(session, "bolletta")
+    assert session.exec(text("SHOW hnsw.iterative_scan")).scalar() == "strict_order"
+    assert session.exec(text("SHOW hnsw.ef_search")).scalar() == "100"
