@@ -4,15 +4,18 @@ import { ContextBar } from "@/components/chat/ContextBar";
 import { MessageList } from "@/components/chat/MessageList";
 import { Button } from "@/components/ui/button";
 import { getToken } from "@/lib/api";
-import { chatReducer, initialChatState, nextMessageId } from "@/lib/chatReducer";
+import { chatReducer, nextMessageId } from "@/lib/chatReducer";
 import { buildChatRequest } from "@/lib/chatRequest";
+import { loadChatState, saveChatState } from "@/lib/chatStorage";
 import { parseSSEStream } from "@/lib/sse";
 
 const NEW_CHAT_CONFIRM = "Start a new chat? The current conversation will be cleared.";
 
 export function ChatPage() {
-  const [state, dispatch] = useReducer(chatReducer, initialChatState);
+  const [state, dispatch] = useReducer(chatReducer, undefined, () => loadChatState());
   const controllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => saveChatState(state), [state]); // survives following a citation link and coming back
 
   useEffect(() => () => controllerRef.current?.abort(), []); // leaving the page stops the stream
 
