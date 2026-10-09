@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AgentInstallPanel } from "./AgentInstallPanel";
@@ -49,4 +49,21 @@ it("links the detected platform when it is built", async () => {
   renderPanel();
   const link = await screen.findByRole("link", { name: "Download for Windows" });
   expect(link).toHaveAttribute("download");
+});
+
+it("shows the install steps for the platform that was downloaded", async () => {
+  vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (X11; Linux x86_64)");
+  const stopNavigation = (e: Event) => e.preventDefault(); // jsdom cannot follow a download link
+  document.addEventListener("click", stopNavigation);
+  try {
+    renderPanel();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("link", { name: "Download for Linux (x86-64)" }));
+    const banner = screen.getByRole("status");
+    expect(banner).toHaveTextContent("chmod +x ~/.local/share/origami-agent/origami-agent-linux-amd64");
+    fireEvent.click(screen.getByRole("link", { name: "Windows" }));
+    expect(screen.getByRole("status")).toHaveTextContent("origami-agent-windows-amd64.exe");
+  } finally {
+    document.removeEventListener("click", stopNavigation);
+  }
 });

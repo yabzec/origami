@@ -5,6 +5,7 @@ import {
   detectPlatform,
   devicePollInterval,
   downloadUrl,
+  installSteps,
   getClientId,
   groupDevices,
   initialSearch,
@@ -147,5 +148,30 @@ describe("devicePollInterval", () => {
     expect(devicePollInterval(late, 119_999)).toBe(2000);
     expect(devicePollInterval(late, 120_000)).toBe(false);
     expect(devicePollInterval({ phase: "found", startedAt: 0 }, 5000)).toBe(false);
+  });
+});
+
+describe("installSteps", () => {
+  it("moves the Linux build to a hidden folder, makes it executable and runs it", () => {
+    const steps = installSteps("linux-arm64");
+    expect(steps.map((s) => s.command).filter(Boolean)).toEqual([
+      "mkdir -p ~/.local/share/origami-agent && mv ~/Downloads/origami-agent-linux-arm64 ~/.local/share/origami-agent/",
+      "chmod +x ~/.local/share/origami-agent/origami-agent-linux-arm64",
+      "~/.local/share/origami-agent/origami-agent-linux-arm64",
+    ]);
+    expect(steps.at(-1)?.text).toMatch(/Installed, search now/);
+  });
+
+  it("uses the Windows build name and a per-user folder", () => {
+    const commands = installSteps("windows-amd64").map((s) => s.command ?? "").join("\n");
+    expect(commands).toContain('$env:LOCALAPPDATA\\Origami Agent');
+    expect(commands).toContain("origami-agent-windows-amd64.exe");
+  });
+
+  it("tells macOS users to open the app once from Applications", () => {
+    const text = installSteps("darwin-amd64").map((s) => s.text).join(" ");
+    expect(text).toMatch(/origami-agent-darwin-amd64\.zip/);
+    expect(text).toMatch(/Applications/);
+    expect(text).toMatch(/right-click/i);
   });
 });

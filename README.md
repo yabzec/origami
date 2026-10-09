@@ -105,13 +105,13 @@ Set `PUBLIC_URL` in `.env` to the address clients use to reach Origami (e.g. `ht
 
 ### First run on a client
 
-On the scan page open the scanner menu, choose **Search local scanners** and download the agent for your system. Run it once:
+On the scan page open the scanner menu, choose **Search local scanners** and download the agent for your system. After the download the menu shows the exact steps for that system. Put the file in a hidden folder where it can stay, then run it once:
 
-- **Windows:** if SmartScreen says "Windows protected your PC", choose **More info → Run anyway**. Allow it on private networks when the firewall asks.
+- **Windows:** move it to `%LOCALAPPDATA%\Origami Agent\` and run it. If SmartScreen says "Windows protected your PC", choose **More info → Run anyway**. Allow it on private networks when the firewall asks.
 - **macOS:** unzip, move **Origami Agent** to Applications, right-click → **Open** once.
-- **Linux:** `chmod +x origami-agent-linux-*` and run it once. It needs `xdg-mime` (package `xdg-utils`).
+- **Linux:** move it to `~/.local/share/origami-agent/`, then `chmod +x` it and run it once. It needs `xdg-mime` (package `xdg-utils`).
 
-Keep the file where it is: the browser starts it from that path. Then click **Installed, search now**. The browser asks once whether to open Origami Agent; tick "always allow".
+Keep the file in that folder: the browser starts it from that path. Then click **Installed, search now**. The browser asks once whether to open Origami Agent; tick "always allow".
 
 The agent remembers the first Origami server that starts it, and refuses others. To pair it with another server, run it with `--reset`. It also keeps a private key in `origami-agent/handoff.key` in your user settings folder: when the agent is already running, a second start must show this key, so another user on the same computer cannot take it over.
 

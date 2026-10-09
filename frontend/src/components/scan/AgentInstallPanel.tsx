@@ -1,19 +1,36 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { api, getToken } from "@/lib/api";
-import { AGENT_PLATFORMS, detectPlatform, downloadUrl, type AgentPlatform } from "@/lib/localScan";
+import { AGENT_PLATFORMS, detectPlatform, downloadUrl, installSteps, type AgentPlatform } from "@/lib/localScan";
 
-const FIRST_RUN: Record<string, string> = {
-  windows: "Run the file once. If Windows shows “Windows protected your PC”, choose More info → Run anyway. Allow it on private networks if the firewall asks.",
-  darwin: "Unzip, move Origami Agent to Applications, then right-click it → Open once.",
-  linux: "Make it executable (chmod +x origami-agent-linux-*) and run it once.",
-};
+function InstallSteps({ platform, label }: { platform: AgentPlatform; label: string }) {
+  return (
+    <div role="status" className="space-y-1 rounded-md border border-brand-300 bg-brand-200/40 p-2 text-zinc-700">
+      <p className="font-medium">Finish installing on {label}</p>
+      <ol className="list-decimal space-y-1 pl-4">
+        {installSteps(platform).map((step) => (
+          <li key={step.text}>
+            {step.text}
+            {step.command && (
+              <code className="mt-0.5 block rounded bg-zinc-100 px-1.5 py-1 font-mono break-all select-all">
+                {step.command}
+              </code>
+            )}
+          </li>
+        ))}
+      </ol>
+      <p>Keep the file in that folder: the browser starts it from there.</p>
+    </div>
+  );
+}
 
 export function AgentInstallPanel({ onInstalled }: { onInstalled: () => void }) {
   const detected = detectPlatform(navigator.userAgent);
   const token = getToken();
   const others = AGENT_PLATFORMS.filter((p) => p.id !== detected);
   const label = (id: AgentPlatform) => AGENT_PLATFORMS.find((p) => p.id === id)?.label ?? id;
+  const [downloaded, setDownloaded] = useState<AgentPlatform | null>(null);
   const { data } = useQuery({
     queryKey: ["agent-downloads"],
     queryFn: () => api.get<{ platforms: AgentPlatform[] }>("/api/agent/downloads"),
@@ -31,11 +48,11 @@ export function AgentInstallPanel({ onInstalled }: { onInstalled: () => void }) 
             <a
               href={downloadUrl(detected, token)}
               download
+              onClick={() => setDownloaded(detected)}
               className="inline-block rounded-md bg-brand-700 px-3 py-1.5 font-medium text-white hover:bg-brand-800"
             >
               Download for {label(detected)}
             </a>
-            <p>{FIRST_RUN[detected.split("-")[0]]}</p>
           </>
         ) : (
           <p>{notBuilt(detected)}</p>
@@ -46,7 +63,7 @@ export function AgentInstallPanel({ onInstalled }: { onInstalled: () => void }) 
           <span key={p.id}>
             {i > 0 && " · "}
             {built(p.id) ? (
-              <a className="underline" href={downloadUrl(p.id, token)} download>
+              <a className="underline" href={downloadUrl(p.id, token)} download onClick={() => setDownloaded(p.id)}>
                 {p.label}
               </a>
             ) : (
@@ -55,6 +72,7 @@ export function AgentInstallPanel({ onInstalled }: { onInstalled: () => void }) 
           </span>
         ))}
       </p>
+      {downloaded && <InstallSteps platform={downloaded} label={label(downloaded)} />}
       <Button type="button" size="sm" onClick={onInstalled}>
         Installed, search now
       </Button>

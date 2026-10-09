@@ -131,3 +131,55 @@ export function downloadUrl(platform: AgentPlatform, token: string | null): stri
   const base = `/api/agent/download/${platform}`;
   return token ? `${base}?token=${encodeURIComponent(token)}` : base;
 }
+
+/** File names served by /api/agent/download (backend AGENT_FILES). */
+export const AGENT_FILE_NAMES: Record<AgentPlatform, string> = {
+  "windows-amd64": "origami-agent-windows-amd64.exe",
+  "darwin-arm64": "origami-agent-darwin-arm64.zip",
+  "darwin-amd64": "origami-agent-darwin-amd64.zip",
+  "linux-amd64": "origami-agent-linux-amd64",
+  "linux-arm64": "origami-agent-linux-arm64",
+};
+
+export interface InstallStep {
+  text: string;
+  command?: string;
+}
+
+const LINUX_DIR = "~/.local/share/origami-agent";
+const WINDOWS_DIR = "$env:LOCALAPPDATA\\Origami Agent";
+const FINAL_STEP: InstallStep = { text: "Come back here and click Installed, search now." };
+
+/** First-run steps after downloading. The file must stay where it is put: the browser starts it from there. */
+export function installSteps(platform: AgentPlatform): InstallStep[] {
+  const file = AGENT_FILE_NAMES[platform];
+  if (platform.startsWith("linux")) {
+    return [
+      {
+        text: "Move it to a hidden folder where it can stay:",
+        command: `mkdir -p ${LINUX_DIR} && mv ~/Downloads/${file} ${LINUX_DIR}/`,
+      },
+      { text: "Make it executable:", command: `chmod +x ${LINUX_DIR}/${file}` },
+      { text: "Run it once (it needs xdg-utils):", command: `${LINUX_DIR}/${file}` },
+      FINAL_STEP,
+    ];
+  }
+  if (platform.startsWith("windows")) {
+    return [
+      {
+        text: "In PowerShell, move it to a folder in your user profile where it can stay:",
+        command: `New-Item -ItemType Directory -Force "${WINDOWS_DIR}"; Move-Item "$HOME\\Downloads\\${file}" "${WINDOWS_DIR}\\"`,
+      },
+      { text: "Run it once:", command: `& "${WINDOWS_DIR}\\${file}"` },
+      {
+        text: "If Windows says “Windows protected your PC”, choose More info → Run anyway. Allow it on private networks if the firewall asks.",
+      },
+      FINAL_STEP,
+    ];
+  }
+  return [
+    { text: `Open ${file} and move Origami Agent to Applications.` },
+    { text: "Right-click Origami Agent → Open, once." },
+    FINAL_STEP,
+  ];
+}
