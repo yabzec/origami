@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { rangeSelect, toggleId } from "./selection";
+import { rangeSelect, shouldClearOnEscape, toggleId } from "./selection";
 
 const ORDER = ["a", "b", "c", "d", "e"];
 
@@ -20,5 +20,16 @@ describe("selection", () => {
   it("falls back to a toggle without a usable anchor", () => {
     expect([...rangeSelect(new Set(), ORDER, null, "c")]).toEqual(["c"]);
     expect([...rangeSelect(new Set(), ORDER, "zz", "c")]).toEqual(["c"]);
+  });
+});
+
+describe("shouldClearOnEscape", () => {
+  it("is false while a dialog is open", () => {
+    expect(shouldClearOnEscape()).toBe(true);
+    const d = document.createElement("div");
+    d.setAttribute("role", "dialog");
+    document.body.appendChild(d);
+    expect(shouldClearOnEscape()).toBe(false);
+    d.remove();
   });
 });

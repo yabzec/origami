@@ -21,6 +21,7 @@ import {
 } from "@/lib/browseParams";
 import { childrenOf } from "@/lib/folderTree";
 import { parseSort, SORT_OPTIONS } from "@/lib/sorting";
+import { shouldClearOnEscape } from "@/lib/selection";
 import { DOC_TYPES } from "@/lib/types";
 
 export function BrowsePage() {
@@ -61,7 +62,9 @@ export function BrowsePage() {
 
   const { clear } = selection;
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && clear();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && shouldClearOnEscape()) clear();
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [clear]);

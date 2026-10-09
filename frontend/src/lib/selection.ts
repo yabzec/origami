@@ -18,3 +18,8 @@ export function rangeSelect(
   const [lo, hi] = from < to ? [from, to] : [to, from];
   return new Set([...sel, ...order.slice(lo, hi + 1)]);
 }
+
+/** Esc clears the selection, unless it is closing an open dialog (dialogs listen on window too). */
+export function shouldClearOnEscape(doc: Document = document): boolean {
+  return doc.querySelector('[role="dialog"]') === null;
+}

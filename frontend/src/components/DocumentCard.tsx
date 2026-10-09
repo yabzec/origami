@@ -40,7 +40,7 @@ export function DocumentCard({
           checked={selected}
           onChange={() => {}}
           onClick={(e) => onToggleSelect(doc.id, e.shiftKey)}
-          className={cn("absolute top-2 left-2 z-10 h-4 w-4", selecting || selected ? "block" : "hidden group-hover:block")}
+          className={cn("absolute top-2 left-2 z-10 h-4 w-4", selecting || selected ? "opacity-100" : "opacity-100 focus:opacity-100 md:opacity-0 md:group-hover:opacity-100")}
         />
       )}
       <Link to={`/documents/${doc.id}`} className="block">
