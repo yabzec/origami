@@ -165,3 +165,35 @@ def test_uuid_orphan_is_quarantined(session, store):
     assert report.quarantined == [name]
     assert not store.has_old_layout()
     assert not (store.root / "files").exists()
+
+
+def test_root_folder_named_files_blocks_migration(session, store):
+    from app.services.storage_migration import ReservedFolderExists
+
+    session.add(Folder(name="Files"))
+    session.commit()
+    doc = old_doc(session, store, "A", ".pdf")
+    with pytest.raises(ReservedFolderExists, match="rename it"):
+        migrate_storage(session, store)
+    session.refresh(doc)
+    assert doc.file_path == f"files/{doc.id}.pdf"
+    assert store.abs_path(doc.file_path).exists()
+
+
+def test_sweep_never_moves_a_file_a_document_points_at(session, store):
+    from app.services.storage_migration import MigrationReport, _sweep_files_dir
+
+    other = Document(title="Other", doc_type=DocType.image, file_path="Other.png")
+    session.add(other)
+    session.commit()
+    names = [f"{uuid.uuid4()}.txt", f"{other.id}.pdf"]  # a uuid-named file, and one shaped like a companion
+    for name in names:
+        store.write_file(f"files/{name}", b"live")
+        session.add(Document(title=name, doc_type=DocType.text, file_path=f"files/{name}"))
+    session.commit()
+    report = MigrationReport()
+    _sweep_files_dir(session, store, False, report)
+    for name in names:
+        assert store.abs_path(f"files/{name}").read_bytes() == b"live"
+    assert report.quarantined == []
+    assert report.moved == []

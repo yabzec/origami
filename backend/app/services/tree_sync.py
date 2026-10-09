@@ -61,11 +61,17 @@ def disk_transaction(session: Session, storage: Storage):
 
 # Fixed key of the transaction-scoped advisory lock that serializes every tree path computation.
 TREE_LOCK_KEY = 7_202_610_009
+RESERVED_ROOT_NAME = "files"  # the old flat layout lived in STORAGE_PATH/files
 
 
 def lock_tree(session: Session) -> None:
     """Serialize path computations and tree moves until this transaction ends (re-entrant)."""
     session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": TREE_LOCK_KEY})
+
+
+def reserved_folder_name(parent_id: int | None, name: str) -> bool:
+    """True for a root folder whose directory would be `files` (mistaken for the old layout)."""
+    return parent_id is None and safe_name(name).lower() == RESERVED_ROOT_NAME
 
 
 def lock_documents(session: Session, ids: list[uuid.UUID]) -> list[Document]:

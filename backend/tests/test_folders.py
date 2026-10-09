@@ -140,3 +140,24 @@ def test_ensure_path_creates_and_reuses(auth_client, session, storage):
 def test_ensure_path_rejects_empty_segment(auth_client, storage):
     resp = auth_client.post("/api/folders/ensure-path", json={"parent_id": None, "segments": ["A", " "]})
     assert resp.status_code == 422
+
+
+def _assert_reserved(resp):
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["error"]["code"] == "reserved_folder_name"
+
+
+def test_root_folder_named_files_is_reserved(auth_client, storage):
+    _assert_reserved(auth_client.post("/api/folders", json={"name": "Files"}))
+    _assert_reserved(auth_client.post("/api/folders", json={"name": " files. "}))
+    home = _new_folder(auth_client, "Home")
+    _new_folder(auth_client, "files", home)  # allowed below the root
+    _assert_reserved(auth_client.patch(f"/api/folders/{home}", json={"name": "FILES"}))
+    nested = _new_folder(auth_client, "Files", _new_folder(auth_client, "Other"))
+    _assert_reserved(auth_client.patch(f"/api/folders/{nested}", json={"parent_id": None}))
+    _assert_reserved(
+        auth_client.post("/api/folders/ensure-path", json={"parent_id": None, "segments": ["files", "x"]})
+    )
+    ok = auth_client.post("/api/folders/ensure-path", json={"parent_id": home, "segments": ["files"]})
+    assert ok.status_code == 200
+    assert not storage.abs_path("files").exists()

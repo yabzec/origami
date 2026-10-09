@@ -121,3 +121,17 @@ def test_migrate_storage_dry_run_prints(monkeypatch, capsys, tmp_path, cli_engin
     monkeypatch.setattr("app.services.storage.get_storage", lambda: store)
     run_cli(monkeypatch, "migrate-storage", "--dry-run")
     assert "0 item(s) to move" in capsys.readouterr().out
+
+
+def test_migrate_storage_refuses_root_folder_named_files(session, monkeypatch, capsys, tmp_path, cli_engine):
+    from app.models import Folder
+    from app.services.storage import Storage
+
+    session.add(Folder(name="files"))
+    session.commit()
+    store = Storage(tmp_path / "storage")
+    monkeypatch.setattr("app.services.storage.get_storage", lambda: store)
+    with pytest.raises(SystemExit) as exc:
+        run_cli(monkeypatch, "migrate-storage")
+    assert exc.value.code == 1
+    assert "rename it in Origami first" in capsys.readouterr().out

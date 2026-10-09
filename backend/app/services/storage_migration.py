@@ -12,15 +12,19 @@ from pathlib import Path, PurePosixPath
 from sqlalchemy import func, or_, update
 from sqlmodel import Session, select
 
-from app.models import Document, ScanPage
+from app.models import Document, Folder, ScanPage
 from app.services.storage import OLD_LAYOUT_NAME, PART_SUFFIX, Storage, companion_name, preview_name
-from app.services.tree_paths import document_rel_path
+from app.services.tree_paths import document_rel_path, safe_name
 
 JOURNAL_NAME = "storage-migration.journal"
 
 log = logging.getLogger("origami.migration")
 
 OLD_FILE = re.compile(r"^files/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[^/]+$")
+
+
+class ReservedFolderExists(RuntimeError):
+    """A top-level folder maps to `files/`, where the old layout kept its files."""
 
 
 @dataclass
@@ -137,8 +141,12 @@ def _sweep_files_dir(session: Session, storage: Storage, dry_run: bool, report: 
     if not files_dir.is_dir():
         return
     if not dry_run:
+        # a file a document points at is never moved away, whatever its name
+        live = set(session.exec(select(Document.file_path).where(Document.file_path.startswith("files/"))))
         # companions stranded by an earlier interrupted run
         for path in sorted(files_dir.glob("*.pdf")):
+            if f"files/{path.name}" in live:
+                continue
             stem = path.name[: -len(".pdf")]
             try:
                 doc = session.get(Document, uuid.UUID(stem))
@@ -153,7 +161,7 @@ def _sweep_files_dir(session: Session, storage: Storage, dry_run: bool, report: 
                 _move_out(path, dst)
         # uuid-named orphans: quarantine, never delete
         for path in sorted(files_dir.iterdir()):
-            if not (path.is_file() and OLD_LAYOUT_NAME.match(path.name)):
+            if not (path.is_file() and OLD_LAYOUT_NAME.match(path.name)) or f"files/{path.name}" in live:
                 continue
             dst = storage.derived_abs(f"orphans/{path.name}")
             if dst.exists():
@@ -168,6 +176,15 @@ def _sweep_files_dir(session: Session, storage: Storage, dry_run: bool, report: 
 
 def migrate_storage(session: Session, storage: Storage, dry_run: bool = False) -> MigrationReport:
     """Idempotent and resumable: each document is moved and committed on its own."""
+    reserved = [
+        f.name for f in session.exec(select(Folder).where(Folder.parent_id.is_(None)))
+        if safe_name(f.name).lower() == "files"
+    ]
+    if reserved:
+        raise ReservedFolderExists(
+            f"The top-level folder {reserved[0]!r} uses the directory files/, where the old layout"
+            " kept its files; rename it in Origami first, then run the migration again"
+        )
     report = MigrationReport()
     if not dry_run:
         _replay_journal(session, storage)

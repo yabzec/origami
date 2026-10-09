@@ -74,7 +74,7 @@ def print_models() -> None:
 
 def migrate_storage_cmd(dry_run: bool, check: bool, fix: bool) -> None:
     from app.services.storage import get_storage
-    from app.services.storage_migration import check_storage, migrate_storage
+    from app.services.storage_migration import ReservedFolderExists, check_storage, migrate_storage
 
     storage = get_storage()
     with Session(engine) as session:
@@ -88,7 +88,11 @@ def migrate_storage_cmd(dry_run: bool, check: bool, fix: bool) -> None:
                 print(f"partial write{' (removed)' if fix else ''}: {rel}")
             print("Storage OK" if report.ok else "Storage has problems (see above)")
             raise SystemExit(0 if report.ok or fix else 1)
-        report = migrate_storage(session, storage, dry_run=dry_run)
+        try:
+            report = migrate_storage(session, storage, dry_run=dry_run)
+        except ReservedFolderExists as exc:
+            print(f"Error: {exc}")
+            raise SystemExit(1)
     for old, new in report.moved:
         print(f"{'would move' if dry_run else 'moved'}: {old} -> {new}")
     for rel in report.missing:
