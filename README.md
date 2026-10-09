@@ -122,6 +122,7 @@ If a new start replaces the agent's current Origami session, it shows the notice
 - **No scanners found:** the scanner must support eSCL/AirScan (look for AirPrint or Mopria Scan in its specs). Guest Wi-Fi with client isolation, or a firewall blocking multicast DNS (UDP 5353), hides the scanner.
 - **Agent not responding:** the browser prompt may have been dismissed, or the agent was moved after the first run. Run it again once, then search again.
 - **"port 47811 is in use by another program or user":** another program or another user on this computer is using port 47811. Close it, or sign the other user out, then start the agent again.
+- **Browser prompt for `origami-agent://` links:** any website can ask the browser to open an `origami-agent://` link. After you confirm the browser prompt, such a link can stop a running agent (it cannot connect it to another server). Only allow the prompt for your Origami site.
 
 ## Run as a systemd service
 
