@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { DocFilters, FilterField } from "@/components/DocFilters";
 import { DocumentCard } from "@/components/DocumentCard";
+import { BatchUploadDialog } from "@/components/BatchUploadDialog";
 import { UploadDialog } from "@/components/UploadDialog";
 import { Breadcrumb, FolderTiles } from "@/components/FolderTiles";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,8 @@ import {
   parseBrowseParams,
   type BrowseParams,
 } from "@/lib/browseParams";
+import type { PickedFile } from "@/lib/batchUpload";
+import { pickedFromDataTransfer, pickedFromInput } from "@/lib/dropEntries";
 import { childrenOf } from "@/lib/folderTree";
 import { parseSort, SORT_OPTIONS } from "@/lib/sorting";
 import { shouldClearOnEscape } from "@/lib/selection";
@@ -71,12 +74,23 @@ export function BrowsePage() {
   const fileInput = useRef<HTMLInputElement>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
+  const folderInput = useRef<HTMLInputElement>(null);
+  const [picked, setPicked] = useState<PickedFile[] | null>(null);
+  const [uploadMenu, setUploadMenu] = useState(false);
+
+  useEffect(() => {
+    folderInput.current?.setAttribute("webkitdirectory", ""); // not in React's input typings
+  }, []);
+
+  const receive = (files: PickedFile[]) => {
+    if (files.length === 1 && !files[0].relativePath.includes("/")) setPendingFile(files[0].file);
+    else if (files.length > 0) setPicked(files);
+  };
 
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
     setDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file) setPendingFile(file);
+    void pickedFromDataTransfer(e.dataTransfer).then(receive);
   };
 
   return (
@@ -98,14 +112,51 @@ export function BrowsePage() {
         <h2 className="flex-1 text-lg font-semibold">
           {params.all ? "All documents" : "Documents"}
         </h2>
-        <Button onClick={() => fileInput.current?.click()}>Upload</Button>
+        <div className="relative">
+          <Button onClick={() => setUploadMenu((v) => !v)} aria-haspopup="menu" aria-expanded={uploadMenu}>
+            Upload
+          </Button>
+          {uploadMenu && (
+            <div role="menu" className="absolute right-0 z-20 mt-1 w-36 rounded-md border border-zinc-200 bg-white p-1 shadow">
+              <button
+                role="menuitem"
+                className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-zinc-100"
+                onClick={() => {
+                  setUploadMenu(false);
+                  fileInput.current?.click();
+                }}
+              >
+                Files…
+              </button>
+              <button
+                role="menuitem"
+                className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-zinc-100"
+                onClick={() => {
+                  setUploadMenu(false);
+                  folderInput.current?.click();
+                }}
+              >
+                Folder…
+              </button>
+            </div>
+          )}
+        </div>
         <input
           ref={fileInput}
           type="file"
+          multiple
           hidden
           onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) setPendingFile(file);
+            receive(pickedFromInput(e.target.files ?? []));
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={folderInput}
+          type="file"
+          hidden
+          onChange={(e) => {
+            receive(pickedFromInput(e.target.files ?? []));
             e.target.value = "";
           }}
         />
@@ -197,6 +248,15 @@ export function BrowsePage() {
         onClose={() => setPendingFile(null)}
         initialFolderId={params.all ? null : params.folderId}
       />
+      {picked && (
+        <BatchUploadDialog
+          key={picked.map((p) => p.relativePath).join("|")}
+          picked={picked}
+          open
+          onClose={() => setPicked(null)}
+          initialFolderId={params.all ? null : params.folderId}
+        />
+      )}
     </div>
   );
 }
