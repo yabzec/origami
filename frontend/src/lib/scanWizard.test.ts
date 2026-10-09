@@ -149,6 +149,14 @@ describe("scannerMessage", () => {
     expect(scannerMessage("scanner_offline", "x")).toMatch(/power|USB/i);
     expect(scannerMessage("weird_code", "fallback text")).toBe("fallback text");
   });
+
+  it("explains an offline agent scanner", () => {
+    expect(scannerMessage("scanner_offline", "x", "agent:abcdefgh:u1")).toBe(
+      "Scanner not reachable — make sure the Origami Agent is running and the scanner is on, then use Search local scanners.",
+    );
+    expect(scannerMessage("scanner_offline", "x", "fake:0")).toMatch(/power|USB/i);
+    expect(scannerMessage("scanner_busy", "x", "agent:abcdefgh:u1")).toMatch(/busy/);
+  });
 });
 
 describe("movePage", () => {

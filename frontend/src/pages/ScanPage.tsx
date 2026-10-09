@@ -236,7 +236,7 @@ export function ScanPage() {
 
       {state.error && (
         <div className="flex items-center justify-between rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          <span>{scannerMessage(state.error.code, state.error.message)}</span>
+          <span>{scannerMessage(state.error.code, state.error.message, chosenDevice)}</span>
           <button onClick={() => dispatch({ type: "DISMISS_ERROR" })}>
             {state.phase === "starting" ? "Retry" : "×"}
           </button>

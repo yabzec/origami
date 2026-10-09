@@ -91,7 +91,11 @@ export const SCANNER_MESSAGES: Record<string, string> = {
   scanner_timeout: "The scan timed out — try power-cycling the scanner.",
 };
 
-export function scannerMessage(code: string, fallback: string): string {
+const AGENT_OFFLINE_MESSAGE =
+  "Scanner not reachable — make sure the Origami Agent is running and the scanner is on, then use Search local scanners.";
+
+export function scannerMessage(code: string, fallback: string, device?: string | null): string {
+  if (code === "scanner_offline" && device?.startsWith("agent:")) return AGENT_OFFLINE_MESSAGE;
   return SCANNER_MESSAGES[code] ?? fallback;
 }
 
