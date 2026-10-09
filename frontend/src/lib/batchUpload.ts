@@ -37,7 +37,7 @@ export type ItemState =
 
 export interface BatchDeps {
   ensurePath: (parentId: number | null, segments: string[]) => Promise<number | null>;
-  upload: (form: FormData, onProgress: (percent: number) => void) => Promise<unknown>;
+  upload: (form: FormData, onProgress: (percent: number) => void, signal?: AbortSignal) => Promise<unknown>;
 }
 
 export interface BatchOptions {
@@ -93,6 +93,7 @@ export async function runBatch(
   deps: BatchDeps,
   onState: (key: string, state: ItemState) => void,
   concurrency = 3,
+  signal?: AbortSignal,
 ): Promise<void> {
   const folders = new Map<string, Promise<number | null>>();
   const folderFor = (segments: string[]): Promise<number | null> => {
@@ -109,10 +110,11 @@ export async function runBatch(
 
   let next = 0;
   const worker = async () => {
-    while (next < items.length) {
+    while (next < items.length && !signal?.aborted) {
       const item = items[next++];
       try {
         const folderId = await folderFor(item.folderSegments);
+        if (signal?.aborted) throw new Error("Cancelled");
         onState(item.key, { status: "uploading", percent: 0 });
         const form = buildUploadForm(item.file, {
           title: item.title,
@@ -121,10 +123,13 @@ export async function runBatch(
           tagIds: options.tagIds,
           ...uploadProcessingFields(options.processing),
         });
-        await deps.upload(form, (percent) => onState(item.key, { status: "uploading", percent }));
+        await deps.upload(form, (percent) => onState(item.key, { status: "uploading", percent }), signal);
         onState(item.key, { status: "done" });
       } catch (err) {
-        onState(item.key, { status: "failed", message: err instanceof Error ? err.message : "Upload failed" });
+        onState(item.key, {
+          status: "failed",
+          message: signal?.aborted ? "Cancelled" : err instanceof Error ? err.message : "Upload failed",
+        });
       }
     }
   };

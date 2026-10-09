@@ -44,8 +44,17 @@ async function request<T>(
 }
 
 /** multipart POST with upload progress (fetch has no upload progress events). */
-function uploadForm<T>(path: string, form: FormData, onProgress?: (percent: number) => void): Promise<T> {
+function uploadForm<T>(
+  path: string,
+  form: FormData,
+  onProgress?: (percent: number) => void,
+  signal?: AbortSignal,
+): Promise<T> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new ApiError(0, "aborted", "Cancelled"));
+      return;
+    }
     const xhr = new XMLHttpRequest();
     xhr.open("POST", path);
     const token = getToken();
@@ -68,6 +77,9 @@ function uploadForm<T>(path: string, form: FormData, onProgress?: (percent: numb
       reject(new ApiError(xhr.status, err?.code ?? "unknown_error", err?.message ?? (xhr.statusText || "Upload failed"), err?.detail));
     };
     xhr.onerror = () => reject(new ApiError(0, "network_error", "Network error"));
+    xhr.onabort = () => reject(new ApiError(0, "aborted", "Cancelled"));
+    xhr.ontimeout = () => reject(new ApiError(0, "timeout", "Upload timed out"));
+    signal?.addEventListener("abort", () => xhr.abort(), { once: true });
     xhr.send(form);
   });
 }

@@ -62,3 +62,30 @@ describe("api client", () => {
     expect(fileUrl("doc-1", { download: true })).toBe("/api/documents/doc-1/file?token=tok&download=1");
   });
 });
+
+describe("api.upload abort", () => {
+  class FakeXhr {
+    upload = {};
+    onabort: (() => void) | null = null;
+    open() {}
+    setRequestHeader() {}
+    send() {}
+    abort() {
+      this.onabort?.();
+    }
+  }
+
+  it("settles with Cancelled when the signal aborts, and immediately if already aborted", async () => {
+    vi.stubGlobal("XMLHttpRequest", FakeXhr);
+    try {
+      const { api } = await import("./api");
+      const ctrl = new AbortController();
+      const pending = api.upload("/x", new FormData(), undefined, ctrl.signal);
+      ctrl.abort();
+      await expect(pending).rejects.toMatchObject({ message: "Cancelled" });
+      await expect(api.upload("/x", new FormData(), undefined, ctrl.signal)).rejects.toMatchObject({ message: "Cancelled" });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

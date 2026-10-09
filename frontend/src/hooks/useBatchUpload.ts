@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { runBatch, type BatchDeps, type BatchItem, type BatchOptions, type ItemState } from "@/lib/batchUpload";
@@ -15,13 +15,19 @@ export function useBatchUpload() {
   const qc = useQueryClient();
   const [states, setStates] = useState<Record<string, ItemState>>({});
   const [running, setRunning] = useState(false);
+  const controller = useRef<AbortController | null>(null);
+
+  const cancel = useCallback(() => controller.current?.abort(), []);
+  useEffect(() => cancel, [cancel]); // stop uploads when the dialog unmounts
 
   const run = useCallback(
     async (items: BatchItem[], options: BatchOptions) => {
+      const ctrl = new AbortController();
+      controller.current = ctrl;
       setRunning(true);
       setStates((s) => ({ ...s, ...Object.fromEntries(items.map((i) => [i.key, { status: "queued" } as ItemState])) }));
       try {
-        await runBatch(items, options, deps, (key, state) => setStates((s) => ({ ...s, [key]: state })));
+        await runBatch(items, options, deps, (key, state) => setStates((s) => ({ ...s, [key]: state })), undefined, ctrl.signal);
       } finally {
         setRunning(false);
         qc.invalidateQueries({ queryKey: ["documents"] });
@@ -32,5 +38,5 @@ export function useBatchUpload() {
   );
 
   const reset = useCallback(() => setStates({}), []);
-  return { states, running, run, reset };
+  return { states, running, run, reset, cancel };
 }

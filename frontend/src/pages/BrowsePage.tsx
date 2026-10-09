@@ -82,6 +82,23 @@ export function BrowsePage() {
     folderInput.current?.setAttribute("webkitdirectory", ""); // not in React's input typings
   }, []);
 
+  useEffect(() => {
+    if (!uploadMenu) return;
+    const close = () => setUploadMenu(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    const onClick = (e: MouseEvent) => {
+      if (!(e.target as Element).closest("[data-upload-menu]")) close();
+    };
+    document.addEventListener("click", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("click", onClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [uploadMenu]);
+
   const receive = (files: PickedFile[]) => {
     if (files.length === 1 && !files[0].relativePath.includes("/")) setPendingFile(files[0].file);
     else if (files.length > 0) setPicked(files);
@@ -112,7 +129,7 @@ export function BrowsePage() {
         <h2 className="flex-1 text-lg font-semibold">
           {params.all ? "All documents" : "Documents"}
         </h2>
-        <div className="relative">
+        <div className="relative" data-upload-menu>
           <Button onClick={() => setUploadMenu((v) => !v)} aria-haspopup="menu" aria-expanded={uploadMenu}>
             Upload
           </Button>

@@ -71,6 +71,25 @@ describe("runBatch", () => {
     expect(Object.values(states).every((s) => s.status === "done")).toBe(true);
   });
 
+  it("stops after an abort: in-flight upload is Cancelled, later items never start", async () => {
+    const ctrl = new AbortController();
+    const upload = vi.fn(
+      (_form: FormData, _p: (n: number) => void, signal?: AbortSignal) =>
+        new Promise<unknown>((_, reject) => {
+          signal?.addEventListener("abort", () => reject(new Error("aborted")));
+        }),
+    );
+    const { items } = planBatch(Array.from({ length: 4 }, (_, i) => ({ file: file(`${i}.pdf`), relativePath: `${i}.pdf` })));
+    const states: Record<string, ItemState> = {};
+    const done = runBatch(items, options, fakeDeps({ upload }).deps, (k, s) => (states[k] = s), 1, ctrl.signal);
+    await vi.waitFor(() => expect(upload).toHaveBeenCalledTimes(1));
+    ctrl.abort();
+    await done;
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(states[items[0].key]).toEqual({ status: "failed", message: "Cancelled" });
+    expect(states[items[1].key]).toBeUndefined();
+  });
+
   it("runs at most three uploads at once", async () => {
     let running = 0;
     let peak = 0;

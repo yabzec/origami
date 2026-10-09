@@ -10,7 +10,7 @@ import { useLeaveGuard } from "@/hooks/useLeaveGuard";
 import { batchCounts, planBatch, type ItemState, type PickedFile } from "@/lib/batchUpload";
 import { defaultProcessing, type ProcessingValues } from "@/lib/processing";
 
-const LEAVE_MESSAGE = "Uploads are still running. Leave anyway? Files not sent yet will not be uploaded.";
+const LEAVE_MESSAGE = "Uploads are still running. Stop them and close?";
 
 function stateLabel(state: ItemState | undefined): string {
   if (!state) return "";
@@ -42,7 +42,7 @@ export function BatchUploadDialog({
   const started = Object.keys(batch.states).length > 0;
   const counts = batchCounts(plan.items, batch.states);
 
-  useLeaveGuard(batch.running, LEAVE_MESSAGE, () => {});
+  useLeaveGuard(batch.running, LEAVE_MESSAGE, batch.cancel);
 
   if (!picked) return null;
 
@@ -51,7 +51,10 @@ export function BatchUploadDialog({
   const retryFailed = () =>
     void batch.run(plan.items.filter((i) => batch.states[i.key]?.status === "failed"), options);
   const close = () => {
-    if (batch.running && !window.confirm(LEAVE_MESSAGE)) return;
+    if (batch.running) {
+      if (!window.confirm(LEAVE_MESSAGE)) return;
+      batch.cancel();
+    }
     batch.reset();
     onClose();
   };
@@ -97,7 +100,7 @@ export function BatchUploadDialog({
         )}
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={close}>
-            {started && !batch.running ? "Close" : "Cancel"}
+            {batch.running ? "Stop and close" : started ? "Close" : "Cancel"}
           </Button>
           {!started && (
             <Button onClick={start} disabled={plan.items.length === 0}>
