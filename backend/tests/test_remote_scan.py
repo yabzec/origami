@@ -26,6 +26,7 @@ class FakeHub:
         self.next_document = [EsclResponse(200, "image/jpeg", {}, jpeg())]
         self.post_status = 201
         self.error = None
+        self.status_for = {}  # path -> forced response status
 
     def connected(self, user_id, client_id):
         return user_id == self.user_id and client_id == CLIENT
@@ -39,6 +40,8 @@ class FakeHub:
             raise self.error
         if not self.connected(user_id, client_id):
             raise AgentOffline()
+        if path in self.status_for:
+            return EsclResponse(self.status_for[path], "text/plain", {}, b"")
         if path == "ScannerCapabilities":
             return EsclResponse(200, "text/xml", {}, CAPS)
         if method == "POST" and path == "ScanJobs":
@@ -116,6 +119,48 @@ def test_agent_errors_map_to_scanner_errors():
 def test_other_users_device_is_offline():
     with pytest.raises(ScannerOffline):
         EsclRemoteBackend(FakeHub(user_id=2), user_id=1).scan(dpi=300, mode="Color", device=DEVICE)
+
+
+def test_undiscovered_scanner_is_offline_without_calls():
+    hub = FakeHub(scanners=[])
+    with pytest.raises(ScannerOffline):
+        EsclRemoteBackend(hub, user_id=1).scan(dpi=300, mode="Color", device=DEVICE)
+    assert hub.calls == []
+
+
+@pytest.mark.parametrize("path", ["ScannerCapabilities", "ScanJobs", "ScanJobs/7/NextDocument"])
+def test_agent_502_is_offline(path):
+    hub = FakeHub()
+    hub.status_for[path] = 502
+    with pytest.raises(ScannerOffline, match="not reachable"):
+        EsclRemoteBackend(hub, user_id=1).scan(dpi=300, mode="Color", device=DEVICE)
+
+
+def test_failed_job_is_cancelled():
+    hub = FakeHub()
+    hub.next_document = [EsclResponse(500, "", {}, b"")]
+    with pytest.raises(ScannerError):
+        EsclRemoteBackend(hub, user_id=1).scan(dpi=300, mode="Color", device=DEVICE)
+    assert ("DELETE", "ScanJobs/7", None) in hub.calls
+
+
+def test_timed_out_job_is_cancelled_and_cancel_errors_ignored(monkeypatch):
+    import app.services.escl as escl
+
+    hub = FakeHub()
+    hub.next_document = [EsclResponse(503, "", {}, b"")] * 2
+    clock = iter([0.0, 0.0, 1000.0])
+    monkeypatch.setattr(escl.time, "monotonic", lambda: next(clock))
+    hub.status_for["ScanJobs/7"] = 500  # DELETE fails; the timeout still surfaces
+    with pytest.raises(ScannerTimeout):
+        EsclRemoteBackend(hub, user_id=1, sleep=lambda s: None).scan(dpi=300, mode="Color", device=DEVICE)
+    assert hub.calls[-1][:2] == ("DELETE", "ScanJobs/7")
+
+
+def test_successful_job_is_not_cancelled():
+    hub = FakeHub()
+    EsclRemoteBackend(hub, user_id=1).scan(dpi=300, mode="Color", device=DEVICE)
+    assert all(m != "DELETE" for m, _, _ in hub.calls)
 
 
 def test_malformed_capabilities_is_scanner_error():

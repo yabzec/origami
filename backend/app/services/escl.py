@@ -125,6 +125,7 @@ def to_png(data: bytes) -> bytes:
 
 AGENT_PREFIX = "agent:"
 NEXT_DOCUMENT_RETRY_SECONDS = 1.0
+CANCEL_TIMEOUT_SECONDS = 10.0
 
 
 def parse_agent_device(device: str) -> tuple[str, str]:
@@ -176,11 +177,14 @@ class EsclRemoteBackend:
     def _call(self, client_id: str, uuid: str, method: str, path: str, body: str | None = None,
               timeout: float = SCAN_TIMEOUT_SECONDS) -> EsclResponse:
         try:
-            return self._hub.request(self._user_id, client_id, uuid, method, path, body, timeout)
+            res = self._hub.request(self._user_id, client_id, uuid, method, path, body, timeout)
         except AgentOffline:
             raise ScannerOffline("The scanner agent on this computer is not connected")
         except AgentTimeout:
             raise ScannerTimeout()
+        if res.status == 502:  # the agent could not reach the scanner
+            raise ScannerOffline("Scanner not reachable from this computer")
+        return res
 
     def _capabilities(self, device: str, client_id: str, uuid: str) -> Capabilities:
         if device not in self._caps:
@@ -197,6 +201,8 @@ class EsclRemoteBackend:
         client_id, uuid = parse_agent_device(device)
         if not self._hub.connected(self._user_id, client_id):
             raise ScannerOffline("The scanner agent on this computer is not connected")
+        if not self.available(device):
+            raise ScannerOffline("Scanner no longer found by the agent on this computer")
         caps = self._capabilities(device, client_id, uuid)
         job = self._call(client_id, uuid, "POST", "ScanJobs", scan_settings_xml(caps, dpi, mode))
         if job.status == 503:
@@ -204,9 +210,17 @@ class EsclRemoteBackend:
         location = job.headers.get("Location") or job.headers.get("location")
         if job.status not in (200, 201) or not location:
             raise ScannerError(f"ScanJobs returned {job.status}")
+        job_id = job_path(location)
+        try:
+            return self._next_document(client_id, uuid, job_id)
+        except ScannerError:
+            self._cancel(client_id, uuid, job_id)
+            raise
+
+    def _next_document(self, client_id: str, uuid: str, job_id: str) -> bytes:
         deadline = time.monotonic() + SCAN_TIMEOUT_SECONDS
         while True:
-            doc = self._call(client_id, uuid, "GET", f"{job_path(location)}/NextDocument")
+            doc = self._call(client_id, uuid, "GET", f"{job_id}/NextDocument")
             if doc.status == 200 and doc.body:
                 try:
                     return to_png(doc.body)
@@ -219,3 +233,10 @@ class EsclRemoteBackend:
             raise ScannerTimeout()
         status = self._call(client_id, uuid, "GET", "ScannerStatus")
         raise status_error(status.body)
+
+    def _cancel(self, client_id: str, uuid: str, job_id: str) -> None:
+        """Best effort: free the scanner after a failed job."""
+        try:
+            self._call(client_id, uuid, "DELETE", job_id, timeout=CANCEL_TIMEOUT_SECONDS)
+        except ScannerError:
+            pass
