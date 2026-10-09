@@ -25,6 +25,7 @@ from app.models import (
     Tag,
 )
 from app.services.storage import Storage, get_storage
+from app.worker.pipeline import delete_translation_segments
 
 router = APIRouter(
     prefix="/api/documents", tags=["documents"], dependencies=[Depends(get_current_user)]
@@ -325,6 +326,7 @@ def reprocess_document(
         )
     ):
         session.delete(chunk)
+    delete_translation_segments(session, doc.id)
     doc.ocr_languages = body.ocr_languages
     doc.ocr_enabled = body.ocr_enabled
     doc.summary_enabled = body.summary_enabled

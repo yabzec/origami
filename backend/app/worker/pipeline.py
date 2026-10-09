@@ -1,14 +1,15 @@
+import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from sqlalchemy import func, update
+from sqlalchemy import delete, func, update
 from sqlalchemy.orm.exc import StaleDataError
 from sqlmodel import Session, select
 
 from app.config import get_primary_language, get_settings
-from app.models import Chunk, ChunkSource, DocStatus, DocType, Document, Job, TranslationStatus
-from app.services.chunking import chunk_pages
+from app.models import Chunk, ChunkSource, DocStatus, DocType, Document, Job, TranslationSegment, TranslationStatus
+from app.services.chunking import chunk_pages, page_texts_from_chunks, segment_pages
 from app.services.convert import OFFICE_EXTENSIONS, ConversionError, office_to_pdf
 from app.services.extract import (
     extract_docx,
@@ -305,16 +306,70 @@ def _schedule_translation(session: Session, doc: Document) -> None:
     )
 
 
-def _insert_translation_chunks(session: Session, doc: Document) -> bool:
-    """Translate every content chunk in memory, then insert all translation chunks in one commit.
+CHARS_PER_TOKEN = 3.5
+SEGMENT_SHARE_OF_TPM = 0.4  # input share of one minute's budget; output roughly doubles it
 
-    Returns False without writing when the document was re-processed meanwhile (translation
-    status reset or content chunks replaced): the new processing run schedules its own job.
-    """
+
+def translation_segment_chars() -> int:
+    settings = get_settings()
+    limit = settings.translation_segment_chars
+    if settings.llm_tpm_limit > 0:
+        limit = min(limit, int(settings.llm_tpm_limit * SEGMENT_SHARE_OF_TPM * CHARS_PER_TOKEN))
+    return max(limit, 200)
+
+
+def _source_hash(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def delete_translation_segments(session: Session, doc_id) -> None:
+    """Drop saved translation progress (no commit)."""
+    session.exec(delete(TranslationSegment).where(TranslationSegment.document_id == doc_id))
+
+
+def _translate_segments(
+    session: Session, doc: Document, content_chunks: list[Chunk]
+) -> list[tuple[int | None, str]]:
+    """Translate page segments, committing each one so a retry resumes where this run stopped."""
     target = get_primary_language()
+    pages = page_texts_from_chunks([(c.page_number, c.content) for c in content_chunks])
+    stored = {
+        s.segment_index: s
+        for s in session.exec(select(TranslationSegment).where(TranslationSegment.document_id == doc.id))
+    }
+    translated: list[tuple[int | None, str]] = []
+    for index, (page_number, source) in enumerate(segment_pages(pages, translation_segment_chars())):
+        digest = _source_hash(source)
+        row = stored.get(index)
+        if row is None or row.source_hash != digest:
+            text = llm_translate(source, target)
+            row = row or TranslationSegment(document_id=doc.id, segment_index=index, source_hash=digest, text="")
+            row.page_number, row.source_hash, row.text = page_number, digest, text
+            session.add(row)
+            session.commit()
+        translated.append((row.page_number, row.text))
+    return translated
+
+
+def _merge_pages(segments: list[tuple[int | None, str]]) -> list[tuple[int | None, str]]:
+    merged: list[tuple[int | None, str]] = []
+    for page_number, text in segments:
+        if merged and merged[-1][0] == page_number:
+            merged[-1] = (page_number, f"{merged[-1][1]}\n\n{text}")
+        else:
+            merged.append((page_number, text))
+    return merged
+
+
+def _insert_translation_chunks(session: Session, doc: Document) -> bool:
+    """Translate page segments (resumable), then insert the translation chunks in one commit.
+
+    Returns False without writing chunks when the document was re-processed meanwhile
+    (translation status reset or content chunks replaced): the new run schedules its own job.
+    """
     content_chunks = _content_chunks(session, doc)
     source_ids = [c.id for c in content_chunks]
-    translated = [(c.page_number, llm_translate(c.content, target)) for c in content_chunks]
+    translated = _merge_pages(_translate_segments(session, doc, content_chunks))
     # row lock (released by the commit below) serializes with reprocess_document, which takes
     # the same lock before touching chunks; never held across the LLM calls above
     session.refresh(doc, with_for_update=True)
@@ -324,16 +379,17 @@ def _insert_translation_chunks(session: Session, doc: Document) -> bool:
         log.info("Document %s changed during translation; result discarded", doc.id)
         return False
     next_index = _next_chunk_index(session, doc)
-    for offset, (page_number, text) in enumerate(translated):
+    for offset, chunk in enumerate(chunk_pages(translated)):
         session.add(
             Chunk(
                 document_id=doc.id,
                 chunk_index=next_index + offset,
-                page_number=page_number,
+                page_number=chunk["page_number"],
                 source=ChunkSource.translation,
-                content=text,
+                content=chunk["content"],
             )
         )
+    delete_translation_segments(session, doc.id)
     session.commit()
     return True
 
@@ -360,6 +416,10 @@ def translate_document(session: Session, payload: dict) -> None:
         # nothing to translate (e.g. the document was re-processed since queueing)
         if doc.translation_status == TranslationStatus.pending:
             _finish_translation(session, doc, None)  # stop the UI polling "pending"
+        return
+    if not doc.translation_enabled:
+        if doc.translation_status == TranslationStatus.pending:
+            _finish_translation(session, doc, None)
         return
     if doc.translation_status == TranslationStatus.done and _has_chunks(
         session, doc, ChunkSource.translation

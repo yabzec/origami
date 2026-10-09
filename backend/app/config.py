@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     embedding_api_base: str = ""
     default_ocr_languages: str = "ita+eng"
     primary_language: str = "it"
+    llm_tpm_limit: int = 0  # provider tokens-per-minute limit for translation; 0 = no throttle
+    translation_segment_chars: int = 6000  # max source characters per translation call
     rag_top_k: int = 8
     rag_relevance_floor: float = 0.35
     cors_origins: str = "*"

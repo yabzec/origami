@@ -60,3 +60,12 @@ def test_document_processing_flag_columns(engine):
     for name in ("summary_enabled", "translation_enabled"):
         assert cols[name]["nullable"] is False
         assert cols[name]["default"] == "true"
+
+
+def test_translation_segments_table(engine):
+    inspector = inspect(engine)
+    cols = {c["name"] for c in inspector.get_columns("translation_segments")}
+    assert {"document_id", "segment_index", "page_number", "source_hash", "text"} <= cols
+    fks = inspector.get_foreign_keys("translation_segments")
+    assert fks[0]["referred_table"] == "documents"
+    assert fks[0]["options"].get("ondelete") == "CASCADE"
