@@ -14,6 +14,17 @@ import (
 // Browser finds eSCL scanners; tests replace it.
 type Browser func(ctx context.Context, timeout time.Duration) []Scanner
 
+// usableIP returns the first address a LAN device may point the agent at:
+// never this machine (loopback, unspecified) and never a multicast group.
+func usableIP(ips []net.IP) net.IP {
+	for _, ip := range ips {
+		if ip != nil && !ip.IsLoopback() && !ip.IsUnspecified() && !ip.IsMulticast() {
+			return ip
+		}
+	}
+	return nil
+}
+
 func scannerFromRecord(instance string, txt []string, ipv4, ipv6 []net.IP, port int, secure bool) (Scanner, bool) {
 	fields := map[string]string{}
 	for _, kv := range txt {
@@ -22,12 +33,11 @@ func scannerFromRecord(instance string, txt []string, ipv4, ipv6 []net.IP, port 
 		}
 	}
 	var host string
-	switch {
-	case len(ipv4) > 0:
-		host = ipv4[0].String()
-	case len(ipv6) > 0:
-		host = "[" + ipv6[0].String() + "]"
-	default:
+	if ip := usableIP(ipv4); ip != nil {
+		host = ip.String()
+	} else if ip := usableIP(ipv6); ip != nil {
+		host = "[" + ip.String() + "]"
+	} else {
 		return Scanner{}, false
 	}
 	scheme := "http"
@@ -35,7 +45,7 @@ func scannerFromRecord(instance string, txt []string, ipv4, ipv6 []net.IP, port 
 		scheme = "https"
 	}
 	root := strings.Trim(fields["rs"], "/")
-	if root == "" {
+	if !validPath(root) {
 		root = "eSCL"
 	}
 	uuid := fields["uuid"]
