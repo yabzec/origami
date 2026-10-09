@@ -102,3 +102,53 @@ def test_document_delete_cascades_segments(auth_client, session, storage):
     session.commit()
     assert auth_client.delete(f"/api/documents/{doc.id}").status_code == 204
     assert session.exec(select(TranslationSegment)).all() == []
+
+
+def test_long_provider_wait_requeues_and_resumes(session, pipeline_storage, llm_stub, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    from app.models import Job, JobStatus
+    from app.services.llm import TranslationDeferred
+
+    doc = _german(session)
+    real = pipeline.llm_translate
+    def throttled(text, target):
+        if text.startswith("Seite 2"):
+            raise TranslationDeferred(42)
+        return real(text, target)
+    monkeypatch.setattr(pipeline, "llm_translate", throttled)
+    before = datetime.now(timezone.utc)
+    doc = translate(session, doc, _final_attempt=True)  # returns normally: no failure, no email
+    assert doc.translation_status == "pending"
+    stored = session.exec(select(TranslationSegment)).all()
+    assert [s.page_number for s in stored] == [1]
+    job = session.exec(select(Job)).one()
+    assert (job.type, job.payload, job.status) == (
+        "translate_document", {"document_id": str(doc.id)}, JobStatus.queued,
+    )
+    run_at = job.run_at if job.run_at.tzinfo else job.run_at.replace(tzinfo=timezone.utc)
+    assert before + timedelta(seconds=41) <= run_at <= datetime.now(timezone.utc) + timedelta(seconds=43)
+
+    monkeypatch.setattr(pipeline, "llm_translate", real)
+    llm_stub["translate"].clear()
+    doc = translate(session, doc)
+    assert doc.translation_status == "done"
+    assert [t for t, _ in llm_stub["translate"]] == ["Seite 2 Text.", "Seite 3 Text."]
+
+
+def test_deferral_is_dropped_when_translation_was_reset(session, pipeline_storage, llm_stub, monkeypatch):
+    from app.models import Job
+    from app.services.llm import TranslationDeferred
+
+    doc = _german(session, pages=1)
+    def reset_then_defer(text, target):
+        # reprocess resets the status while the worker waits on the provider
+        session.execute(
+            pipeline.update(pipeline.Document).where(pipeline.Document.id == doc.id).values(translation_status=None)
+        )
+        session.commit()
+        raise TranslationDeferred(42)
+    monkeypatch.setattr(pipeline, "llm_translate", reset_then_defer)
+    doc = translate(session, doc)
+    assert doc.translation_status is None
+    assert session.exec(select(Job)).all() == []

@@ -20,6 +20,7 @@ from app.services.extract import (
 from app.services.language import detect_language
 from app.services.llm import describe as llm_describe
 from app.services.llm import embed as llm_embed
+from app.services.llm import TranslationDeferred
 from app.services.llm import translate as llm_translate
 from app.services.ocr import images_to_pdf, images_to_searchable_pdf, ocr_image, pdf_to_searchable_pdf
 from app.services.storage import Storage
@@ -406,6 +407,24 @@ def _finish_translation(session: Session, doc: Document, status: str) -> bool:
     return True
 
 
+def _defer_translation(session: Session, doc: Document, wait: float) -> None:
+    """Queue a later translate_document run if the translation is still pending (row-locked)."""
+    session.refresh(doc, with_for_update=True)
+    if doc.translation_status != TranslationStatus.pending:
+        session.rollback()
+        log.info("Document %s changed during translation; deferral dropped", doc.id)
+        return
+    session.add(
+        Job(
+            type="translate_document",
+            payload={"document_id": str(doc.id)},
+            run_at=datetime.now(timezone.utc) + timedelta(seconds=wait),
+        )
+    )
+    session.commit()
+    log.info("Translation of %s rate-limited; continuing in %.0fs", doc.id, wait)
+
+
 @register("translate_document")
 def translate_document(session: Session, payload: dict) -> None:
     doc = session.get(Document, payload["document_id"])
@@ -433,6 +452,10 @@ def translate_document(session: Session, payload: dict) -> None:
                 return
         _embed_pending_chunks(session, doc)  # only translation chunks are still unembedded
         _finish_translation(session, doc, TranslationStatus.done)
+    except TranslationDeferred as deferred:
+        # long provider wait: free the worker; saved segments let the next run resume
+        session.rollback()
+        _defer_translation(session, doc, deferred.wait)
     except StaleDataError:
         # re-process deleted the chunks while they were being embedded: superseded run
         session.rollback()

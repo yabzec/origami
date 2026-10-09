@@ -104,9 +104,18 @@ WINDOW_SECONDS = 60.0
 RATE_LIMIT_RETRIES = 5
 DEFAULT_RATE_LIMIT_WAIT = 60.0
 CHARS_PER_TOKEN = 3.5
+MAX_INLINE_WAIT = 5.0  # longer waits re-queue the translation instead of blocking the worker
 
 _clock: Callable[[], float] = time.monotonic  # replaced in tests
 _sleep: Callable[[float], None] = time.sleep
+
+
+class TranslationDeferred(Exception):
+    """The provider budget needs a longer pause than MAX_INLINE_WAIT: retry after `wait` seconds."""
+
+    def __init__(self, wait: float):
+        super().__init__(f"translation deferred for {wait:.1f}s")
+        self.wait = wait
 
 
 class TokenBudget:
@@ -118,7 +127,9 @@ class TokenBudget:
         self._events: deque[list] = deque()  # [timestamp, tokens]; tokens corrected after the call
         self._lock = threading.Lock()
 
-    def acquire(self, tokens: int) -> list | None:
+    def acquire(self, tokens: int, max_wait: float | None = None) -> list | None:
+        """Reserve tokens, sleeping until they fit; raises TranslationDeferred when the
+        wait would exceed max_wait (None = always wait)."""
         if self.limit <= 0:
             return None
         tokens = min(tokens, self.limit)  # one oversized call must not wait forever
@@ -127,11 +138,19 @@ class TokenBudget:
                 now = self._clock()
                 while self._events and now - self._events[0][0] >= WINDOW_SECONDS:
                     self._events.popleft()
-                if sum(e[1] for e in self._events) + tokens <= self.limit:
+                used = sum(e[1] for e in self._events)
+                if used + tokens <= self.limit:
                     entry = [now, tokens]
                     self._events.append(entry)
                     return entry
-                wait = self._events[0][0] + WINDOW_SECONDS - now
+                wait = 0.0
+                for timestamp, spent in self._events:  # until enough old entries age out
+                    used -= spent
+                    wait = timestamp + WINDOW_SECONDS - now
+                    if used + tokens <= self.limit:
+                        break
+            if max_wait is not None and wait > max_wait:
+                raise TranslationDeferred(wait)
             self._sleep(max(wait, 0.05))
 
 
@@ -188,15 +207,19 @@ def translate(text: str, target_language: str) -> str:
     content = f"{prompt}\n\n---\n\n{text}"
     budget = _budget()
     for attempt in range(RATE_LIMIT_RETRIES + 1):
-        entry = budget.acquire(_estimate_tokens(settings.llm_model, content))
+        entry = budget.acquire(_estimate_tokens(settings.llm_model, content), max_wait=MAX_INLINE_WAIT)
         try:
             resp = litellm.completion(
                 model=settings.llm_model, messages=[{"role": "user", "content": content}], **kw
             )
         except litellm.RateLimitError as exc:
+            if entry is not None:
+                entry[1] = 0  # the rejected call used no tokens
             if attempt == RATE_LIMIT_RETRIES:
                 raise
             wait = rate_limit_wait(exc)
+            if wait > MAX_INLINE_WAIT:
+                raise TranslationDeferred(wait) from exc
             log.warning("Translation rate-limited; retrying in %.1fs (%d/%d)", wait, attempt + 1, RATE_LIMIT_RETRIES)
             _sleep(wait)
             continue

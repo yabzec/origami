@@ -149,6 +149,7 @@ EMBEDDING_API_KEY=<google key>
 `VISION_API_KEY` / `VISION_API_BASE` fall back to `LLM_API_KEY` / `LLM_API_BASE` as a pair: when `VISION_API_KEY` is empty, vision uses both LLM values. When it is set, `VISION_API_BASE` is used on its own (empty means the provider default). `EMBEDDING_API_KEY` and `EMBEDDING_API_BASE` each fall back to the LLM value on their own.
 
 - `LLM_TPM_LIMIT` — your provider's tokens-per-minute limit (for example `8000` on a free tier). Translation waits to stay under it and retries 429 responses. `0` (default) disables the throttle. The budget is per worker process.
+  Waits longer than a few seconds re-queue the translation job for later, so new documents keep processing meanwhile.
 - `TRANSLATION_SEGMENT_CHARS` — maximum characters sent in one translation call (default `6000`; capped automatically to fit `LLM_TPM_LIMIT`).
 
 List the models offered by the `LLM_MODEL` provider (Groq, OpenAI, Gemini or an OpenAI-compatible `LLM_API_BASE`):
