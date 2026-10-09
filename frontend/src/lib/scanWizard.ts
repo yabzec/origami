@@ -94,3 +94,13 @@ export const SCANNER_MESSAGES: Record<string, string> = {
 export function scannerMessage(code: string, fallback: string): string {
   return SCANNER_MESSAGES[code] ?? fallback;
 }
+
+/** New page order with `pageId` at `toIndex` (clamped), renumbered from 1. */
+export function movePage(pages: ScanPageInfo[], pageId: number, toIndex: number): ScanPageInfo[] {
+  const from = pages.findIndex((p) => p.id === pageId);
+  if (from === -1) return pages;
+  const rest = pages.filter((p) => p.id !== pageId);
+  const target = Math.max(0, Math.min(toIndex, rest.length));
+  rest.splice(target, 0, pages[from]);
+  return rest.map((p, index) => ({ ...p, page_number: index + 1 }));
+}

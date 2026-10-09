@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   initialScanState,
+  movePage,
   scannerMessage,
   scanWizardReducer,
   shouldBlockLeave,
@@ -147,5 +148,24 @@ describe("scannerMessage", () => {
   it("maps known codes and falls back otherwise", () => {
     expect(scannerMessage("scanner_offline", "x")).toMatch(/power|USB/i);
     expect(scannerMessage("weird_code", "fallback text")).toBe("fallback text");
+  });
+});
+
+describe("movePage", () => {
+  const pages = [
+    { id: 10, page_number: 1 },
+    { id: 11, page_number: 2 },
+    { id: 12, page_number: 3 },
+  ];
+  it("moves a page and renumbers", () => {
+    expect(movePage(pages, 12, 0)).toEqual([
+      { id: 12, page_number: 1 },
+      { id: 10, page_number: 2 },
+      { id: 11, page_number: 3 },
+    ]);
+  });
+  it("clamps the target index and ignores unknown ids", () => {
+    expect(movePage(pages, 10, 99).map((p) => p.id)).toEqual([11, 12, 10]);
+    expect(movePage(pages, 99, 0)).toBe(pages);
   });
 });

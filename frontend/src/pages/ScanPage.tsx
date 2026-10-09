@@ -9,7 +9,14 @@ import { ScanToolbar } from "@/components/scan/ScanToolbar";
 import { useLeaveGuard } from "@/hooks/useLeaveGuard";
 import { api, ApiError, getToken } from "@/lib/api";
 import { defaultProcessing, processingPayload, type ProcessingValues } from "@/lib/processing";
-import { initialScanState, scannerMessage, scanWizardReducer, shouldBlockLeave } from "@/lib/scanWizard";
+import { applyReorder } from "@/lib/scanReorder";
+import {
+  initialScanState,
+  movePage,
+  scannerMessage,
+  scanWizardReducer,
+  shouldBlockLeave,
+} from "@/lib/scanWizard";
 import type { Document, ScanDevice, ScanPageInfo, ScanStatus } from "@/lib/types";
 
 const LEAVE_MESSAGE = "You have unsaved scanned pages. Leave and discard them?";
@@ -139,6 +146,13 @@ export function ScanPage() {
     }
   };
 
+  const movePageTo = (pageId: number, toIndex: number) => {
+    if (state.sessionId === null) return;
+    const next = movePage(state.pages, pageId, toIndex);
+    if (next === state.pages) return;
+    void applyReorder({ sessionId: state.sessionId, previous: state.pages, next, dispatch });
+  };
+
   const finish = async () => {
     dispatch({ type: "COMPILE_STARTED" });
     try {
@@ -218,6 +232,7 @@ export function ScanPage() {
               disabled={state.phase !== "ready"}
               onSelect={selectPage}
               onDelete={deletePage}
+              onMove={movePageTo}
             />
             {state.phase === "starting" && !state.error && (
               <p className="text-sm text-zinc-500">Starting scan session…</p>
