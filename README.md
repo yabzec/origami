@@ -47,14 +47,15 @@ soffice --version
 ```bash
 cd backend
 cp ../.env.example ../.env   # edit STORAGE_PATH, GEMINI_API_KEY, JWT_SECRET
-# optional: PRIMARY_LANGUAGE (ISO 639-1, default "it") - language for AI summaries and translations
+# optional: PRIMARY_LANGUAGE (ISO 639-1, default "it") - language for AI summaries
+# optional: DEFAULT_TRANSLATION_LANGUAGE (ISO 639-1, default PRIMARY_LANGUAGE) - default translation target for scan and upload
 uv sync
 docker compose up -d db
 uv run alembic upgrade head
 uv run python -m app.cli create-user <username>
 ```
 
-Upgrading from a version with the flat `files/<uuid>` layout: the API and the worker refuse to start until you move the files once:
+Upgrading from a version with the flat `files/<uuid>` layout. The API and the worker refuse to start until you move the files once:
 
 ```bash
 uv run python -m app.cli migrate-storage --dry-run   # print the moves
