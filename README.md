@@ -15,10 +15,10 @@ Self-hosted document management system: scan, upload, OCR, semantic search, and 
 ### System dependencies
 
 ```bash
-sudo apt install tesseract-ocr tesseract-ocr-ita tesseract-ocr-eng tesseract-ocr-deu
+sudo apt install tesseract-ocr tesseract-ocr-ita tesseract-ocr-eng tesseract-ocr-deu  # add any tesseract-ocr-<lang>
 ```
 
-Required for OCR (Italian, English and German). Also needed on the host:
+Required for OCR. Install any `tesseract-ocr-<lang>` packages you need: the app discovers installed languages automatically (within 5 minutes, no restart). The test suite needs `ita`, `eng` and `deu`. Also needed on the host:
 
 - `poppler-utils` (`pdftoppm`) — PDF rasterization for OCR fallback. Usually preinstalled; otherwise `sudo apt install poppler-utils`.
 - `sane-utils` (`scanimage`) — flatbed scanner access. Usually preinstalled; otherwise `sudo apt install sane-utils`.

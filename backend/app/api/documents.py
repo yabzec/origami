@@ -8,6 +8,7 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.api.deps import api_error, get_current_user
+from app.api.ocr import check_ocr_languages
 from app.config import get_primary_language
 from app.db import get_session
 from app.models import (
@@ -230,6 +231,7 @@ def reprocess_document(
     storage: Storage = Depends(get_storage),
 ) -> dict:
     doc = get_doc_or_404(session, document_id)
+    check_ocr_languages(body.ocr_languages)
     if doc.status in (DocStatus.pending, DocStatus.processing):
         raise api_error(409, "document_busy", "Document is still being processed")
     if doc.doc_type == DocType.video:

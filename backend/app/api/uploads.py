@@ -6,6 +6,7 @@ from sqlmodel import Session
 
 from app.api.deps import api_error, get_current_user
 from app.api.documents import serialize
+from app.api.ocr import check_ocr_languages
 from app.config import get_settings
 from app.db import get_session
 from app.models import DocType, Document, DocumentTag, Folder, Tag
@@ -98,6 +99,7 @@ def upload_document(
     session: Session = Depends(get_session),
     storage: Storage = Depends(get_storage),
 ) -> dict:
+    check_ocr_languages(ocr_languages)
     ext = Path(file.filename or "").suffix.lower()
     doc_type = EXTENSION_MAP.get(ext)
     if doc_type is None:

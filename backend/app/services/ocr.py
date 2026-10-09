@@ -1,4 +1,5 @@
 import io
+import time
 from pathlib import Path
 
 import pytesseract
@@ -62,3 +63,29 @@ def images_to_pdf(image_paths: list[Path]) -> bytes:
     finally:
         for image in images:
             image.close()
+
+
+LANGUAGE_CACHE_SECONDS = 300
+_IGNORED_LANGUAGES = {"osd", "equ"}  # orientation/script detection and equations: not text languages
+_language_cache: tuple[float, list[str]] | None = None
+
+
+def available_languages() -> list[str]:
+    """Installed Tesseract languages, sorted; cached so new packages show up within 5 minutes."""
+    global _language_cache
+    now = time.monotonic()
+    if _language_cache is None or now - _language_cache[0] > LANGUAGE_CACHE_SECONDS:
+        codes = sorted(set(pytesseract.get_languages(config="")) - _IGNORED_LANGUAGES)
+        _language_cache = (now, codes)
+    return list(_language_cache[1])
+
+
+def reset_language_cache() -> None:
+    global _language_cache
+    _language_cache = None
+
+
+def unknown_languages(value: str) -> list[str]:
+    """Codes of a Tesseract `lang` string (`ita+eng`) that are not installed."""
+    installed = set(available_languages())
+    return [code for code in value.split("+") if code not in installed]

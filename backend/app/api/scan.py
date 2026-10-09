@@ -7,6 +7,7 @@ from sqlmodel import Session, select
 
 from app.api.deps import api_error, get_current_user
 from app.api.documents import serialize
+from app.api.ocr import check_ocr_languages
 from app.api.uploads import create_pending_document
 from app.config import get_settings
 from app.db import get_session
@@ -94,6 +95,7 @@ def scan_preview(
 def create_session(
     body: SessionCreate, db: Session = Depends(get_session)
 ) -> ScanSession:
+    check_ocr_languages(body.ocr_languages)
     scan_session = ScanSession(
         ocr_languages=body.ocr_languages or get_settings().default_ocr_languages,
         ocr_enabled=body.ocr_enabled,
@@ -211,6 +213,7 @@ def compile_session(
     session_id: int, body: CompileRequest, db: Session = Depends(get_session)
 ) -> dict:
     scan_session = get_session_or_404(db, session_id)
+    check_ocr_languages(body.ocr_languages)
     if scan_session.status != ScanSessionStatus.active:
         raise api_error(409, "session_not_active", "Scan session is not active")
     if not session_pages(db, session_id):
