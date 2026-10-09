@@ -1,17 +1,20 @@
-import { useRef, useState, type DragEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 import { useSearchParams } from "react-router";
+import { BulkActionBar } from "@/components/BulkActionBar";
 import { DocumentCard } from "@/components/DocumentCard";
 import { UploadDialog } from "@/components/UploadDialog";
 import { Breadcrumb, FolderTiles } from "@/components/FolderTiles";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { useDeleteDocument, useDocuments } from "@/hooks/useDocuments";
+import { useBulkDelete, useBulkMove, useDeleteDocument, useDocuments } from "@/hooks/useDocuments";
 import { useFolders } from "@/hooks/useFolders";
+import { useSelection } from "@/hooks/useSelection";
 import { useTags } from "@/hooks/useTags";
 import { ApiError } from "@/lib/api";
 import {
   browseQuery,
+  browseViewKey,
   invalidDateRange,
   parseBrowseParams,
   type BrowseParams,
@@ -47,6 +50,21 @@ export function BrowsePage() {
   );
   const { data: tags } = useTags();
   const deleteDoc = useDeleteDocument();
+
+  const order = (docs ?? []).map((d) => d.id);
+  const selection = useSelection(order, browseViewKey(params));
+  const bulkMove = useBulkMove();
+  const bulkDelete = useBulkDelete();
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  const selectedIds = [...selection.selected];
+  const reportBulk = (err: unknown) => setBulkError(err instanceof ApiError ? err.message : "Bulk action failed");
+
+  const { clear } = selection;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && clear();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [clear]);
 
   const fileInput = useRef<HTMLInputElement>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
@@ -162,6 +180,23 @@ export function BrowsePage() {
             : "Could not load documents"}
         </p>
       )}
+      {selection.selected.size > 0 && (
+        <BulkActionBar
+          count={selection.selected.size}
+          busy={bulkMove.isPending || bulkDelete.isPending}
+          onSelectAll={selection.selectAll}
+          onClear={selection.clear}
+          onMove={(folderId) => {
+            setBulkError(null);
+            bulkMove.mutate({ ids: selectedIds, folder_id: folderId }, { onSuccess: selection.clear, onError: reportBulk });
+          }}
+          onDelete={() => {
+            setBulkError(null);
+            bulkDelete.mutate(selectedIds, { onSuccess: selection.clear, onError: reportBulk });
+          }}
+        />
+      )}
+      {bulkError && <p className="mb-3 text-sm text-red-600">{bulkError}</p>}
       {!params.all && (
         <>
           <Breadcrumb
@@ -191,6 +226,9 @@ export function BrowsePage() {
             key={doc.id}
             doc={doc}
             onDelete={(id) => deleteDoc.mutate(id)}
+            selected={selection.selected.has(doc.id)}
+            selecting={selection.selected.size > 0}
+            onToggleSelect={selection.toggle}
           />
         ))}
       </div>

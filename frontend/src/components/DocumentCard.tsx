@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/dates";
 import { badgeTitle } from "@/lib/retry";
 import type { Document } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 export const STATUS_VARIANTS = {
   ready: "green",
@@ -12,11 +13,38 @@ export const STATUS_VARIANTS = {
   failed: "red",
 } as const;
 
-export function DocumentCard({ doc, onDelete }: { doc: Document; onDelete: (id: string) => void }) {
+export function DocumentCard({
+  doc,
+  onDelete,
+  selected = false,
+  selecting = false,
+  onToggleSelect,
+}: {
+  doc: Document;
+  onDelete: (id: string) => void;
+  selected?: boolean;
+  selecting?: boolean;
+  onToggleSelect?: (id: string, shift: boolean) => void;
+}) {
   return (
-    <div className="group relative rounded-lg border border-zinc-200 bg-white p-4 hover:shadow">
+    <div
+      className={cn(
+        "group relative rounded-lg border bg-white p-4 hover:shadow",
+        selected ? "border-zinc-900 ring-1 ring-zinc-900" : "border-zinc-200",
+      )}
+    >
+      {onToggleSelect && (
+        <input
+          type="checkbox"
+          aria-label={`Select ${doc.title}`}
+          checked={selected}
+          onChange={() => {}}
+          onClick={(e) => onToggleSelect(doc.id, e.shiftKey)}
+          className={cn("absolute top-2 left-2 z-10 h-4 w-4", selecting || selected ? "block" : "hidden group-hover:block")}
+        />
+      )}
       <Link to={`/documents/${doc.id}`} className="block">
-        <div className="mb-2 flex items-center gap-2">
+        <div className="mb-2 flex items-center gap-2 pl-4">
           <DocTypeIcon doc={doc} />
           <span className="flex-1 truncate font-medium">{doc.title}</span>
           <Badge variant={STATUS_VARIANTS[doc.status]} title={badgeTitle(doc, new Date())}>

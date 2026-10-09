@@ -38,10 +38,10 @@ export function useDocuments(filters: DocumentFilters, enabled = true) {
 }
 
 export function useUploadDocument() {
-  const qc = useQueryClient();
+  const invalidate = useInvalidateListing();
   return useMutation({
     mutationFn: (form: FormData) => api.postForm<Document>("/api/documents/upload", form),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["documents"] }),
+    onSuccess: invalidate,
   });
 }
 
