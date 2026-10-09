@@ -29,7 +29,11 @@ func register() (string, error) {
 	if err := os.MkdirAll(appDir, 0o755); err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(filepath.Join(appDir, "origami-agent.desktop"), []byte(desktopEntry(exe)), 0o644); err != nil {
+	entry, err := desktopEntry(exe)
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "origami-agent.desktop"), []byte(entry), 0o644); err != nil {
 		return "", err
 	}
 	if out, err := exec.Command("xdg-mime", "default", "origami-agent.desktop", "x-scheme-handler/origami-agent").CombinedOutput(); err != nil {

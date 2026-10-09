@@ -1,9 +1,8 @@
 package main
 
 import (
-	"bufio"
 	"errors"
-	"net"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -42,23 +41,15 @@ func TestCheckPinned(t *testing.T) {
 	}
 }
 
-func TestHandoff(t *testing.T) {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
+func TestCheckPinnedUnreadable(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "server")
+	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	defer l.Close()
-	got := make(chan string, 1)
-	go serveHandoffs(l, func(u string) { got <- u })
-	c, err := net.Dial("tcp", l.Addr().String())
-	if err != nil {
-		t.Fatal(err)
+	if err := checkPinned(dir, "https://a.example"); err == nil || errors.Is(err, errForeignServer) {
+		t.Fatalf("want read error, got %v", err)
 	}
-	w := bufio.NewWriter(c)
-	_, _ = w.WriteString("origami-agent://connect?x=1\n")
-	_ = w.Flush()
-	_ = c.Close()
-	if u := <-got; u != "origami-agent://connect?x=1" {
-		t.Fatalf("got %q", u)
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		t.Fatal("pin path must not be overwritten")
 	}
 }

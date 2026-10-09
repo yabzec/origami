@@ -1,17 +1,15 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
-	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 const HandoffAddr = "127.0.0.1:47811"
@@ -58,38 +56,13 @@ func checkPinned(path, server string) error {
 		}
 		return nil
 	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	return os.WriteFile(path, []byte(server+"\n"), 0o600)
-}
-
-func listenSingleInstance() (net.Listener, error) { return net.Listen("tcp", HandoffAddr) }
-
-func handOff(raw string) error {
-	c, err := net.DialTimeout("tcp", HandoffAddr, 2*time.Second)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	_, err = fmt.Fprintln(c, raw)
-	return err
-}
-
-func serveHandoffs(l net.Listener, onURL func(string)) {
-	for {
-		c, err := l.Accept()
-		if err != nil {
-			return
-		}
-		go func(c net.Conn) {
-			defer c.Close()
-			_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
-			if line, err := bufio.NewReader(c).ReadString('\n'); err == nil {
-				onURL(strings.TrimSpace(line))
-			}
-		}(c)
-	}
 }
 
 func validatedLaunch(raw string) (LaunchParams, error) {
@@ -111,18 +84,28 @@ func launch(raw string) {
 		notify("Origami Agent: " + err.Error())
 		os.Exit(1)
 	}
+	keyPath, err := handoffKeyPath()
+	if err != nil {
+		notify("Origami Agent: " + err.Error())
+		os.Exit(1)
+	}
 	l, err := listenSingleInstance()
 	if err != nil {
-		if handOff(raw) == nil {
+		if handOffTo(HandoffAddr, keyPath, raw) == nil {
 			os.Exit(0) // the running agent takes over
 		}
+		notify("Origami Agent: port 47811 is in use by another program or user")
+		os.Exit(1)
+	}
+	if err := writeHandoffKey(keyPath); err != nil {
 		notify("Origami Agent: cannot start: " + err.Error())
 		os.Exit(1)
 	}
 	a := NewAgent(p.Server, p.Token, browseMDNS)
-	go serveHandoffs(l, func(next string) {
+	go serveHandoffs(l, keyPath, func(next string) {
 		if q, err := validatedLaunch(next); err == nil {
 			a.Relaunch(q.Server, q.Token)
+			go notify("Origami Agent: switched to a new Origami session")
 		} else {
 			log.Printf("ignored launch: %v", err)
 		}
@@ -144,14 +127,33 @@ func reset() error {
 	return nil
 }
 
-func desktopEntry(exe string) string {
+// desktopEntry renders the .desktop file. The executable path is quoted and escaped
+// per the Desktop Entry spec (Exec quoting, then string-value escaping, % as %%).
+func desktopEntry(exe string) (string, error) {
+	if strings.ContainsAny(exe, "\n\r") {
+		return "", fmt.Errorf("executable path contains a newline")
+	}
+	var q strings.Builder
+	for _, r := range exe {
+		switch r {
+		case '\\':
+			q.WriteString(`\\\\`) // Exec escape (\\), doubled again for the string value
+		case '"', '`', '$':
+			q.WriteString(`\\`) // Exec escape (\), doubled for the string value
+			q.WriteRune(r)
+		case '%':
+			q.WriteString("%%")
+		default:
+			q.WriteRune(r)
+		}
+	}
 	return "[Desktop Entry]\n" +
 		"Type=Application\n" +
 		"Name=Origami Agent\n" +
-		"Exec=\"" + exe + "\" %u\n" +
+		"Exec=\"" + q.String() + "\" %u\n" +
 		"MimeType=x-scheme-handler/origami-agent;\n" +
 		"NoDisplay=true\n" +
-		"Terminal=false\n"
+		"Terminal=false\n", nil
 }
 
 func windowsEntries(exe string) []regEntry {

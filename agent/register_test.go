@@ -6,7 +6,10 @@ import (
 )
 
 func TestDesktopEntry(t *testing.T) {
-	d := desktopEntry("/home/u/Downloads/origami-agent-linux-amd64")
+	d, err := desktopEntry("/home/u/Downloads/origami-agent-linux-amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, want := range []string{
 		"Exec=\"/home/u/Downloads/origami-agent-linux-amd64\" %u",
 		"MimeType=x-scheme-handler/origami-agent;",
@@ -32,5 +35,19 @@ func TestWindowsEntries(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("entry %d: got %+v want %+v", i, got[i], want[i])
 		}
+	}
+}
+
+func TestDesktopEntryEscaping(t *testing.T) {
+	d, err := desktopEntry("/a b/\"x$y`z\\w%u")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Exec=\"/a b/\\\\\"x\\\\$y\\\\`z\\\\\\\\w%%u\" %u"
+	if !strings.Contains(d, want) {
+		t.Errorf("want %s in\n%s", want, d)
+	}
+	if _, err := desktopEntry("/a\nExec=evil"); err == nil {
+		t.Error("newline in path must be refused")
 	}
 }
