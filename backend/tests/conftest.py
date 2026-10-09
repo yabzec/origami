@@ -133,6 +133,17 @@ def fake_scanner(client):
 
 
 @pytest.fixture
+def agent_hub(client):
+    from app.main import app as main_app
+    from app.services.agent_hub import AgentHub, get_agent_hub
+
+    hub = AgentHub()
+    main_app.dependency_overrides[get_agent_hub] = lambda: hub
+    yield hub
+    main_app.dependency_overrides.pop(get_agent_hub, None)
+
+
+@pytest.fixture
 def llm_stub(monkeypatch):
     """Stub the LLM mock boundary (calls["language"] is what language detection returns for non-empty text): app.services.llm (the other one is smtplib.SMTP). select_documents is scripted via calls["select_ids"] / calls["select_error"]."""
     calls = {

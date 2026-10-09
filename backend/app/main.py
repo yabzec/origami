@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, chat, documents, files, folders, ocr, scan, search, tags, uploads
+from app.api import agent, auth, chat, documents, files, folders, ocr, scan, search, tags, uploads
 from app.api.error_handlers import register_error_handlers
 from app.api.spa import register_spa
 from app.config import get_settings
@@ -20,6 +20,7 @@ app.add_middleware(
 )
 
 register_error_handlers(app)
+app.include_router(agent.router)
 app.include_router(auth.router)
 app.include_router(chat.router)
 app.include_router(documents.router)

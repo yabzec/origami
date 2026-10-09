@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     smtp_from: str = ""  # empty → smtp_user
     app_base_url: str = ""  # e.g. http://origami.lan:8000 — adds document links to emails
     soffice_path: str = "soffice"  # LibreOffice binary used to convert office documents to PDF
+    public_url: str = ""  # e.g. https://origami.example.com — public server URL handed to the client scanner agent; empty → request base URL
+    agent_dist_dir: Path = Path("../agent/dist")  # built agent binaries served by /api/agent/download
 
 
 @lru_cache
