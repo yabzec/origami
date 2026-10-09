@@ -56,3 +56,15 @@ it("shows the error message on bad credentials", async () => {
   expect(await screen.findByText(/wrong username or password/i)).toBeInTheDocument();
   expect(getToken()).toBeNull();
 });
+
+it("shows the logo above the title", () => {
+  const { container } = render(
+    <MemoryRouter>
+      <AuthProvider>
+        <LoginPage />
+      </AuthProvider>
+    </MemoryRouter>,
+  );
+  expect(container.querySelector('img[src="/logo.png"]')).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Origami" })).toBeInTheDocument();
+});

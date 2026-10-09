@@ -14,7 +14,7 @@ const components: Components = {
         <Link
           to={href}
           className={
-            isCitationLabel(children) ? "align-super text-xs font-semibold text-blue-700" : "text-blue-700 underline"
+            isCitationLabel(children) ? "align-super text-xs font-semibold text-brand-700" : "text-brand-700 underline"
           }
         >
           {children}
@@ -22,7 +22,7 @@ const components: Components = {
       );
     }
     return (
-      <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline">
+      <a href={href} target="_blank" rel="noopener noreferrer" className="text-brand-700 underline">
         {children}
       </a>
     );

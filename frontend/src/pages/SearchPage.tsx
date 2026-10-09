@@ -18,7 +18,7 @@ function Snippet({ text }: { text: string }) {
     <>
       {splitHighlights(text).map((part, index) =>
         part.highlighted ? (
-          <mark key={index} className="rounded bg-yellow-200 px-0.5">
+          <mark key={index} className="rounded bg-brand-200 px-0.5">
             {part.text}
           </mark>
         ) : (

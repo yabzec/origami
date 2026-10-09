@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils";
 import type { ButtonHTMLAttributes } from "react";
 
 const variants = {
-  default: "bg-zinc-900 text-white hover:bg-zinc-700",
+  default: "bg-brand-700 text-white hover:bg-brand-800",
   outline: "border border-zinc-300 hover:bg-zinc-100",
   ghost: "hover:bg-zinc-100",
   destructive: "bg-red-600 text-white hover:bg-red-500",

@@ -61,7 +61,7 @@ export function FolderPicker({
         onClick={toggle}
         aria-haspopup="dialog"
         aria-expanded={open}
-        className="flex h-9 w-full items-center justify-between rounded-md border border-zinc-300 bg-white px-2 text-left text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400"
+        className="flex h-9 w-full items-center justify-between rounded-md border border-zinc-300 bg-white px-2 text-left text-sm focus:outline-none focus:ring-2 focus:ring-brand-300"
       >
         <span className="truncate">{folderLabel(folders, value)}</span>
         <span aria-hidden="true" className="ml-2 text-zinc-400">

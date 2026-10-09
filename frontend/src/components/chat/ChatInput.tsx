@@ -59,7 +59,7 @@ export function ChatInput({
           onKeyDown={onKeyDown}
           placeholder="Ask about your documents… (Shift+Enter for a new line)"
           style={{ maxHeight: MAX_HEIGHT_PX }}
-          className="w-full resize-none overflow-y-auto rounded-md border border-zinc-300 bg-white p-3 text-sm leading-5 focus:ring-2 focus:ring-zinc-400 focus:outline-none disabled:bg-zinc-50"
+          className="w-full resize-none overflow-y-auto rounded-md border border-zinc-300 bg-white p-3 text-sm leading-5 focus:ring-2 focus:ring-brand-300 focus:outline-none disabled:bg-zinc-50"
         />
         {streaming ? (
           <Button type="button" variant="outline" onClick={onStop}>

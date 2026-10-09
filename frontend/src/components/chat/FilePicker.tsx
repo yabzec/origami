@@ -80,7 +80,7 @@ export function FilePicker({ pinnedIds, onPick }: { pinnedIds: string[]; onPick:
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search by title or content…"
-            className="h-8 w-full rounded-md border border-zinc-300 px-2 text-sm focus:ring-2 focus:ring-zinc-400 focus:outline-none"
+            className="h-8 w-full rounded-md border border-zinc-300 px-2 text-sm focus:ring-2 focus:ring-brand-300 focus:outline-none"
           />
           {debounced === "" ? (
             <p className="px-2 py-1 text-sm text-zinc-400">Type to search your documents</p>

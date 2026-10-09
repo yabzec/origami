@@ -24,7 +24,10 @@ export function Layout() {
   return (
     <div className="flex min-h-screen">
       <aside className="flex w-64 flex-col border-r border-zinc-200 bg-zinc-50 p-3">
-        <h1 className="mb-4 px-2 text-lg font-bold">Origami</h1>
+        <h1 className="mb-4 flex items-center gap-2 px-2 text-lg font-bold">
+          <img src="/logo.png" alt="" className="h-6 w-6" />
+          Origami
+        </h1>
         <nav className="mb-4 space-y-0.5">
           {navItems.map((item) => (
             <NavLink

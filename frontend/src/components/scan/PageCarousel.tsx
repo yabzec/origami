@@ -48,7 +48,7 @@ function Thumb({
       style={{ transform: CSS.Transform.toString(transform), transition }}
       className={cn(
         "w-28 shrink-0 rounded border bg-white p-1",
-        selected ? "border-zinc-900 ring-2 ring-zinc-900" : "border-zinc-200",
+        selected ? "border-brand-500 ring-2 ring-brand-500" : "border-zinc-200",
         isDragging && "opacity-60",
       )}
     >

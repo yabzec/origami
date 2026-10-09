@@ -40,7 +40,10 @@ export function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50">
       <form onSubmit={onSubmit} className="w-full max-w-sm space-y-4 rounded-lg bg-white p-8 shadow">
-        <h1 className="text-xl font-semibold">Origami</h1>
+        <div className="flex flex-col items-center gap-2">
+          <img src="/logo.png" alt="" className="h-16 w-16" />
+          <h1 className="text-xl font-semibold">Origami</h1>
+        </div>
         <div>
           <Label htmlFor="username">Username</Label>
           <Input id="username" value={username} onChange={(e) => setUsername(e.target.value)} required />

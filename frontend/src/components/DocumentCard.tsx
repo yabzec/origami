@@ -30,7 +30,7 @@ export function DocumentCard({
     <div
       className={cn(
         "group relative rounded-lg border bg-white p-4 hover:shadow",
-        selected ? "border-zinc-900 ring-1 ring-zinc-900" : "border-zinc-200",
+        selected ? "border-brand-500 ring-1 ring-brand-500" : "border-zinc-200",
       )}
     >
       {onToggleSelect && (
