@@ -164,12 +164,17 @@ def rate_limit_wait(exc: Exception) -> float:
     """Seconds to wait after a 429: retry-after header, then the provider's message, then 60 s."""
     headers = getattr(getattr(exc, "response", None), "headers", None) or {}
     try:
-        return float(headers.get("retry-after"))
+        header = float(headers.get("retry-after"))
+        if math.isfinite(header) and header >= 0:
+            return header
     except (TypeError, ValueError):
         pass
-    match = re.search(r"try again in (?:(\d+)m)?([\d.]+)s", str(exc))
+    match = re.search(r"try again in (?:(\d+)m)?([\d.]+)(ms|s)", str(exc))
     if match:
-        return int(match.group(1) or 0) * 60 + float(match.group(2))
+        value = float(match.group(2))
+        if match.group(3) == "ms":
+            return value / 1000
+        return int(match.group(1) or 0) * 60 + value
     return DEFAULT_RATE_LIMIT_WAIT
 
 

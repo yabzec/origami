@@ -58,6 +58,9 @@ def test_rate_limit_wait_from_header_message_or_default():
     assert llm.rate_limit_wait(_rate_limit({"retry-after": "7"})) == 7.0
     assert llm.rate_limit_wait(_rate_limit(message="Please try again in 7.5s.")) == 7.5
     assert llm.rate_limit_wait(_rate_limit(message="Please try again in 1m2.5s.")) == 62.5
+    assert llm.rate_limit_wait(_rate_limit(message="Please try again in 340ms.")) == 0.34
+    assert llm.rate_limit_wait(_rate_limit({"retry-after": "-5"})) == 60.0
+    assert llm.rate_limit_wait(_rate_limit({"retry-after": "nan"})) == 60.0
     assert llm.rate_limit_wait(_rate_limit()) == 60.0
 
 
