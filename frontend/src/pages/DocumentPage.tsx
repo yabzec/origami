@@ -186,6 +186,15 @@ export function DocumentPage() {
     <div className="flex gap-6 p-6">
       <div className="flex-1">
         <div className="mb-3 flex items-center gap-3">
+          <button
+            type="button"
+            aria-label="Exit"
+            title="Back to folder"
+            onClick={() => navigate(`/${browseQuery({ ...DEFAULT_BROWSE, folderId: doc.folder_id })}`)}
+            className="cursor-pointer text-2xl leading-none text-zinc-400 hover:text-zinc-700"
+          >
+            ×
+          </button>
           <h2 className="flex-1 truncate text-lg font-semibold">{doc.title}</h2>
           {doc.file_path && (
             <a
@@ -196,15 +205,6 @@ export function DocumentPage() {
             </a>
           )}
           <Badge variant={STATUS_VARIANTS[doc.status]}>{doc.status}</Badge>
-          <button
-            type="button"
-            aria-label="Exit"
-            title="Back to folder"
-            onClick={() => navigate(`/${browseQuery({ ...DEFAULT_BROWSE, folderId: doc.folder_id })}`)}
-            className="cursor-pointer text-2xl leading-none text-zinc-400 hover:text-zinc-700"
-          >
-            ×
-          </button>
         </div>
         {doc.status === "failed" && (
           <div className="mb-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
