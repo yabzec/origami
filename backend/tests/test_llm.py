@@ -30,14 +30,12 @@ def _completion_returning(content, captured):
 def test_describe_text(monkeypatch):
     captured = {}
     monkeypatch.setattr(
-        litellm,
-        "completion",
-        _completion_returning('{"summary": " Una fattura del 2026. ", "language": "DE"}', captured),
+        litellm, "completion", _completion_returning('{"summary": " Una fattura del 2026. "}', captured)
     )
-    result = llm.describe(text="FATTURA n. 42 del 2026...")
-    assert result == llm.Description("Una fattura del 2026.", "de")
+    assert llm.describe(text="FATTURA n. 42 del 2026...") == "Una fattura del 2026."
     assert "FATTURA n. 42" in captured["content"]
     assert "Italian" in captured["content"]  # summary requested in the primary language
+    assert '"language"' not in captured["content"]  # detection is local now
     assert captured["model"] == "gemini/gemini-2.5-flash"
 
 
@@ -45,25 +43,20 @@ def test_describe_image(monkeypatch, tmp_path):
     img = tmp_path / "photo.png"
     img.write_bytes(b"\x89PNG fake")
     captured = {}
-    monkeypatch.setattr(
-        litellm, "completion", _completion_returning('{"summary": "Uno scontrino.", "language": "it"}', captured)
-    )
-    result = llm.describe(image_path=img)
-    assert result == llm.Description("Uno scontrino.", "it")
+    monkeypatch.setattr(litellm, "completion", _completion_returning('{"summary": "Uno scontrino."}', captured))
+    assert llm.describe(image_path=img) == "Uno scontrino."
     kinds = [p["type"] for p in captured["content"]]
     assert kinds == ["text", "image_url"]
     assert captured["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
 
 
-def test_parse_description_handles_fenced_json():
-    raw = '```json\n{"summary": "Contratto di affitto.", "language": "it"}\n```'
-    assert llm.parse_description(raw) == llm.Description("Contratto di affitto.", "it")
+def test_parse_summary_handles_fenced_json():
+    assert llm.parse_summary('```json\n{"summary": "Contratto di affitto."}\n```') == "Contratto di affitto."
 
 
-def test_parse_description_falls_back_to_raw_text():
-    assert llm.parse_description("  Just prose, no JSON.  ") == llm.Description("Just prose, no JSON.", None)
-    assert llm.parse_description('{"summary": ""}') == llm.Description('{"summary": ""}', None)
-    assert llm.parse_description('["not", "an", "object"]').language is None
+def test_parse_summary_falls_back_to_raw_text():
+    assert llm.parse_summary("  Just prose, no JSON.  ") == "Just prose, no JSON."
+    assert llm.parse_summary('{"summary": ""}') == '{"summary": ""}'
 
 
 def test_translate(monkeypatch):
@@ -150,27 +143,17 @@ def test_embed_falls_back_to_llm_key(monkeypatch):
     get_settings.cache_clear()
 
 
-def test_parse_description_rejects_null_summary():
-    raw = '{"summary": null, "language": "it"}'
-    assert llm.parse_description(raw) == llm.Description(raw, None)
+def test_parse_summary_rejects_null_summary():
+    raw = '{"summary": null}'
+    assert llm.parse_summary(raw) == raw
 
 
-def test_parse_description_unknown_language_is_none():
-    assert llm.parse_description('{"summary": "Ok.", "language": "unknown"}') == llm.Description("Ok.", None)
+def test_parse_summary_extracts_json_from_prose():
+    assert llm.parse_summary('Here:\n{"summary": "Una fattura."}\nHope it helps!') == "Una fattura."
 
 
-def test_parse_description_normalizes_region_language():
-    assert llm.parse_description('{"summary": "Ok.", "language": "de-DE"}') == llm.Description("Ok.", "de")
-    assert llm.parse_description('{"summary": "Ok.", "language": "EN_us"}') == llm.Description("Ok.", "en")
-
-
-def test_parse_description_extracts_json_from_prose():
-    raw = 'Here is the result:\n{"summary": "Una fattura.", "language": "it"}\nHope it helps!'
-    assert llm.parse_description(raw) == llm.Description("Una fattura.", "it")
-
-
-def test_parse_description_none_content():
-    assert llm.parse_description(None) == llm.Description("", None)
+def test_parse_summary_none_content():
+    assert llm.parse_summary(None) == ""
 
 
 import io
@@ -212,7 +195,7 @@ def _use_settings(monkeypatch, **values):
 def _capturing_completion(captured):
     def fake_completion(model, messages, **kw):
         captured.append({"model": model, **kw})
-        msg = SimpleNamespace(content='{"summary": "Uno scontrino.", "language": "it"}')
+        msg = SimpleNamespace(content='{"summary": "Uno scontrino."}')
         return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
 
     return fake_completion

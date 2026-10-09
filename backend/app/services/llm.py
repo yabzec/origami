@@ -6,7 +6,6 @@ import re
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import NamedTuple
 
 import litellm
 
@@ -21,24 +20,18 @@ def language_name(code: str) -> str:
     return LANGUAGE_NAMES.get(code, code)
 
 
-class Description(NamedTuple):
-    summary: str
-    language: str | None  # ISO 639-1 of the document's own language; None if unknown
-
-
 def _describe_prompt(target_language: str) -> str:
     return (
         "You are indexing a document for a searchable personal archive. "
-        'Reply with ONLY a JSON object: {"summary": "...", "language": "xx"}. '
+        'Reply with ONLY a JSON object: {"summary": "..."}. '
         f'"summary": 2-4 sentences written in {language_name(target_language)} describing '
         "what the document is, its purpose, and key entities (dates, amounts, names, "
-        'organizations). "language": the ISO 639-1 code of the document\'s own language '
-        '(for example "it", "en", "de").'
+        "organizations)."
     )
 
 
-def parse_description(raw: str | None) -> Description:
-    """Parse the describe() JSON reply; fall back to the raw text with no language."""
+def parse_summary(raw: str | None) -> str:
+    """Summary from the describe() JSON reply; falls back to the raw text."""
     raw = raw or ""
     text = raw.strip()
     if text.startswith("```"):
@@ -47,21 +40,12 @@ def parse_description(raw: str | None) -> Description:
     if first != -1 and last > first:
         text = text[first : last + 1]  # tolerate prose around the JSON object
     try:
-        data = json.loads(text)
-        summary = data["summary"]
-        language = data.get("language")
-    except (ValueError, KeyError, TypeError, AttributeError):
-        return Description(raw.strip(), None)
+        summary = json.loads(text)["summary"]
+    except (ValueError, KeyError, TypeError):
+        return raw.strip()
     if not isinstance(summary, str) or not summary.strip():
-        return Description(raw.strip(), None)
-    return Description(summary.strip(), _normalize_language(language))
-
-
-def _normalize_language(language: object) -> str | None:
-    if not isinstance(language, str):
-        return None
-    code = re.split(r"[-_]", language.strip(), maxsplit=1)[0].lower()
-    return code if re.fullmatch(r"[a-z]{2}", code) else None
+        return raw.strip()
+    return summary.strip()
 
 
 def _kw(key: str, base: str) -> dict:
@@ -86,7 +70,7 @@ def embed(texts: list[str]) -> list[list[float]]:
     return [d["embedding"] for d in data]
 
 
-def describe(text: str | None = None, image_path: Path | None = None) -> Description:
+def describe(text: str | None = None, image_path: Path | None = None) -> str:
     settings = get_settings()
     prompt = _describe_prompt(get_primary_language())
     if image_path is not None:
@@ -108,7 +92,7 @@ def describe(text: str | None = None, image_path: Path | None = None) -> Descrip
         model = settings.llm_model
         kw = _kw(settings.llm_api_key, settings.llm_api_base)
     resp = litellm.completion(model=model, messages=[{"role": "user", "content": content}], **kw)
-    return parse_description(resp.choices[0].message.content)
+    return parse_summary(resp.choices[0].message.content)
 
 
 def translate(text: str, target_language: str) -> str:

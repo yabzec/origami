@@ -1,7 +1,6 @@
 from sqlmodel import select
 
 from app.models import ChunkSource, DocType, Job
-from app.worker import pipeline
 from tests.test_pipeline import chunks_by_source, make_doc, pipeline_storage, run  # noqa: F401
 
 
@@ -28,6 +27,14 @@ def test_translation_disabled_schedules_nothing(session, pipeline_storage, llm_s
     assert doc.detected_language == "de"
     assert doc.translation_status is None
     assert session.exec(select(Job).where(Job.type == "translate_document")).all() == []
+
+
+def test_summary_disabled_still_detects_language_and_translates(session, pipeline_storage, llm_stub):
+    llm_stub["language"] = "de"
+    doc = run(session, _text_doc(session, pipeline_storage, summary_enabled=False))
+    assert doc.detected_language == "de"
+    assert doc.translation_status == "pending"
+    assert len(session.exec(select(Job).where(Job.type == "translate_document")).all()) == 1
 
 
 def test_upload_stores_flags(auth_client, storage):

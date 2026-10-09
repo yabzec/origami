@@ -134,11 +134,9 @@ def fake_scanner(client):
 
 @pytest.fixture
 def llm_stub(monkeypatch):
-    """Stub the LLM mock boundary: app.services.llm (the other one is smtplib.SMTP). select_documents is scripted via calls["select_ids"] / calls["select_error"]."""
-    from app.services.llm import Description
-
+    """Stub the LLM mock boundary (calls["language"] is what language detection returns for non-empty text): app.services.llm (the other one is smtplib.SMTP). select_documents is scripted via calls["select_ids"] / calls["select_error"]."""
     calls = {
-        "embed": [], "describe": [], "translate": [], "language": "it", "translate_error": None,
+        "embed": [], "describe": [], "detect": [], "translate": [], "language": "it", "translate_error": None,
         "select": [], "select_ids": None, "select_error": None,
     }
 
@@ -148,7 +146,11 @@ def llm_stub(monkeypatch):
 
     def fake_describe(text=None, image_path=None):
         calls["describe"].append({"text": text, "image_path": image_path})
-        return Description("Descrizione generata.", calls["language"])
+        return "Descrizione generata."
+
+    def fake_detect_language(text):
+        calls["detect"].append(text)
+        return calls["language"] if text and text.strip() else None
 
     def fake_translate(text, target_language):
         calls["translate"].append((text, target_language))
@@ -158,6 +160,7 @@ def llm_stub(monkeypatch):
 
     monkeypatch.setattr("app.worker.pipeline.llm_embed", fake_embed)
     monkeypatch.setattr("app.worker.pipeline.llm_describe", fake_describe)
+    monkeypatch.setattr("app.worker.pipeline.detect_language", fake_detect_language)
     monkeypatch.setattr("app.worker.pipeline.llm_translate", fake_translate)
 
     def fake_select_documents(question, history, candidates):

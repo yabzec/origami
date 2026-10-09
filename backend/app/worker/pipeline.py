@@ -16,6 +16,7 @@ from app.services.extract import (
     extract_text_file,
     pdf_needs_ocr,
 )
+from app.services.language import detect_language
 from app.services.llm import describe as llm_describe
 from app.services.llm import embed as llm_embed
 from app.services.llm import translate as llm_translate
@@ -48,6 +49,7 @@ def process_document(session: Session, payload: dict) -> None:
 
         pages = _extract_content(session, doc, storage, payload)
         _ensure_content_chunks(session, doc, pages)
+        _ensure_language(session, doc)
         _ensure_summary(session, doc, storage)
         _ensure_metadata_chunk(session, doc)
         _embed_pending_chunks(session, doc)
@@ -233,27 +235,37 @@ def _content_chunks(session: Session, doc: Document) -> list[Chunk]:
     )
 
 
+def _ensure_language(session: Session, doc: Document) -> None:
+    """Local detection on the extracted text; translation depends on this, not on the summary."""
+    if doc.detected_language is not None:
+        return
+    text = "\n\n".join(c.content for c in _content_chunks(session, doc))
+    language = detect_language(text)
+    if language is not None:
+        doc.detected_language = language
+        session.commit()
+
+
 def _ensure_summary(session: Session, doc: Document, storage: Storage) -> None:
     if doc.doc_type == DocType.video or doc.summary is not None or not doc.summary_enabled:
         return
     text = "\n\n".join(c.content for c in _content_chunks(session, doc)).strip()
     if doc.doc_type == DocType.image and len(text) < IMAGE_SUMMARY_TEXT_THRESHOLD:
         # No usable extracted text (a photo, or no-OCR) — send the file to vision.
-        result = llm_describe(image_path=storage.abs_path(doc.file_path))
+        summary = llm_describe(image_path=storage.abs_path(doc.file_path))
     elif text:
-        result = llm_describe(text=text[:SUMMARY_INPUT_CHARS])
+        summary = llm_describe(text=text[:SUMMARY_INPUT_CHARS])
     else:
         return  # nothing to summarize (e.g. a no-OCR scan or an empty PDF)
-    if not result.summary:
+    if not summary:
         return  # empty LLM reply: never store an empty summary chunk
-    doc.summary = result.summary
-    doc.detected_language = result.language
+    doc.summary = summary
     session.add(
         Chunk(
             document_id=doc.id,
             chunk_index=_next_chunk_index(session, doc),
             source=ChunkSource.summary,
-            content=result.summary,
+            content=summary,
         )
     )
     # AI text; the UI labels it until the user edits it. Conditional in SQL so a
@@ -261,7 +273,7 @@ def _ensure_summary(session: Session, doc: Document, storage: Storage) -> None:
     session.execute(
         update(Document)
         .where(Document.id == doc.id, func.btrim(func.coalesce(Document.description, "")) == "")
-        .values(description=result.summary)
+        .values(description=summary)
     )
     session.commit()
     session.refresh(doc)

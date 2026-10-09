@@ -257,7 +257,7 @@ def test_italian_document_is_not_translated(session, pipeline_storage, llm_stub)
 
 
 def test_unknown_language_skips_translation(session, pipeline_storage, llm_stub):
-    llm_stub["language"] = None  # e.g. describe() got non-JSON and fell back to raw text
+    llm_stub["language"] = None  # language detection was not confident
     doc = run(session, _text_doc(session, pipeline_storage))
     assert doc.status == DocStatus.ready
     assert doc.summary == "Descrizione generata."
@@ -309,9 +309,7 @@ def test_embedding_is_batched(session, pipeline_storage, llm_stub):
 
 
 def test_empty_summary_is_not_stored(session, pipeline_storage, llm_stub, monkeypatch):
-    from app.services.llm import Description
-
-    monkeypatch.setattr(pipeline, "llm_describe", lambda text=None, image_path=None: Description("", None))
+    monkeypatch.setattr(pipeline, "llm_describe", lambda text=None, image_path=None: "")
     doc = run(session, _text_doc(session, pipeline_storage))
     assert doc.status == DocStatus.ready
     assert not doc.summary
@@ -349,8 +347,6 @@ def test_summary_does_not_overwrite_description_edited_during_llm_call(
 ):
     from sqlmodel import Session
 
-    from app.services.llm import Description
-
     doc = _text_doc(session, pipeline_storage)
 
     def describe_while_user_edits(text=None, image_path=None):
@@ -358,7 +354,7 @@ def test_summary_does_not_overwrite_description_edited_during_llm_call(
             other_doc = other.get(Document, doc.id)
             other_doc.description = "Scritta dall'utente"
             other.commit()
-        return Description("Descrizione generata.", "it")
+        return "Descrizione generata."
 
     monkeypatch.setattr(pipeline, "llm_describe", describe_while_user_edits)
     doc = run(session, doc)
