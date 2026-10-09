@@ -2,10 +2,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FolderPicker } from "@/components/FolderPicker";
+import { ProcessingOptions } from "@/components/ProcessingOptions";
+import { TagInput } from "@/components/TagInput";
 import { Textarea } from "@/components/ui/textarea";
 import { todayIso } from "@/lib/dates";
+import type { ProcessingValues } from "@/lib/processing";
 import type { ScanPhase } from "@/lib/scanWizard";
-import type { Tag } from "@/lib/types";
 
 export interface ScanFormFields {
   title: string;
@@ -22,7 +24,8 @@ export function emptyScanForm(): ScanFormFields {
 export function ScanSidebar({
   fields,
   onChange,
-  tags,
+  processing,
+  onProcessingChange,
   phase,
   pageCount,
   previewing,
@@ -33,7 +36,8 @@ export function ScanSidebar({
 }: {
   fields: ScanFormFields;
   onChange: (patch: Partial<ScanFormFields>) => void;
-  tags: Tag[];
+  processing: ProcessingValues;
+  onProcessingChange: (v: ProcessingValues) => void;
   phase: ScanPhase;
   pageCount: number;
   previewing: boolean;
@@ -71,29 +75,11 @@ export function ScanSidebar({
         <Label htmlFor="scan-folder">Folder</Label>
         <FolderPicker id="scan-folder" value={fields.folderId} onChange={(folderId) => onChange({ folderId })} />
       </div>
-      {tags.length > 0 && (
-        <div>
-          <Label>Tags</Label>
-          <div className="flex flex-wrap gap-2">
-            {tags.map((tag) => (
-              <label key={tag.id} className="flex items-center gap-1 text-sm">
-                <input
-                  type="checkbox"
-                  checked={fields.tagIds.includes(tag.id)}
-                  onChange={(e) =>
-                    onChange({
-                      tagIds: e.target.checked
-                        ? [...fields.tagIds, tag.id]
-                        : fields.tagIds.filter((x) => x !== tag.id),
-                    })
-                  }
-                />
-                {tag.name}
-              </label>
-            ))}
-          </div>
-        </div>
-      )}
+      <div>
+        <Label htmlFor="scan-tags">Tags</Label>
+        <TagInput id="scan-tags" value={fields.tagIds} onChange={(tagIds) => onChange({ tagIds })} />
+      </div>
+      <ProcessingOptions idPrefix="scan" value={processing} onChange={onProcessingChange} />
       <div className="space-y-2 border-t border-zinc-200 pt-3">
         <Button variant="outline" className="w-full" disabled={busy} onClick={onPreview}>
           {previewing ? "Previewing…" : "Preview"}

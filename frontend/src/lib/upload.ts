@@ -4,6 +4,8 @@ export interface UploadFields {
   tagIds?: number[];
   ocrLanguages?: string;
   ocrEnabled?: boolean;
+  summaryEnabled?: boolean;
+  translationEnabled?: boolean;
   documentDate?: string;
 }
 
@@ -21,6 +23,8 @@ export function buildUploadForm(file: File, fields: UploadFields): FormData {
   if (fields.tagIds && fields.tagIds.length > 0) form.append("tag_ids", fields.tagIds.join(","));
   if (fields.ocrLanguages) form.append("ocr_languages", fields.ocrLanguages);
   if (fields.ocrEnabled === false) form.append("ocr_enabled", "false");
+  if (fields.summaryEnabled === false) form.append("summary_enabled", "false");
+  if (fields.translationEnabled === false) form.append("translation_enabled", "false");
   if (fields.documentDate) form.append("document_date", fields.documentDate);
   return form;
 }

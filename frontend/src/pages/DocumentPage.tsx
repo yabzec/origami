@@ -8,12 +8,12 @@ import { Label } from "@/components/ui/label";
 import { FolderPicker } from "@/components/FolderPicker";
 import { Textarea } from "@/components/ui/textarea";
 import { STATUS_VARIANTS } from "@/components/DocumentCard";
-import { OcrLanguageSelect } from "@/components/OcrLanguageSelect";
+import { ProcessingOptions } from "@/components/ProcessingOptions";
+import { TagInput } from "@/components/TagInput";
 import { useNow } from "@/hooks/useNow";
-import { useTags } from "@/hooks/useTags";
 import { api, ApiError, fileUrl } from "@/lib/api";
 import { isAiDescription, nextDescription } from "@/lib/description";
-import { DEFAULT_OCR_LANGUAGES } from "@/lib/ocrLanguages";
+import { defaultProcessing, processingFromDocument, processingPayload, type ProcessingValues } from "@/lib/processing";
 import { processingRetryMessage, shouldPollDocument } from "@/lib/retry";
 import { languageLabel, textVariants, translationNote, type TextVariant } from "@/lib/translation";
 import type { Document, DocumentText } from "@/lib/types";
@@ -88,7 +88,6 @@ export function DocumentPage() {
     queryFn: () => api.get<Document>(`/api/documents/${id}`),
     refetchInterval: (q) => (q.state.data && shouldPollDocument(q.state.data) ? 4000 : false),
   });
-  const { data: tags } = useTags();
 
   const [tab, setTab] = useState<"preview" | "text">("preview");
   const [title, setTitle] = useState("");
@@ -96,8 +95,7 @@ export function DocumentPage() {
   const [folderId, setFolderId] = useState<number | null>(null);
   const [tagIds, setTagIds] = useState<number[]>([]);
   const [documentDate, setDocumentDate] = useState("");
-  const [ocrLanguages, setOcrLanguages] = useState(DEFAULT_OCR_LANGUAGES);
-  const [ocrEnabled, setOcrEnabled] = useState(true);
+  const [processing, setProcessing] = useState<ProcessingValues>(defaultProcessing);
   const lastStatus = useRef<string | null>(null);
   const lastTranslation = useRef<string | null>(null);
   const now = useNow();
@@ -113,8 +111,7 @@ export function DocumentPage() {
       setFolderId(doc.folder_id);
       setTagIds(doc.tags.map((t) => t.id));
       setDocumentDate(doc.document_date);
-      setOcrLanguages(doc.ocr_languages);
-      setOcrEnabled(doc.ocr_enabled);
+      setProcessing(processingFromDocument(doc));
       hydratedForDocId.current = doc.id;
     } else if (serverDescription.current !== doc.description) {
       // pipeline filled (or re-process cleared) the description: follow it unless the user edited the field
@@ -159,10 +156,7 @@ export function DocumentPage() {
 
   const reprocess = useMutation({
     mutationFn: () =>
-      api.post<Document>(`/api/documents/${id}/reprocess`, {
-        ocr_languages: ocrLanguages,
-        ocr_enabled: ocrEnabled,
-      }),
+      api.post<Document>(`/api/documents/${id}/reprocess`, processingPayload(processing)),
     onSuccess: (updated) => {
       qc.setQueryData(["document", id], updated);
       qc.invalidateQueries({ queryKey: ["documents"] });
@@ -171,7 +165,7 @@ export function DocumentPage() {
   const confirmReprocess = () => {
     const base = "Re-run OCR and AI processing? Extracted text, summary and translation will be replaced.";
     const pdfNote =
-      doc && (doc.doc_type === "pdf" || doc.doc_type === "scan") && ocrEnabled && doc.ocr_applied !== false
+      doc && (doc.doc_type === "pdf" || doc.doc_type === "scan") && processing.ocrEnabled && doc.ocr_applied !== false
         ? " The PDF is rebuilt from page images."
         : "";
     if (window.confirm(base + pdfNote)) reprocess.mutate();
@@ -239,21 +233,8 @@ export function DocumentPage() {
           <FolderPicker id="d-folder" value={folderId} onChange={setFolderId} />
         </div>
         <div>
-          <Label>Tags</Label>
-          <div className="flex flex-wrap gap-2">
-            {(tags ?? []).map((tag) => (
-              <label key={tag.id} className="flex items-center gap-1 text-sm">
-                <input
-                  type="checkbox"
-                  checked={tagIds.includes(tag.id)}
-                  onChange={(e) =>
-                    setTagIds(e.target.checked ? [...tagIds, tag.id] : tagIds.filter((x) => x !== tag.id))
-                  }
-                />
-                {tag.name}
-              </label>
-            ))}
-          </div>
+          <Label htmlFor="d-tags">Tags</Label>
+          <TagInput id="d-tags" value={tagIds} onChange={setTagIds} />
         </div>
         <Button className="w-full" onClick={() => save.mutate()} disabled={save.isPending}>
           {save.isPending ? "Saving…" : "Save"}
@@ -267,18 +248,7 @@ export function DocumentPage() {
         </Button>
         {doc.doc_type !== "video" && (
           <div className="space-y-2 border-t border-zinc-200 pt-3">
-            <p className="text-sm font-medium">OCR</p>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={ocrEnabled} onChange={(e) => setOcrEnabled(e.target.checked)} />
-              Run OCR
-            </label>
-            {ocrEnabled && (
-              <OcrLanguageSelect
-                aria-label="OCR language"
-                value={ocrLanguages}
-                onChange={(e) => setOcrLanguages(e.target.value)}
-              />
-            )}
+            <ProcessingOptions idPrefix="d" value={processing} onChange={setProcessing} />
             <Button
               variant="outline"
               className="w-full"

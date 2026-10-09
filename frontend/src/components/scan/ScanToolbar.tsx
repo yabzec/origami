@@ -1,4 +1,3 @@
-import { OcrLanguageSelect } from "@/components/OcrLanguageSelect";
 import { Select } from "@/components/ui/select";
 import { scanDeviceHint } from "@/lib/scanDevices";
 import type { ScanDevice, ScanStatus } from "@/lib/types";
@@ -19,19 +18,11 @@ export function ScanToolbar({
   devices,
   device,
   onDeviceChange,
-  languages,
-  onLanguagesChange,
-  ocrEnabled,
-  onOcrEnabledChange,
 }: {
   status: ScanStatus | undefined;
   devices: ScanDevice[];
   device: string | null;
   onDeviceChange: (device: string | null) => void;
-  languages: string;
-  onLanguagesChange: (languages: string) => void;
-  ocrEnabled: boolean;
-  onOcrEnabledChange: (enabled: boolean) => void;
 }) {
   const hint = scanDeviceHint(devices);
   return (
@@ -52,18 +43,6 @@ export function ScanToolbar({
             </option>
           ))}
         </Select>
-      )}
-      <label className="flex items-center gap-2">
-        <input type="checkbox" checked={ocrEnabled} onChange={(e) => onOcrEnabledChange(e.target.checked)} />
-        Run OCR
-      </label>
-      {ocrEnabled && (
-        <OcrLanguageSelect
-          aria-label="OCR language"
-          className="w-48"
-          value={languages}
-          onChange={(e) => onLanguagesChange(e.target.value)}
-        />
       )}
     </div>
   );

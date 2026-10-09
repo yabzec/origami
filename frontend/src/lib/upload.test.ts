@@ -13,6 +13,14 @@ describe("buildUploadForm", () => {
     expect(form.has("ocr_languages")).toBe(false);
   });
 
+  it("sends disabled summary and translation flags", () => {
+    const form = buildUploadForm(new File(["x"], "a.pdf"), { summaryEnabled: false, translationEnabled: false });
+    expect(form.get("summary_enabled")).toBe("false");
+    expect(form.get("translation_enabled")).toBe("false");
+    const defaults = buildUploadForm(new File(["x"], "a.pdf"), {});
+    expect(defaults.get("summary_enabled")).toBeNull();
+  });
+
   it("serializes all fields", () => {
     const form = buildUploadForm(file, {
       title: "Bolletta",

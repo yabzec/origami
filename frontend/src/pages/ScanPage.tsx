@@ -7,9 +7,8 @@ import { ScanPreview } from "@/components/scan/ScanPreview";
 import { emptyScanForm, ScanSidebar, type ScanFormFields } from "@/components/scan/ScanSidebar";
 import { ScanToolbar } from "@/components/scan/ScanToolbar";
 import { useLeaveGuard } from "@/hooks/useLeaveGuard";
-import { useTags } from "@/hooks/useTags";
 import { api, ApiError, getToken } from "@/lib/api";
-import { DEFAULT_OCR_LANGUAGES } from "@/lib/ocrLanguages";
+import { defaultProcessing, processingPayload, type ProcessingValues } from "@/lib/processing";
 import { initialScanState, scannerMessage, scanWizardReducer, shouldBlockLeave } from "@/lib/scanWizard";
 import type { Document, ScanDevice, ScanPageInfo, ScanStatus } from "@/lib/types";
 
@@ -32,12 +31,10 @@ export function ScanPage() {
     queryKey: ["scan-devices"],
     queryFn: () => api.get<{ devices: ScanDevice[]; default: string | null }>("/api/scan/devices"),
   });
-  const { data: tags } = useTags();
 
   const [device, setDevice] = useState<string | null>(null);
   const chosenDevice = device ?? deviceData?.default ?? null;
-  const [languages, setLanguages] = useState(DEFAULT_OCR_LANGUAGES);
-  const [ocrEnabled, setOcrEnabled] = useState(true);
+  const [processing, setProcessing] = useState<ProcessingValues>(defaultProcessing);
   const [fields, setFields] = useState<ScanFormFields>(emptyScanForm);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
@@ -61,8 +58,8 @@ export function ScanPage() {
     startInFlight.current = true;
     api
       .post<{ id: number }>("/api/scan/sessions", {
-        ocr_languages: languages,
-        ocr_enabled: ocrEnabled,
+        ocr_languages: processing.ocrLanguages || null,
+        ocr_enabled: processing.ocrEnabled,
         device: chosenDevice,
       })
       .then((session) => dispatch({ type: "SESSION_STARTED", sessionId: session.id }))
@@ -70,7 +67,7 @@ export function ScanPage() {
       .finally(() => {
         startInFlight.current = false;
       });
-    // languages/ocrEnabled/device are only defaults here; compile and page scans send the current values
+    // processing/device are only defaults here; compile and page scans send the current values
   }, [state.phase, state.error]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const leaveSession = useCallback(() => {
@@ -151,8 +148,7 @@ export function ScanPage() {
         document_date: fields.documentDate || null,
         folder_id: fields.folderId,
         tag_ids: fields.tagIds,
-        ocr_languages: languages,
-        ocr_enabled: ocrEnabled,
+        ...processingPayload(processing),
       });
       clearPreview();
       dispatch({ type: "COMPILED", document: doc });
@@ -184,10 +180,6 @@ export function ScanPage() {
             devices={deviceData?.devices ?? []}
             device={chosenDevice}
             onDeviceChange={setDevice}
-            languages={languages}
-            onLanguagesChange={setLanguages}
-            ocrEnabled={ocrEnabled}
-            onOcrEnabledChange={setOcrEnabled}
           />
         </div>
       </div>
@@ -234,7 +226,8 @@ export function ScanPage() {
           <ScanSidebar
             fields={fields}
             onChange={(patch) => setFields((prev) => ({ ...prev, ...patch }))}
-            tags={tags ?? []}
+            processing={processing}
+            onProcessingChange={setProcessing}
             phase={state.phase}
             pageCount={state.pages.length}
             previewing={previewing}
