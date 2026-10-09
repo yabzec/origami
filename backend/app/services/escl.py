@@ -8,6 +8,7 @@ import io
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from PIL import Image, UnidentifiedImageError
 
@@ -133,6 +134,15 @@ def parse_agent_device(device: str) -> tuple[str, str]:
     return parts[1], parts[2]
 
 
+def job_path(location: str) -> str:
+    path = urlparse(location).path.rstrip("/")
+    marker = "ScanJobs/"
+    idx = path.rfind(marker)
+    if idx == -1 or not path[idx + len(marker):]:
+        raise ScannerError("Scanner returned an invalid job location")
+    return marker + path[idx + len(marker):]
+
+
 class EsclRemoteBackend:
     """Drives eSCL scanners on a client's network through that client's agent."""
 
@@ -196,7 +206,7 @@ class EsclRemoteBackend:
             raise ScannerError(f"ScanJobs returned {job.status}")
         deadline = time.monotonic() + SCAN_TIMEOUT_SECONDS
         while True:
-            doc = self._call(client_id, uuid, "GET", f"{location.strip('/')}/NextDocument")
+            doc = self._call(client_id, uuid, "GET", f"{job_path(location)}/NextDocument")
             if doc.status == 200 and doc.body:
                 try:
                     return to_png(doc.body)

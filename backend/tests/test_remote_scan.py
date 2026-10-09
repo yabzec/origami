@@ -142,6 +142,22 @@ def test_to_png_converts_cmyk():
     assert Image.open(io.BytesIO(out)).mode == "RGB"
 
 
+@pytest.mark.parametrize(
+    "location", ["ScanJobs/7", "/eSCL/ScanJobs/7/", "http://192.168.1.5/eSCL/ScanJobs/7"]
+)
+def test_job_path_normalizes_location(location):
+    from app.services.escl import job_path
+
+    assert job_path(location) == "ScanJobs/7"
+
+
+def test_job_path_rejects_bad_location():
+    from app.services.escl import job_path
+
+    with pytest.raises(ScannerError):
+        job_path("http://host/other/7")
+
+
 # --- API wiring ----------------------------------------------------------
 
 
