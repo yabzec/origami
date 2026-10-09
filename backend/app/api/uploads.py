@@ -6,8 +6,7 @@ from sqlmodel import Session
 
 from app.api.deps import api_error, get_current_user
 from app.api.documents import serialize
-from app.api.ocr import check_ocr_languages
-from app.config import get_settings
+from app.api.ocr import check_ocr_languages, default_ocr_languages
 from app.db import get_session
 from app.models import DocType, Document, DocumentTag, Folder, Tag
 from app.services.jobs import enqueue
@@ -116,7 +115,7 @@ def upload_document(
         session,
         title=title or Path(file.filename).stem,
         doc_type=doc_type,
-        ocr_languages=ocr_languages or get_settings().default_ocr_languages,
+        ocr_languages=ocr_languages or default_ocr_languages(),
         ocr_enabled=ocr_enabled,
         summary_enabled=summary_enabled,
         translation_enabled=translation_enabled,

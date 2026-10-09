@@ -7,9 +7,8 @@ from sqlmodel import Session, select
 
 from app.api.deps import api_error, get_current_user
 from app.api.documents import serialize
-from app.api.ocr import check_ocr_languages
+from app.api.ocr import check_ocr_languages, default_ocr_languages
 from app.api.uploads import create_pending_document
-from app.config import get_settings
 from app.db import get_session
 from app.models import DocType, ScanPage, ScanSession, ScanSessionStatus
 from app.services.jobs import enqueue
@@ -100,7 +99,7 @@ def create_session(
     if body.ocr_enabled:
         check_ocr_languages(body.ocr_languages)
     scan_session = ScanSession(
-        ocr_languages=body.ocr_languages or get_settings().default_ocr_languages,
+        ocr_languages=body.ocr_languages or default_ocr_languages(),
         ocr_enabled=body.ocr_enabled,
         device=body.device,
     )

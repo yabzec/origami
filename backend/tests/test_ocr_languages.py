@@ -127,3 +127,24 @@ def test_languages_are_not_checked_when_ocr_is_disabled(auth_client, session, st
         json={"title": "T", "ocr_languages": "xyz", "ocr_enabled": False},
     )
     assert resp.status_code == 201
+
+
+def test_upload_and_scan_fallback_default_uses_installed_languages(
+    auth_client, session, storage, fake_scanner, installed, monkeypatch
+):
+    from app.config import get_settings
+    from app.models import Document
+
+    installed(["eng"])
+    monkeypatch.setenv("DEFAULT_OCR_LANGUAGES", "ita+eng")
+    get_settings.cache_clear()
+    try:
+        resp = auth_client.post(
+            "/api/documents/upload", files={"file": ("a.pdf", b"%PDF", "application/pdf")}
+        )
+        scan = auth_client.post("/api/scan/sessions", json={})
+    finally:
+        get_settings.cache_clear()
+    assert resp.status_code == 201
+    assert session.get(Document, resp.json()["id"]).ocr_languages == "eng"
+    assert scan.json()["ocr_languages"] == "eng"

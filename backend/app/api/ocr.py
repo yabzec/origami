@@ -17,12 +17,16 @@ def check_ocr_languages(value: str | None) -> None:
         raise api_error(422, "unknown_ocr_language", f"Unknown OCR language: {unknown[0]}")
 
 
-@router.get("/languages")
-def list_ocr_languages() -> dict:
+def default_ocr_languages() -> str:
+    """DEFAULT_OCR_LANGUAGES limited to installed languages; else the first installed one."""
     codes = available_languages()
     configured = [c for c in get_settings().default_ocr_languages.split("+") if c in codes]
-    default = "+".join(configured) or (codes[0] if codes else "")
+    return "+".join(configured) or (codes[0] if codes else "")
+
+
+@router.get("/languages")
+def list_ocr_languages() -> dict:
     return {
-        "languages": [{"code": c, "name": ocr_language_name(c)} for c in codes],
-        "default": default,
+        "languages": [{"code": c, "name": ocr_language_name(c)} for c in available_languages()],
+        "default": default_ocr_languages(),
     }
