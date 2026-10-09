@@ -16,15 +16,28 @@ export function useLocalScanSearch(clientId: string, input: { agentConnected: bo
   const [search, setSearch] = useState<SearchState>(initialSearch);
   const launchUrl = useRef<{ url: string; at: number } | null>(null);
 
+  const inFlight = useRef(false);
+
   const fetchUrl = useCallback(async () => {
     const { url } = await api.post<{ url: string }>("/api/agent/launch", { client_id: clientId });
     launchUrl.current = { url, at: Date.now() };
     return url;
   }, [clientId]);
 
-  const prefetch = useCallback(() => {
-    if (isAgentInstalled()) fetchUrl().catch(() => {});
+  const warm = useCallback(() => {
+    const cached = launchUrl.current;
+    if (inFlight.current || (cached && Date.now() - cached.at < PREFETCH_MAX_AGE_MS)) return;
+    inFlight.current = true;
+    fetchUrl()
+      .catch(() => {})
+      .finally(() => {
+        inFlight.current = false;
+      });
   }, [fetchUrl]);
+
+  const prefetch = useCallback(() => {
+    if (isAgentInstalled()) warm();
+  }, [warm]);
 
   const launch = useCallback(() => {
     const cached = launchUrl.current;
@@ -32,6 +45,7 @@ export function useLocalScanSearch(clientId: string, input: { agentConnected: bo
     setSearch(startSearch(true, Date.now()));
     if (cached && Date.now() - cached.at < PREFETCH_MAX_AGE_MS) {
       openAgentUrl(cached.url); // synchronous: keeps the click's user activation
+      warm(); // next click gets a fresh one
       return;
     }
     fetchUrl()
@@ -40,7 +54,7 @@ export function useLocalScanSearch(clientId: string, input: { agentConnected: bo
         openAgentUrl(url);
       })
       .catch(() => setSearch({ phase: "unresponsive", startedAt: Date.now(), found: 0 }));
-  }, [fetchUrl]);
+  }, [fetchUrl, warm]);
 
   const start = useCallback(() => {
     if (input.agentConnected) {
@@ -59,6 +73,11 @@ export function useLocalScanSearch(clientId: string, input: { agentConnected: bo
   useEffect(() => {
     if (input.agentConnected) markAgentInstalled();
   }, [input.agentConnected]);
+
+  // The install and retry buttons need a ready URL to open synchronously.
+  useEffect(() => {
+    if (search.phase === "install" || search.phase === "unresponsive") warm();
+  }, [search.phase, warm]);
 
   useEffect(() => {
     if (search.phase !== "searching") return;

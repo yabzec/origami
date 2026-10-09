@@ -29,7 +29,7 @@ function setup(devices: ScanDevice[], search: SearchState = initialSearch) {
 describe("DeviceListbox", () => {
   it("shows the selected device and opens with groups", async () => {
     const { onOpen } = setup([server, local]);
-    const button = screen.getByRole("button", { name: /scanner/i });
+    const button = screen.getByRole("combobox", { name: /scanner/i });
     expect(button).toHaveTextContent("Server Epson");
     await userEvent.click(button);
     expect(onOpen).toHaveBeenCalled();
@@ -40,7 +40,7 @@ describe("DeviceListbox", () => {
 
   it("selecting a device closes the list", async () => {
     const { onChange } = setup([server, local]);
-    await userEvent.click(screen.getByRole("button", { name: /scanner/i }));
+    await userEvent.click(screen.getByRole("combobox", { name: /scanner/i }));
     await userEvent.click(screen.getByRole("option", { name: "Home HP" }));
     expect(onChange).toHaveBeenCalledWith("agent:abcdefgh:u1");
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
@@ -48,7 +48,7 @@ describe("DeviceListbox", () => {
 
   it("search keeps the list open and new devices appear in place", async () => {
     const { onSearch, view } = setup([server]);
-    await userEvent.click(screen.getByRole("button", { name: /scanner/i }));
+    await userEvent.click(screen.getByRole("combobox", { name: /scanner/i }));
     await userEvent.click(screen.getByRole("option", { name: /search local scanners/i }));
     expect(onSearch).toHaveBeenCalled();
     expect(screen.getByRole("listbox")).toBeInTheDocument();
@@ -71,26 +71,26 @@ describe("DeviceListbox", () => {
 
   it("shows the install panel inside the open list", async () => {
     setup([server], { phase: "install", startedAt: null, found: 0 });
-    await userEvent.click(screen.getByRole("button", { name: /scanner/i }));
+    await userEvent.click(screen.getByRole("combobox", { name: /scanner/i }));
     expect(screen.getByText("Install panel")).toBeInTheDocument();
   });
 
   it("keyboard: arrows move, Enter on search keeps it open, Escape closes", async () => {
     const { onSearch, onChange } = setup([server, local]);
-    await userEvent.click(screen.getByRole("button", { name: /scanner/i }));
+    await userEvent.click(screen.getByRole("combobox", { name: /scanner/i }));
     await userEvent.keyboard("{ArrowDown}{ArrowDown}{Enter}");
     expect(onSearch).toHaveBeenCalled();
     expect(screen.getByRole("listbox")).toBeInTheDocument();
     await userEvent.keyboard("{ArrowUp}{Enter}");
     expect(onChange).toHaveBeenCalledWith("agent:abcdefgh:u1");
-    await userEvent.click(screen.getByRole("button", { name: /scanner/i }));
+    await userEvent.click(screen.getByRole("combobox", { name: /scanner/i }));
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
   it("shows status text for unresponsive and none", async () => {
     const { view } = setup([server], { phase: "unresponsive", startedAt: 0, found: 0 });
-    await userEvent.click(screen.getByRole("button", { name: /scanner/i }));
+    await userEvent.click(screen.getByRole("combobox", { name: /scanner/i }));
     expect(screen.getByText(/agent not responding/i)).toBeInTheDocument();
     view.rerender(
       <DeviceListbox devices={[server]} value="fake:0" onChange={() => {}}
@@ -98,5 +98,43 @@ describe("DeviceListbox", () => {
         installPanel={null} />,
     );
     expect(screen.getByText(/no scanners found/i)).toBeInTheDocument();
+  });
+
+  it("keys on the install panel act on its controls, not the list", async () => {
+    const onSearch = vi.fn();
+    const onInstalled = vi.fn();
+    render(
+      <DeviceListbox
+        devices={[server]}
+        value="fake:0"
+        onChange={() => {}}
+        search={{ phase: "install", startedAt: null, found: 0 }}
+        onSearch={onSearch}
+        onOpen={() => {}}
+        installPanel={<button onClick={onInstalled}>Installed, search now</button>}
+      />,
+    );
+    await userEvent.click(screen.getByRole("combobox", { name: /scanner/i }));
+    screen.getByRole("button", { name: "Installed, search now" }).focus();
+    await userEvent.keyboard("{Enter}");
+    expect(onInstalled).toHaveBeenCalledTimes(1);
+    expect(onSearch).not.toHaveBeenCalled();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("closes when focus leaves the component", async () => {
+    render(
+      <>
+        <DeviceListbox devices={[server]} value="fake:0" onChange={() => {}} search={initialSearch}
+          onSearch={() => {}} onOpen={() => {}} installPanel={null} />
+        <button>Outside</button>
+      </>,
+    );
+    await userEvent.click(screen.getByRole("combobox"));
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    await userEvent.tab();
+    await userEvent.tab();
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 });

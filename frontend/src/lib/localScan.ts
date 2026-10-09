@@ -72,10 +72,14 @@ export function searchTick(
 ): SearchState {
   if (state.phase !== "searching" || state.startedAt === null) return state;
   const elapsed = input.now - state.startedAt;
-  if (input.localCount > 0) return { ...state, phase: "found", found: input.localCount };
   if (!input.agentConnected && elapsed >= AGENT_WAIT_MS) return { ...state, phase: "unresponsive" };
-  if (input.agentConnected && elapsed >= SEARCH_WINDOW_MS) return { ...state, phase: "none" };
-  return state;
+  // Keep polling the whole window so scanners that appear late still show up.
+  if (input.agentConnected && elapsed >= SEARCH_WINDOW_MS) {
+    return input.localCount > 0
+      ? { ...state, phase: "found", found: input.localCount }
+      : { ...state, phase: "none", found: 0 };
+  }
+  return state.found === input.localCount ? state : { ...state, found: input.localCount };
 }
 
 export function isLocalDevice(id: string): boolean {

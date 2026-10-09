@@ -71,8 +71,19 @@ describe("search state machine", () => {
     const s = startSearch(true, 0);
     expect(s.phase).toBe("searching");
     expect(searchTick(s, { now: 2000, agentConnected: true, localCount: 0 }).phase).toBe("searching");
-    const found = searchTick(s, { now: 4000, agentConnected: true, localCount: 2 });
-    expect(found).toMatchObject({ phase: "found", found: 2 });
+    const live = searchTick(s, { now: 4000, agentConnected: true, localCount: 2 });
+    expect(live).toMatchObject({ phase: "searching", found: 2 });
+    expect(searchTick(live, { now: 14999, agentConnected: true, localCount: 3 })).toMatchObject({
+      phase: "searching",
+      found: 3,
+    });
+    const done = searchTick(live, { now: 15000, agentConnected: true, localCount: 3 });
+    expect(done).toMatchObject({ phase: "found", found: 3 });
+  });
+
+  it("keeps the same state object when nothing changed", () => {
+    const s = startSearch(true, 0);
+    expect(searchTick(s, { now: 1000, agentConnected: true, localCount: 0 })).toBe(s);
   });
 
   it("reports none after the window when the agent is connected", () => {

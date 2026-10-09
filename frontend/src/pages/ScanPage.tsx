@@ -34,7 +34,7 @@ export function ScanPage() {
   const clientId = useMemo(() => getClientId(), []);
   const [device, setDevice] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
-  const { data: deviceData } = useQuery({
+  const { data: deviceData, refetch: refetchDevices } = useQuery({
     queryKey: ["scan-devices", clientId],
     queryFn: () =>
       api.get<ScanDevicesResponse>(`/api/scan/devices?client_id=${encodeURIComponent(clientId)}`),
@@ -55,7 +55,10 @@ export function ScanPage() {
     agentConnected: deviceData?.agent_connected ?? false,
     localCount,
   });
-  useEffect(() => setSearching(search.phase === "searching"), [search.phase]);
+  useEffect(() => {
+    setSearching(search.phase === "searching");
+    if (search.phase === "searching") void refetchDevices(); // don't wait for the first interval tick
+  }, [search.phase, search.startedAt, refetchDevices]);
 
   const [reordering, setReordering] = useState(false);
   const [processing, setProcessing] = useState<ProcessingValues>(scanProcessing);
