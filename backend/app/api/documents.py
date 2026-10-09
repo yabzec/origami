@@ -439,6 +439,6 @@ def _scan_session_with_pages(session: Session, storage: Storage, doc: Document) 
     if scan_session_id is None:
         return None
     pages = session.exec(select(ScanPage).where(ScanPage.session_id == scan_session_id)).all()
-    if not pages or not all(storage.abs_path(p.image_path).exists() for p in pages):
+    if not pages or not all(storage.tmp_abs(p.image_path).exists() for p in pages):
         return None
     return scan_session_id

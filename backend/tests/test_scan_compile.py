@@ -137,3 +137,17 @@ def test_session_and_compiled_doc_carry_ocr_enabled(auth_client, fake_scanner, s
         f"/api/scan/sessions/{sid}/compile", json={"title": "X"}
     ).json()["id"]
     assert session.get(Document, doc_id).ocr_enabled is False
+
+
+def test_sweep_removes_old_part_files(session, storage, monkeypatch):
+    import os
+    import time
+
+    monkeypatch.setattr(pipeline, "get_pipeline_storage", lambda: storage)
+    storage.make_dir("A")
+    part = storage.abs_path("A/x.pdf.part")
+    part.write_bytes(b"")
+    past = time.time() - 7200
+    os.utime(part, (past, past))
+    pipeline.sweep_scan_sessions(session, {})
+    assert not part.exists()

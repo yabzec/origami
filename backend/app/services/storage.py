@@ -143,7 +143,7 @@ class Storage:
     # --- scan sessions ---
     @property
     def tmp_scans_dir(self) -> Path:
-        d = self.root / "tmp" / "scan_sessions"
+        d = self.tmp_root / "scan_sessions"
         d.mkdir(parents=True, exist_ok=True)
         return d
 

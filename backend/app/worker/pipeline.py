@@ -185,7 +185,7 @@ def _extract_scan(
             .where(ScanPage.session_id == session_id)
             .order_by(ScanPage.page_number)
         ).all()
-        image_paths = [storage.abs_path(p.image_path) for p in page_rows]
+        image_paths = [storage.tmp_abs(p.image_path) for p in page_rows]
         if doc.ocr_enabled:
             pdf_bytes, pages = images_to_searchable_pdf(image_paths, doc.ocr_languages)
         else:
@@ -509,6 +509,7 @@ def _embed_pending_chunks(session: Session, doc: Document) -> None:
 
 SWEEP_INTERVAL = timedelta(hours=1)
 SESSION_MAX_AGE = timedelta(hours=24)
+PART_FILE_MAX_AGE = timedelta(hours=1)
 
 
 @register("sweep_scan_sessions")
@@ -559,6 +560,9 @@ def sweep_scan_sessions(session: Session, payload: dict) -> None:
         session.delete(scan_session)
         session.commit()
         storage.remove_scan_session_dir(sid)
+
+    for part in storage.remove_part_files(PART_FILE_MAX_AGE.total_seconds()):
+        log.info("Removed leftover partial write %s", part)
 
     enqueue(
         session,

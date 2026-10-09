@@ -147,7 +147,7 @@ def scan_page(
     page = ScanPage(
         session_id=session_id,
         page_number=number,
-        image_path=f"tmp/scan_sessions/{session_id}/{filename}",
+        image_path=f"scan_sessions/{session_id}/{filename}",
     )
     db.add(page)
     db.commit()
@@ -168,7 +168,7 @@ def page_preview(
     page = db.get(ScanPage, page_id)
     if page is None:
         raise api_error(404, "not_found", f"Scan page {page_id} not found")
-    return FileResponse(storage.abs_path(page.image_path), media_type="image/png")
+    return FileResponse(storage.tmp_abs(page.image_path), media_type="image/png")
 
 
 @router.delete("/pages/{page_id}", status_code=204)
@@ -180,7 +180,7 @@ def delete_page(
     page = db.get(ScanPage, page_id)
     if page is None:
         raise api_error(404, "not_found", f"Scan page {page_id} not found")
-    storage.abs_path(page.image_path).unlink(missing_ok=True)
+    storage.tmp_abs(page.image_path).unlink(missing_ok=True)
     session_id, removed_number = page.session_id, page.page_number
     db.delete(page)
     db.commit()
