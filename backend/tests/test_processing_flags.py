@@ -46,11 +46,28 @@ def test_upload_stores_flags(auth_client, storage):
     assert (body["summary_enabled"], body["translation_enabled"]) == (False, False)
 
 
-def test_upload_flags_default_true(auth_client, storage):
+def test_upload_flags_default_summary_on_translation_off(auth_client, storage):
     body = auth_client.post(
         "/api/documents/upload", files={"file": ("a.md", b"x", "text/markdown")}
     ).json()
-    assert (body["summary_enabled"], body["translation_enabled"]) == (True, True)
+    assert (body["summary_enabled"], body["translation_enabled"]) == (True, False)
+
+
+def test_compile_translation_off_by_default(auth_client, fake_scanner, storage):
+    sid = auth_client.post("/api/scan/sessions", json={}).json()["id"]
+    auth_client.post(f"/api/scan/sessions/{sid}/pages", json={})
+    body = auth_client.post(f"/api/scan/sessions/{sid}/compile", json={"title": "T"}).json()
+    assert body["translation_enabled"] is False
+
+
+def test_reprocess_keeps_translation_flag_when_not_sent(auth_client, session):
+    from tests.helpers import seed_document
+
+    doc = seed_document(
+        session, "Doc", [{"content": "x", "page_number": 1}], doc_type="pdf", translation_enabled=False
+    )
+    body = auth_client.post(f"/api/documents/{doc.id}/reprocess", json={"ocr_languages": "eng"}).json()
+    assert body["translation_enabled"] is False
 
 
 def test_compile_stores_flags(auth_client, fake_scanner, storage):

@@ -10,7 +10,7 @@ export interface ProcessingValues {
 }
 
 export function defaultProcessing(): ProcessingValues {
-  return { ocrEnabled: true, ocrLanguages: "", summaryEnabled: true, translationEnabled: true, translationLanguage: "" };
+  return { ocrEnabled: true, ocrLanguages: "", summaryEnabled: true, translationEnabled: false, translationLanguage: "" };
 }
 
 export function processingFromDocument(doc: Document): ProcessingValues {

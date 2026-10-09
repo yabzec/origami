@@ -65,8 +65,9 @@ describe("fileStem", () => {
 
 describe("translation language in uploads", () => {
   it("sends the target only when translation is on", () => {
-    const on = buildUploadForm(new File(["x"], "a.pdf"), uploadProcessingFields({ ...defaultProcessing(), translationLanguage: "en" }));
+    const on = buildUploadForm(new File(["x"], "a.pdf"), uploadProcessingFields({ ...defaultProcessing(), translationEnabled: true, translationLanguage: "en" }));
     expect(on.get("translation_language")).toBe("en");
+    expect(on.get("translation_enabled")).toBe("true");
     const off = buildUploadForm(
       new File(["x"], "a.pdf"),
       uploadProcessingFields({ ...defaultProcessing(), translationEnabled: false, translationLanguage: "en" }),

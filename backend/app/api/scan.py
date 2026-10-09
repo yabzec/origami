@@ -53,7 +53,7 @@ class CompileRequest(BaseModel):
     ocr_enabled: bool | None = None
     translation_language: str | None = None
     summary_enabled: bool = True
-    translation_enabled: bool = True
+    translation_enabled: bool = False
 
 
 def get_session_or_404(db: Session, session_id: int) -> ScanSession:

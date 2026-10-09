@@ -275,7 +275,9 @@ def test_scan_with_ocr_text_gets_summary_and_language(
     llm_stub["language"] = "de"
     sid = auth_client.post("/api/scan/sessions", json={"ocr_languages": "eng"}).json()["id"]
     auth_client.post(f"/api/scan/sessions/{sid}/pages", json={})
-    doc_id = auth_client.post(f"/api/scan/sessions/{sid}/compile", json={"title": "Rechnung"}).json()["id"]
+    doc_id = auth_client.post(
+        f"/api/scan/sessions/{sid}/compile", json={"title": "Rechnung", "translation_enabled": True}
+    ).json()["id"]
 
     assert run_once(engine) is True
     doc = session.get(Document, doc_id)
