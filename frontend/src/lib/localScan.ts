@@ -4,6 +4,8 @@ export const CLIENT_ID_KEY = "origami.clientId";
 export const AGENT_INSTALLED_KEY = "origami.agentInstalled";
 export const SEARCH_WINDOW_MS = 15_000;
 export const AGENT_WAIT_MS = 10_000;
+/** How long the devices list keeps polling for an agent that connects late (browser prompt, SmartScreen). */
+export const LATE_AGENT_POLL_MS = 120_000;
 
 function defaultStorage(): Storage | undefined {
   try {
@@ -70,6 +72,9 @@ export function searchTick(
   state: SearchState,
   input: { now: number; agentConnected: boolean; localCount: number },
 ): SearchState {
+  if (state.phase === "unresponsive" && input.agentConnected) {
+    return { phase: "searching", startedAt: input.now, found: input.localCount };
+  }
   if (state.phase !== "searching" || state.startedAt === null) return state;
   const elapsed = input.now - state.startedAt;
   if (!input.agentConnected && elapsed >= AGENT_WAIT_MS) return { ...state, phase: "unresponsive" };
@@ -80,6 +85,15 @@ export function searchTick(
       : { ...state, phase: "none", found: 0 };
   }
   return state.found === input.localCount ? state : { ...state, found: input.localCount };
+}
+
+/** refetchInterval for the devices list during a search. */
+export function devicePollInterval(state: Pick<SearchState, "phase" | "startedAt">, now: number): number | false {
+  if (state.phase === "searching") return 1000;
+  if (state.phase === "unresponsive" && state.startedAt !== null && now - state.startedAt < LATE_AGENT_POLL_MS) {
+    return 2000;
+  }
+  return false;
 }
 
 export function isLocalDevice(id: string): boolean {

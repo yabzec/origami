@@ -9,7 +9,7 @@ import { ScanToolbar } from "@/components/scan/ScanToolbar";
 import { useLeaveGuard } from "@/hooks/useLeaveGuard";
 import { useLocalScanSearch } from "@/hooks/useLocalScanSearch";
 import { api, ApiError, getToken } from "@/lib/api";
-import { getClientId, isLocalDevice } from "@/lib/localScan";
+import { devicePollInterval, getClientId, initialSearch, isLocalDevice, type SearchState } from "@/lib/localScan";
 import { processingPayload, scanProcessing, type ProcessingValues } from "@/lib/processing";
 import { applyReorder } from "@/lib/scanReorder";
 import {
@@ -33,12 +33,12 @@ export function ScanPage() {
   const [state, dispatch] = useReducer(scanWizardReducer, initialScanState);
   const clientId = useMemo(() => getClientId(), []);
   const [device, setDevice] = useState<string | null>(null);
-  const [searching, setSearching] = useState(false);
+  const [pollSearch, setPollSearch] = useState<Pick<SearchState, "phase" | "startedAt">>(initialSearch);
   const { data: deviceData, refetch: refetchDevices } = useQuery({
     queryKey: ["scan-devices", clientId],
     queryFn: () =>
       api.get<ScanDevicesResponse>(`/api/scan/devices?client_id=${encodeURIComponent(clientId)}`),
-    refetchInterval: searching ? 1000 : false,
+    refetchInterval: () => devicePollInterval(pollSearch, Date.now()),
   });
   const chosenDevice = device ?? deviceData?.default ?? null;
   const { data: status } = useQuery({
@@ -56,7 +56,7 @@ export function ScanPage() {
     localCount,
   });
   useEffect(() => {
-    setSearching(search.phase === "searching");
+    setPollSearch({ phase: search.phase, startedAt: search.startedAt });
     if (search.phase === "searching") void refetchDevices(); // don't wait for the first interval tick
   }, [search.phase, search.startedAt, refetchDevices]);
 

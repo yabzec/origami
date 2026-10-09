@@ -58,7 +58,8 @@ export function useLocalScanSearch(clientId: string, input: { agentConnected: bo
 
   const start = useCallback(() => {
     if (input.agentConnected) {
-      setSearch(startSearch(true, Date.now())); // agent already running: just poll again
+      setSearch(startSearch(true, Date.now())); // agent already running: browse now and poll again
+      api.post("/api/agent/discover", { client_id: clientId }).catch(() => {});
       return;
     }
     if (!isAgentInstalled()) {
@@ -66,7 +67,7 @@ export function useLocalScanSearch(clientId: string, input: { agentConnected: bo
       return;
     }
     launch();
-  }, [input.agentConnected, launch]);
+  }, [clientId, input.agentConnected, launch]);
 
   const confirmInstalled = launch;
 
@@ -80,7 +81,8 @@ export function useLocalScanSearch(clientId: string, input: { agentConnected: bo
   }, [search.phase, warm]);
 
   useEffect(() => {
-    if (search.phase !== "searching") return;
+    // unresponsive too: an agent that connects late resumes the search
+    if (search.phase !== "searching" && search.phase !== "unresponsive") return;
     const id = setInterval(() => setSearch((s) => searchTick(s, { now: Date.now(), ...input })), 500);
     setSearch((s) => searchTick(s, { now: Date.now(), ...input }));
     return () => clearInterval(id);

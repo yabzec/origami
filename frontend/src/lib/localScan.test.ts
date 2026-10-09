@@ -3,6 +3,7 @@ import {
   AGENT_INSTALLED_KEY,
   CLIENT_ID_KEY,
   detectPlatform,
+  devicePollInterval,
   downloadUrl,
   getClientId,
   groupDevices,
@@ -98,6 +99,16 @@ describe("search state machine", () => {
     expect(searchTick(s, { now: 10000, agentConnected: false, localCount: 0 }).phase).toBe("unresponsive");
   });
 
+  it("goes back to searching when the agent connects late", () => {
+    const late = { phase: "unresponsive" as const, startedAt: 0, found: 0 };
+    expect(searchTick(late, { now: 30000, agentConnected: false, localCount: 0 })).toBe(late);
+    expect(searchTick(late, { now: 30000, agentConnected: true, localCount: 1 })).toEqual({
+      phase: "searching",
+      startedAt: 30000,
+      found: 1,
+    });
+  });
+
   it("ignores ticks when not searching", () => {
     expect(searchTick(initialSearch, { now: 99999, agentConnected: false, localCount: 3 })).toBe(initialSearch);
   });
@@ -125,5 +136,16 @@ describe("devices and platforms", () => {
   it("builds the download url", () => {
     expect(downloadUrl("linux-amd64", "t k")).toBe("/api/agent/download/linux-amd64?token=t%20k");
     expect(downloadUrl("linux-amd64", null)).toBe("/api/agent/download/linux-amd64");
+  });
+});
+
+describe("devicePollInterval", () => {
+  it("polls fast while searching and slower for a late agent, for up to 2 minutes", () => {
+    expect(devicePollInterval(initialSearch, 0)).toBe(false);
+    expect(devicePollInterval({ phase: "searching", startedAt: 0 }, 5000)).toBe(1000);
+    const late = { phase: "unresponsive" as const, startedAt: 0, found: 0 };
+    expect(devicePollInterval(late, 119_999)).toBe(2000);
+    expect(devicePollInterval(late, 120_000)).toBe(false);
+    expect(devicePollInterval({ phase: "found", startedAt: 0 }, 5000)).toBe(false);
   });
 });
