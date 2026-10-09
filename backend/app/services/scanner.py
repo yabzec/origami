@@ -67,7 +67,7 @@ class ScannerTimeout(ScannerError):
 class ScannerBackend(Protocol):
     def scan(self, dpi: int, mode: str, device: str | None = None) -> bytes: ...
     def preview(self, device: str | None = None) -> bytes: ...
-    def available(self) -> bool: ...
+    def available(self, device: str | None = None) -> bool: ...
     def list_devices(self) -> list[dict]: ...
 
 
@@ -211,3 +211,36 @@ _default_backend: ScannerBackend = ScanimageBackend()
 
 def get_scanner() -> ScannerBackend:
     return _default_backend
+
+
+REMOTE_PREFIX = "agent:"
+
+
+class CompositeBackend:
+    """Server scanners plus the scanners of the requesting browser's agent."""
+
+    def __init__(self, local: ScannerBackend, remote, client_id: str | None):
+        self._local = local
+        self._remote = remote
+        self._client_id = client_id
+
+    def _pick(self, device: str | None):
+        return self._remote if device and device.startswith(REMOTE_PREFIX) else self._local
+
+    def scan(self, dpi: int, mode: str, device: str | None = None) -> bytes:
+        return self._pick(device).scan(dpi=dpi, mode=mode, device=device)
+
+    def preview(self, device: str | None = None) -> bytes:
+        return self._pick(device).preview(device=device)
+
+    def available(self, device: str | None = None) -> bool:
+        if device and device.startswith(REMOTE_PREFIX):
+            try:
+                return self._remote.available(device)
+            except ScannerError:
+                return False
+        return self._local.available()
+
+    def list_devices(self) -> list[dict]:
+        remote = self._remote.devices(self._client_id) if self._client_id else []
+        return self._local.list_devices() + remote

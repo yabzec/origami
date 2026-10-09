@@ -5,14 +5,17 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
+from app.api.agent import CLIENT_ID_RE
 from app.api.deps import api_error, get_current_user
 from app.api.documents import serialize
 from app.api.ocr import check_ocr_languages, default_ocr_languages
 from app.api.uploads import create_pending_document
 from app.db import get_session
-from app.models import DocType, ScanPage, ScanSession, ScanSessionStatus
+from app.models import User, DocType, ScanPage, ScanSession, ScanSessionStatus
+from app.services.agent_hub import AgentHub, get_agent_hub
+from app.services.escl import EsclRemoteBackend
 from app.services.jobs import enqueue
-from app.services.scanner import ScannerBackend, device_busy, get_scanner, preview_locked, scan_locked
+from app.services.scanner import CompositeBackend, ScannerBackend, device_busy, get_scanner, preview_locked, scan_locked
 from app.services.storage import Storage, get_storage
 
 router = APIRouter(
@@ -69,22 +72,39 @@ def session_pages(db: Session, session_id: int) -> list[ScanPage]:
     )
 
 
+def get_scan_backend(
+    client_id: str | None = None,
+    user: User = Depends(get_current_user),
+    local: ScannerBackend = Depends(get_scanner),
+    hub: AgentHub = Depends(get_agent_hub),
+) -> CompositeBackend:
+    if client_id is not None and not CLIENT_ID_RE.match(client_id):
+        client_id = None
+    return CompositeBackend(local, EsclRemoteBackend(hub, user.id), client_id)
+
+
 @router.get("/status")
 def scan_status(
-    device: str | None = None, backend: ScannerBackend = Depends(get_scanner)
+    device: str | None = None, backend: CompositeBackend = Depends(get_scan_backend)
 ) -> dict:
-    return {"available": backend.available(), "busy": device_busy(device)}
+    return {"available": backend.available(device), "busy": device_busy(device)}
 
 
 @router.get("/devices")
-def scan_devices(backend: ScannerBackend = Depends(get_scanner)) -> dict:
+def scan_devices(
+    client_id: str | None = None,
+    backend: CompositeBackend = Depends(get_scan_backend),
+    user: User = Depends(get_current_user),
+    hub: AgentHub = Depends(get_agent_hub),
+) -> dict:
     devices = backend.list_devices()
-    return {"devices": devices, "default": devices[0]["id"] if devices else None}
+    connected = bool(client_id) and hub.connected(user.id, client_id)
+    return {"devices": devices, "default": devices[0]["id"] if devices else None, "agent_connected": connected}
 
 
 @router.post("/preview")
 def scan_preview(
-    body: PreviewRequest, backend: ScannerBackend = Depends(get_scanner)
+    body: PreviewRequest, backend: CompositeBackend = Depends(get_scan_backend)
 ) -> Response:
     png = preview_locked(backend, device=body.device)
     return Response(content=png, media_type="image/png")
@@ -113,7 +133,7 @@ def scan_page(
     body: PageScanRequest,
     db: Session = Depends(get_session),
     storage: Storage = Depends(get_storage),
-    backend: ScannerBackend = Depends(get_scanner),
+    backend: CompositeBackend = Depends(get_scan_backend),
 ) -> dict:
     scan_session = get_session_or_404(db, session_id)
     if scan_session.status != ScanSessionStatus.active:

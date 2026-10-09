@@ -5,12 +5,24 @@ wildcard because vendors disagree on prefixes.
 """
 
 import io
+import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
-from app.services.scanner import CoverOpen, ScannerBusy, ScannerError, ScannerJam
+from app.services.agent_hub import AgentHub, AgentOffline, AgentTimeout, EsclResponse
+from app.services.scanner import (
+    PREVIEW_MODE,
+    PREVIEW_RESOLUTION,
+    SCAN_TIMEOUT_SECONDS,
+    CoverOpen,
+    ScannerBusy,
+    ScannerError,
+    ScannerJam,
+    ScannerOffline,
+    ScannerTimeout,
+)
 
 
 @dataclass(frozen=True)
@@ -103,6 +115,97 @@ def to_png(data: bytes) -> bytes:
     if data.startswith(b"\x89PNG"):
         return data
     with Image.open(io.BytesIO(data)) as img:
+        if img.mode not in ("1", "L", "LA", "P", "RGB", "RGBA", "I", "I;16"):
+            img = img.convert("RGB")
         out = io.BytesIO()
         img.save(out, "PNG")
         return out.getvalue()
+
+
+AGENT_PREFIX = "agent:"
+NEXT_DOCUMENT_RETRY_SECONDS = 1.0
+
+
+def parse_agent_device(device: str) -> tuple[str, str]:
+    parts = device.split(":", 2)
+    if len(parts) != 3 or parts[0] + ":" != AGENT_PREFIX or not parts[1] or not parts[2]:
+        raise ScannerOffline(f"Unknown scanner {device}")
+    return parts[1], parts[2]
+
+
+class EsclRemoteBackend:
+    """Drives eSCL scanners on a client's network through that client's agent."""
+
+    def __init__(self, hub: AgentHub, user_id: int, sleep=time.sleep):
+        self._hub = hub
+        self._user_id = user_id
+        self._sleep = sleep
+        self._caps: dict[str, Capabilities] = {}
+
+    def devices(self, client_id: str) -> list[dict]:
+        return [
+            {"id": f"{AGENT_PREFIX}{client_id}:{s['uuid']}", "name": s["name"]}
+            for s in self._hub.scanners(self._user_id, client_id)
+        ]
+
+    def available(self, device: str | None = None) -> bool:
+        if not device:
+            return False
+        client_id, uuid = parse_agent_device(device)
+        return any(s["uuid"] == uuid for s in self._hub.scanners(self._user_id, client_id))
+
+    def list_devices(self) -> list[dict]:
+        return []  # needs a client_id; CompositeBackend calls devices() instead
+
+    def scan(self, dpi: int, mode: str, device: str | None = None) -> bytes:
+        return self._run_job(device or "", dpi, mode)
+
+    def preview(self, device: str | None = None) -> bytes:
+        return self._run_job(device or "", PREVIEW_RESOLUTION, PREVIEW_MODE)
+
+    def _call(self, client_id: str, uuid: str, method: str, path: str, body: str | None = None,
+              timeout: float = SCAN_TIMEOUT_SECONDS) -> EsclResponse:
+        try:
+            return self._hub.request(self._user_id, client_id, uuid, method, path, body, timeout)
+        except AgentOffline:
+            raise ScannerOffline("The scanner agent on this computer is not connected")
+        except AgentTimeout:
+            raise ScannerTimeout()
+
+    def _capabilities(self, device: str, client_id: str, uuid: str) -> Capabilities:
+        if device not in self._caps:
+            res = self._call(client_id, uuid, "GET", "ScannerCapabilities")
+            if res.status != 200:
+                raise ScannerError(f"ScannerCapabilities returned {res.status}")
+            try:
+                self._caps[device] = parse_capabilities(res.body)
+            except (ET.ParseError, ValueError):
+                raise ScannerError("Scanner returned invalid capabilities")
+        return self._caps[device]
+
+    def _run_job(self, device: str, dpi: int, mode: str) -> bytes:
+        client_id, uuid = parse_agent_device(device)
+        if not self._hub.connected(self._user_id, client_id):
+            raise ScannerOffline("The scanner agent on this computer is not connected")
+        caps = self._capabilities(device, client_id, uuid)
+        job = self._call(client_id, uuid, "POST", "ScanJobs", scan_settings_xml(caps, dpi, mode))
+        if job.status == 503:
+            raise ScannerBusy()
+        location = job.headers.get("Location") or job.headers.get("location")
+        if job.status not in (200, 201) or not location:
+            raise ScannerError(f"ScanJobs returned {job.status}")
+        deadline = time.monotonic() + SCAN_TIMEOUT_SECONDS
+        while True:
+            doc = self._call(client_id, uuid, "GET", f"{location.strip('/')}/NextDocument")
+            if doc.status == 200 and doc.body:
+                try:
+                    return to_png(doc.body)
+                except (UnidentifiedImageError, OSError):
+                    raise ScannerError("Scanner returned an unreadable image")
+            if doc.status != 503 or time.monotonic() >= deadline:
+                break
+            self._sleep(NEXT_DOCUMENT_RETRY_SECONDS)
+        if doc.status == 503:
+            raise ScannerTimeout()
+        status = self._call(client_id, uuid, "GET", "ScannerStatus")
+        raise status_error(status.body)
