@@ -35,6 +35,8 @@ export function SearchPage() {
   const [folderId, setFolderId] = useState<number | null>(null);
   const [tagId, setTagId] = useState<number | null>(null);
   const [docType, setDocType] = useState<string | null>(null);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const { data: folders } = useFolders();
   const { data: tags } = useTags();
 
@@ -47,6 +49,8 @@ export function SearchPage() {
           folder_id: folderId,
           tag_ids: tagId !== null ? [tagId] : [],
           doc_type: docType,
+          date_from: dateFrom || null,
+          date_to: dateTo || null,
         },
         limit: 10,
       }),
@@ -104,6 +108,8 @@ export function SearchPage() {
             </option>
           ))}
         </Select>
+        <Input type="date" aria-label="From date" className="w-40" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+        <Input type="date" aria-label="To date" className="w-40" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
         <Button type="submit" disabled={search.isPending}>
           {search.isPending ? "Searching…" : "Search"}
         </Button>

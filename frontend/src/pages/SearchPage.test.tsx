@@ -1,12 +1,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { SearchPage } from "./SearchPage";
 
 const fetchMock = vi.fn();
-beforeEach(() => vi.stubGlobal("fetch", fetchMock));
+beforeEach(() => {
+  fetchMock.mockReset();
+  vi.stubGlobal("fetch", fetchMock);
+});
 afterEach(() => vi.unstubAllGlobals());
 
 function json(status: number, body: unknown) {
@@ -70,4 +73,18 @@ it("shows the empty state when nothing matches", async () => {
   await userEvent.type(screen.getByPlaceholderText(/search your documents/i), "niente");
   await userEvent.click(screen.getByRole("button", { name: /^search$/i }));
   expect(await screen.findByText(/no results/i)).toBeInTheDocument();
+});
+
+it("sends the date range with the search", async () => {
+  fetchMock.mockImplementation(async (url: string) => {
+    if (url === "/api/folders" || url === "/api/tags") return json(200, []);
+    return json(200, { mode: "hybrid", results: [] });
+  });
+  renderPage();
+  await userEvent.type(screen.getByPlaceholderText("Search your documents…"), "bolletta");
+  fireEvent.change(screen.getByLabelText("From date"), { target: { value: "2026-01-01" } });
+  fireEvent.change(screen.getByLabelText("To date"), { target: { value: "2026-03-31" } });
+  await userEvent.click(screen.getByRole("button", { name: "Search" }));
+  const call = fetchMock.mock.calls.find(([url]) => url === "/api/search");
+  expect(JSON.parse(call![1].body).filters).toMatchObject({ date_from: "2026-01-01", date_to: "2026-03-31" });
 });
