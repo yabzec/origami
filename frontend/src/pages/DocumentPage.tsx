@@ -15,7 +15,7 @@ import { api, ApiError, fileUrl } from "@/lib/api";
 import { isAiDescription, nextDescription } from "@/lib/description";
 import { defaultProcessing, processingFromDocument, processingPayload, type ProcessingValues } from "@/lib/processing";
 import { processingRetryMessage, shouldPollDocument } from "@/lib/retry";
-import { languageLabel, textVariants, translationNote, type TextVariant } from "@/lib/translation";
+import { canRetranslate, languageLabel, textVariants, translationNote, type TextVariant } from "@/lib/translation";
 import type { Document, DocumentText } from "@/lib/types";
 import { viewerKind } from "@/lib/viewer";
 
@@ -162,6 +162,13 @@ export function DocumentPage() {
       qc.invalidateQueries({ queryKey: ["documents"] });
     },
   });
+  const retranslate = useMutation({
+    mutationFn: () => api.post<Document>(`/api/documents/${id}/retranslate`),
+    onSuccess: (updated) => {
+      qc.setQueryData(["document", id], updated);
+      qc.invalidateQueries({ queryKey: ["document-text", id] });
+    },
+  });
   const confirmReprocess = () => {
     const base = "Re-run OCR and AI processing? Extracted text, summary and translation will be replaced.";
     const pdfNote =
@@ -261,6 +268,23 @@ export function DocumentPage() {
               <p className="text-xs text-red-600">
                 {reprocess.error instanceof ApiError ? reprocess.error.message : "Re-process failed"}
               </p>
+            )}
+            {doc.translatable && (
+              <>
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  disabled={retranslate.isPending || !canRetranslate(doc)}
+                  onClick={() => retranslate.mutate()}
+                >
+                  {retranslate.isPending ? "Starting…" : "Re-translate"}
+                </Button>
+                {retranslate.isError && (
+                  <p className="text-xs text-red-600">
+                    {retranslate.error instanceof ApiError ? retranslate.error.message : "Re-translate failed"}
+                  </p>
+                )}
+              </>
             )}
           </div>
         )}

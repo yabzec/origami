@@ -20,9 +20,15 @@ export function languageLabel(code: string): string {
 }
 
 export function translationNote(doc: Pick<Document, "translation_status" | "active_job">, now: Date): string | null {
-  if (doc.translation_status === "failed") return "Translation failed — notification sent. Re-process to retry.";
+  if (doc.translation_status === "failed") return "Translation failed — notification sent. Re-translate to retry.";
   if (doc.translation_status !== "pending") return null;
   const job = doc.active_job;
   const label = job && job.type === "translate_document" ? retryLabel(job, now) : null;
   return label ? `Translation retrying (${label})` : "Translation pending…";
+}
+
+export function canRetranslate(
+  doc: Pick<Document, "status" | "translatable" | "translation_status">,
+): boolean {
+  return doc.status === "ready" && doc.translatable && doc.translation_status !== "pending";
 }

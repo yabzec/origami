@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { languageLabel, textVariants, translationNote } from "./translation";
+import { canRetranslate, languageLabel, textVariants, translationNote } from "./translation";
 import type { ActiveJob } from "./types";
 
 describe("textVariants", () => {
@@ -49,11 +49,25 @@ describe("translationNote", () => {
   });
   it("tells that a notification was sent on failure", () => {
     expect(translationNote({ translation_status: "failed", active_job: null }, now)).toBe(
-      "Translation failed — notification sent. Re-process to retry.",
+      "Translation failed — notification sent. Re-translate to retry.",
     );
   });
   it("is null when done or not needed", () => {
     expect(translationNote({ translation_status: "done", active_job: null }, now)).toBeNull();
     expect(translationNote({ translation_status: null, active_job: null }, now)).toBeNull();
+  });
+});
+
+describe("canRetranslate", () => {
+  const base = { status: "ready", translatable: true, translation_status: "done" } as const;
+  it("allows a ready, translatable document with no translation running", () => {
+    expect(canRetranslate(base)).toBe(true);
+    expect(canRetranslate({ ...base, translation_status: null })).toBe(true);
+    expect(canRetranslate({ ...base, translation_status: "failed" })).toBe(true);
+  });
+  it("refuses while busy or when nothing needs translating", () => {
+    expect(canRetranslate({ ...base, translation_status: "pending" })).toBe(false);
+    expect(canRetranslate({ ...base, status: "processing" })).toBe(false);
+    expect(canRetranslate({ ...base, translatable: false })).toBe(false);
   });
 });
