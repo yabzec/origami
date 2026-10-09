@@ -4,15 +4,16 @@ Self-hosted document management system: scan, upload, OCR, semantic search, and 
 
 ## Features
 
-- **Upload and scan:** PDF, images, video, text, Markdown and office documents (`.doc`, `.docx`, `.odt`, `.rtf`). Office files get a PDF preview made by headless LibreOffice, and Download still returns the original file.
+- **Upload and scan:** PDF, images, video, text, Markdown and office documents (`.doc`, `.docx`, `.odt`, `.rtf`). Office files get a PDF preview made by headless LibreOffice, and Download still returns the original file. Upload several files or a whole folder at once (**Upload → Files…/Folder…**, or drag them onto Browse). Each file keeps its name as title and its last-modified date as document date; folder, tags and processing options apply to all files. A folder upload recreates its subfolders. Closing the batch upload dialog while uploads run asks "Stop them and close?"; confirming stops the files not yet sent.
 - **AI description:** the AI summary fills an empty description and is marked "AI generated" until you edit it. Re-process refreshes an AI description and keeps one you edited.
 - **Scan:** reorder pages before saving (drag the handle, or use the ← → buttons on the selected page). The folder picker selects and closes when you click a folder that has no subfolders.
 - **Scan from your own network:** pick **Search local scanners** in the scanner menu to use a Wi-Fi scanner on the network of the computer you are using, even when the server is elsewhere. The browser starts the Origami Agent, which finds eSCL (AirScan) scanners and connects out to the server; no ports, no VPN.
-- **Processing options:** on scan, upload and re-process, switch OCR, AI summary and translation on or off independently. OCR languages are the ones installed on the server, picked with a multi-select. Scan starts with Italian only, upload with `DEFAULT_OCR_LANGUAGES`, and re-process with the languages the document already uses. The document language is detected locally (lingua), so translation works with the summary off.
+- **Processing options:** on scan, upload and re-process, switch OCR, AI summary and translation on or off independently. OCR languages are the ones installed on the server, picked with a multi-select. Scan and upload start with `DEFAULT_OCR_LANGUAGES`, and re-process with the languages the document already uses. Translation has a **Translate to** language, default `DEFAULT_TRANSLATION_LANGUAGE`; the choices are the installed OCR languages. The document language is detected locally (lingua), so translation works with the summary off.
 - **Tags:** type in the tag field to pick an existing tag or press Enter to create a new one.
 - **Browse:** folders work like a file manager: a breadcrumb, subfolder tiles with document counts, then the documents in that folder. **Root** shows top-level folders and documents without a folder; **All documents** shows everything. Filter by tag, type and document date (from/to); every filter and the order-by menu are kept in the URL. The **×** on a document page goes back to that document's folder. Select several documents (checkbox, Shift-click for a range) to move or delete them together.
+- **Storage tree:** `STORAGE_PATH` mirrors the explorer: `Folder/Subfolder/Title.ext`. Renaming or moving a document or folder in the app moves the file on disk. Characters not allowed in file names become `_`; documents with the same title in one folder get `Title (2).ext`. Office previews and OCR companion PDFs live in `DERIVED_PATH`, scan pages in `TMP_PATH`. Changes made directly on disk are not picked up.
 - **Search:** hybrid, semantic or keyword search, with the same filter row as Browse plus mode and folder.
-- **Translation:** documents in another language than `PRIMARY_LANGUAGE` are translated page by page. Progress is saved per page, so a failed or throttled translation resumes where it stopped. **Re-translate** on the document page redoes only the translation, without OCR or summary.
+- **Translation:** documents whose detected language differs from their translation target are translated page by page. Progress is saved per page, so a failed or throttled translation resumes where it stopped. **Re-translate** on the document page redoes only the translation, without OCR or summary. Re-translate can switch the target language.
 - **Dark mode:** follows the operating system setting.
 - **Background jobs with retries:** every job is retried after 30 s, 2 min, 10 min and 30 min (5 attempts). Between attempts the document stays `pending` and the UI shows the next attempt. After the last failure every user with an email address gets a notification. Translation runs as its own retried job.
 - **Chat:** multi-turn conversation with Markdown answers and `[n]` citations that link to the documents. Origami shortlists candidate documents locally and asks the LLM which ones you mean. Passages come only from those documents and from files you pin. The files in context show as chips: remove one to keep it out of the conversation, or add one with **+ Add file**. The conversation is kept in the browser tab (session storage) until you press **New chat**.
@@ -52,6 +53,18 @@ docker compose up -d db
 uv run alembic upgrade head
 uv run python -m app.cli create-user <username>
 ```
+
+Upgrading from a version with the flat `files/<uuid>` layout: the API and the worker refuse to start until you move the files once:
+
+```bash
+uv run python -m app.cli migrate-storage --dry-run   # print the moves
+uv run python -m app.cli migrate-storage
+uv run python -m app.cli migrate-storage --check     # report database/disk drift; --fix removes partial writes
+```
+
+`migrate-storage` keeps a journal at `<DERIVED_PATH>/storage-migration.journal`, so an interrupted run resumes safely. Run it again.
+
+uuid-named files in the old `files/` folder that belong to no document are moved, never deleted, to `<DERIVED_PATH>/orphans/`.
 
 Run the API:
 
