@@ -68,16 +68,45 @@ it("creates a new tag on Enter and selects it", async () => {
 
 it("selects an existing tag on Enter instead of creating a duplicate", async () => {
   const { input, onIds } = renderInput();
-  await screen.findByRole("textbox");
-  await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-  await userEvent.type(input, "casa{Enter}");
+  await userEvent.type(input, "ca");
+  await screen.findByRole("option", { name: "Casa" }); // tags have loaded
+  await userEvent.type(input, "sa{Enter}");
   expect(onIds).toHaveBeenLastCalledWith([1]);
   expect(fetchMock).not.toHaveBeenCalledWith("/api/tags", expect.objectContaining({ method: "POST" }));
 });
 
 it("removes a chip", async () => {
   const { input, onIds } = renderInput();
-  await userEvent.type(input, "casa{Enter}");
-  await userEvent.click(screen.getByRole("button", { name: "Remove Casa" }));
+  await userEvent.type(input, "ca");
+  await screen.findByRole("option", { name: "Casa" }); // tags have loaded
+  await userEvent.type(input, "sa{Enter}");
+  await userEvent.click(await screen.findByRole("button", { name: "Remove Casa" }));
   expect(onIds).toHaveBeenLastCalledWith([]);
+});
+
+it("picks the arrow-highlighted suggestion on Enter instead of creating", async () => {
+  const { input, onIds } = renderInput();
+  await userEvent.type(input, "cas");
+  await screen.findByRole("option", { name: "Casa" });
+  await userEvent.keyboard("{ArrowDown}{Enter}");
+  expect(onIds).toHaveBeenLastCalledWith([1]);
+  expect(fetchMock).not.toHaveBeenCalledWith("/api/tags", expect.objectContaining({ method: "POST" }));
+});
+
+it("selects the existing tag when creation returns 409", async () => {
+  const { input, onIds } = renderInput();
+  await userEvent.type(input, "x");
+  await screen.findByRole("option", { name: /Create/ }); // tags have loaded
+  fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url === "/api/tags" && init?.method === "POST") {
+      tags = [...tags, { id: 7, name: "Bollette", color: "#222222" }]; // created elsewhere
+      return json(409, { error: { code: "duplicate_tag", message: "Tag with same name exists" } });
+    }
+    return json(200, tags);
+  });
+  await userEvent.clear(input);
+  await userEvent.type(input, "Bollette{Enter}");
+  await waitFor(() => expect(onIds).toHaveBeenLastCalledWith([7]));
+  expect(screen.queryByText("Tag with same name exists")).not.toBeInTheDocument();
+  expect(screen.queryByText("Could not create tag")).not.toBeInTheDocument();
 });

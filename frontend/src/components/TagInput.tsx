@@ -19,6 +19,7 @@ export function TagInput({
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
   const [active, setActive] = useState(0);
+  const [navigated, setNavigated] = useState(false); // user moved the highlight since the last edit
   const [error, setError] = useState<string | null>(null);
 
   const selected = value.map((tid) => tags.find((t) => t.id === tid)).filter((t) => t !== undefined);
@@ -30,6 +31,7 @@ export function TagInput({
     if (!value.includes(tagId)) onChange([...value, tagId]);
     setQuery("");
     setActive(0);
+    setNavigated(false);
     setError(null);
   };
 
@@ -53,12 +55,14 @@ export function TagInput({
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
-      const next = e.key === "ArrowDown" ? Math.min(active + 1, suggestions.length - 1) : Math.max(active - 1, 0);
-      setActive(next);
+      const next = e.key === "ArrowDown" ? Math.min(active + 1, suggestions.length - 1) : active - 1;
+      setActive(Math.max(next, 0));
+      setNavigated(true);
     } else if (e.key === "Enter") {
       e.preventDefault();
-      // exact name → select it; otherwise create the typed name; arrows + Enter on an empty box pick
-      if (exact) add(exact.id);
+      // arrowed highlight → select it; exact name → select it; otherwise create the typed name
+      if (navigated && suggestions[active]) add(suggestions[active].id);
+      else if (exact) add(exact.id);
       else if (canCreate) createTag();
       else if (suggestions[active]) add(suggestions[active].id);
     } else if (e.key === "Backspace" && query === "" && value.length > 0) {
@@ -91,6 +95,7 @@ export function TagInput({
           onChange={(e) => {
             setQuery(e.target.value);
             setActive(0);
+            setNavigated(false);
           }}
           onFocus={() => setFocused(true)}
           onBlur={() => setTimeout(() => setFocused(false), 150)} // let option clicks land first
