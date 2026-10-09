@@ -6,6 +6,7 @@ the source of truth. Scan endpoints are sync and run in the threadpool;
 """
 
 import asyncio
+import concurrent.futures
 import json
 import logging
 import secrets
@@ -51,6 +52,7 @@ class _Agent:
     loop: asyncio.AbstractEventLoop
     scanners: list[dict] = field(default_factory=list)
     pending: dict[str, _Pending] = field(default_factory=dict)
+    closed: bool = False
 
 
 class AgentHub:
@@ -94,25 +96,30 @@ class AgentHub:
         with self._lock:
             old = self._agents.get(key)
             self._agents[key] = agent
-        if old is not None:
-            self._fail_pending(old)
-            try:
-                await old.ws.close(code=4000)
-            except RuntimeError:
-                pass  # already closed
-        await ws.send_json({"type": "welcome", "resume_token": self.issue_token(user_id, client_id)})
         try:
+            if old is not None:
+                old.closed = True
+                self._fail_pending(old)
+                try:
+                    await old.ws.close(code=4000)
+                except Exception:  # noqa: BLE001 - old socket may be dead already
+                    pass
+            await ws.send_json({"type": "welcome", "resume_token": self.issue_token(user_id, client_id)})
             while True:
                 msg = await ws.receive()
                 if msg["type"] == "websocket.disconnect":
                     break
-                if msg.get("bytes") is not None:
-                    self._on_chunk(agent, msg["bytes"])
-                elif msg.get("text") is not None:
-                    self._on_message(agent, json.loads(msg["text"]))
-        except (WebSocketDisconnect, RuntimeError):
+                try:
+                    if msg.get("bytes") is not None:
+                        self._on_chunk(agent, msg["bytes"])
+                    elif msg.get("text") is not None:
+                        self._on_message(agent, json.loads(msg["text"]))
+                except (ValueError, KeyError, TypeError, AttributeError):
+                    log.warning("malformed message from agent %s", key, exc_info=True)
+        except (WebSocketDisconnect, RuntimeError, OSError):
             pass
         finally:
+            agent.closed = True
             with self._lock:
                 if self._agents.get(key) is agent:
                     del self._agents[key]
@@ -185,22 +192,24 @@ class AgentHub:
         rid = secrets.token_hex(ID_LEN // 2)
 
         async def call() -> EsclResponse:
+            if agent.closed:
+                raise AgentOffline()
             future = agent.loop.create_future()
-            agent.pending[rid] = _Pending(future=future)
-            await agent.ws.send_json(
-                {"type": "escl", "id": rid, "scanner_uuid": scanner_uuid,
-                 "method": method, "path": path, "body": body or ""}
-            )
             try:
+                agent.pending[rid] = _Pending(future=future)
+                await agent.ws.send_json(
+                    {"type": "escl", "id": rid, "scanner_uuid": scanner_uuid,
+                     "method": method, "path": path, "body": body or ""}
+                )
                 return await asyncio.wait_for(future, timeout)
             finally:
                 agent.pending.pop(rid, None)
 
         try:
             return asyncio.run_coroutine_threadsafe(call(), agent.loop).result(timeout + 5)
-        except (asyncio.TimeoutError, TimeoutError):
+        except (asyncio.TimeoutError, TimeoutError, concurrent.futures.TimeoutError):
             raise AgentTimeout()
-        except RuntimeError:
+        except (RuntimeError, WebSocketDisconnect):
             raise AgentOffline()  # socket closed while sending
 
 

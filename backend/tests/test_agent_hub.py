@@ -133,3 +133,38 @@ def test_second_agent_replaces_first():
                         break
                     threading.Event().wait(0.02)
                 assert hub.scanners(1, "client-abc") == [{"uuid": "new", "name": "New"}]
+
+
+def test_malformed_messages_keep_agent_connected():
+    hub = AgentHub()
+    with TestClient(make_app(hub)) as client, client.websocket_connect("/ws/1/client-abc") as ws:
+        ws.receive_json()
+        ws.send_text("not json")
+        ws.send_json([1, 2])
+        ws.send_json({"type": "devices", "devices": [{"name": "no uuid"}]})
+        ws.send_json({"type": "devices", "devices": [{"uuid": "u1", "name": "HP"}]})
+        for _ in range(50):
+            if hub.scanners(1, "client-abc"):
+                break
+            threading.Event().wait(0.02)
+        assert hub.connected(1, "client-abc")
+        t, box = run_request(hub, 1, "client-abc", "u1", "GET", "ScannerCapabilities", timeout=5)
+        rid = ws.receive_json()["id"]
+        ws.send_json({"type": "escl_response", "id": rid, "status": "bad"})
+        ws.send_json({"type": "escl_response", "id": rid, "status": 200, "content_type": "text/xml"})
+        ws.send_json({"type": "end", "id": rid})
+        t.join(5)
+        assert box["result"].status == 200
+
+
+def test_request_after_disconnect_is_offline_fast():
+    hub = AgentHub()
+    with TestClient(make_app(hub)) as client:
+        with client.websocket_connect("/ws/1/client-abc") as ws:
+            ws.receive_json()
+        for _ in range(50):
+            if not hub.connected(1, "client-abc"):
+                break
+            threading.Event().wait(0.02)
+        with pytest.raises(AgentOffline):
+            hub.request(1, "client-abc", "u1", "GET", "ScannerCapabilities", timeout=30)
