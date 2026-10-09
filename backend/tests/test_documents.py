@@ -319,3 +319,18 @@ def test_delete_cancels_queued_retry_and_late_run_sends_no_email(
     session.refresh(job)
     assert job.status == JobStatus.done
     assert smtp_stub == []
+
+
+def test_delete_removes_ocr_companion(auth_client, session, storage):
+    from app.services.storage import companion_name
+
+    doc = make_document(session, doc_type=DocType.image)
+    rel, _ = storage.write_file(f"{doc.id}.png", b"png")
+    doc.file_path = rel
+    session.commit()
+    companion = storage.derived_abs(companion_name(doc.id))
+    storage.write_derived(companion_name(doc.id), b"%PDF")
+    assert companion.exists()
+
+    assert auth_client.delete(f"/api/documents/{doc.id}").status_code == 204
+    assert not companion.exists()

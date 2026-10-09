@@ -127,7 +127,13 @@ def upload_document(
         document_date=document_date,
     )
     with storage_errors():
-        write_document_file(session, storage, doc, ext, file.file)
+        try:
+            write_document_file(session, storage, doc, ext, file.file)
+        except BaseException:
+            session.rollback()
+            session.delete(doc)  # document_tags cascade via FK
+            session.commit()
+            raise
 
     enqueue(session, "process_document", {"document_id": str(doc.id)})
     session.refresh(doc)

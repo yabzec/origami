@@ -130,3 +130,20 @@ def test_upload_places_file_in_folder_tree(auth_client, session, storage):
     assert first["file_path"] == "Home/Bills/Invoice.pdf"
     assert second["file_path"] == "Home/Bills/Invoice (2).pdf"
     assert storage.abs_path("Home/Bills/Invoice (2).pdf").read_bytes() == b"%PDF-2"
+
+
+def test_upload_write_failure_leaves_no_document(auth_client, session, storage, monkeypatch):
+    from app.models import Document
+
+    def boom(*args, **kwargs):
+        raise PermissionError(13, "Permission denied", "x")
+
+    monkeypatch.setattr(storage, "write_file", boom)
+    resp = auth_client.post(
+        "/api/documents/upload",
+        files={"file": ("a.pdf", b"%PDF-1", "application/pdf")},
+    )
+    assert resp.status_code == 500
+    assert "storage_error" in resp.text
+    session.expire_all()
+    assert session.exec(select(Document)).all() == []
