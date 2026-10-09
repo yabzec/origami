@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -107,4 +108,66 @@ func toStrings(xs []any) []string {
 		out[i], _ = x.(string)
 	}
 	return out
+}
+
+func TestAgentStopsOnRejectedToken(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		_ = c.Close(websocket.StatusCode(4401), "bad token")
+	}))
+	defer srv.Close()
+	browse := func(ctx context.Context, d time.Duration) []Scanner { return nil }
+	a := NewAgent(srv.URL, "bad", browse)
+	done := make(chan error, 1)
+	go func() { done <- a.Run(context.Background()) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("want error")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run kept retrying after 4401")
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("hits=%d", hits.Load())
+	}
+}
+
+func TestAgentIgnoresBadIDAndEmptyWelcome(t *testing.T) {
+	scannerSrv, _ := fakeScanner(t)
+	got := make(chan string, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got <- r.URL.Query().Get("token")
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer c.CloseNow()
+		ctx := r.Context()
+		_ = writeJSON(ctx, c, map[string]any{"type": "welcome", "resume_token": ""})
+		_ = writeJSON(ctx, c, map[string]any{"type": "escl", "id": "short",
+			"scanner_uuid": "u1", "method": "GET", "path": "ScannerStatus"})
+		time.Sleep(300 * time.Millisecond)
+		c.Close(websocket.StatusNormalClosure, "")
+	}))
+	defer srv.Close()
+	sc := Scanner{UUID: "u1", Name: "HP", BaseURL: scannerSrv.URL + "/eSCL"}
+	a := NewAgent(srv.URL, "launch-1", func(ctx context.Context, d time.Duration) []Scanner { return []Scanner{sc} })
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	go func() { _ = a.Run(ctx) }()
+	<-got
+	select {
+	case tok := <-got:
+		if tok != "launch-1" {
+			t.Fatalf("empty welcome replaced token: %q", tok)
+		}
+	case <-ctx.Done():
+		t.Fatal("no reconnect")
+	}
 }

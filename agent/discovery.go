@@ -60,16 +60,20 @@ func browseMDNS(ctx context.Context, timeout time.Duration) []Scanner {
 		secure := svc == "_uscans._tcp"
 		entries := make(chan *zeroconf.ServiceEntry, 8)
 		bctx, cancel := context.WithTimeout(ctx, timeout)
+		browseDone := make(chan struct{})
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for {
 				select {
-				case <-bctx.Done(): // do not rely on Browse closing the channel
+				case <-browseDone: // Browse returned: nothing more will be sent
 					return
-				case e, open := <-entries:
+				case e, open := <-entries: // keep reading so Browse never blocks on send
 					if !open {
 						return
+					}
+					if bctx.Err() != nil {
+						continue
 					}
 					sc, ok := scannerFromRecord(e.Instance, e.Text, e.AddrIPv4, e.AddrIPv6, e.Port, secure)
 					mu.Lock()
@@ -83,6 +87,7 @@ func browseMDNS(ctx context.Context, timeout time.Duration) []Scanner {
 		}()
 		go func() {
 			defer cancel()
+			defer close(browseDone)
 			_ = zeroconf.Browse(bctx, svc, "local.", entries) // closes entries when bctx ends
 		}()
 	}

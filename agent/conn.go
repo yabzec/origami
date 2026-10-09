@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/url"
 	"sort"
@@ -21,6 +22,9 @@ const (
 	RediscoverInterval = 60 * time.Second
 	browseTimeout      = 3 * time.Second
 	retryDelay         = 3 * time.Second
+	dialTimeout        = 15 * time.Second
+	statusBadToken     = websocket.StatusCode(4401)
+	statusSuperseded   = websocket.StatusCode(4000)
 )
 
 var errIdle = errors.New("idle timeout")
@@ -34,6 +38,7 @@ type Agent struct {
 	browse       Browser
 	exec         *Executor
 	relaunch     chan struct{}
+	gen          int // incremented by Relaunch
 }
 
 func NewAgent(server, token string, browse Browser) *Agent {
@@ -54,6 +59,7 @@ func (a *Agent) lookup(uuid string) (Scanner, bool) {
 func (a *Agent) Relaunch(server, token string) {
 	a.mu.Lock()
 	a.server, a.token, a.lastActivity = server, token, time.Now()
+	a.gen++
 	a.mu.Unlock()
 	select {
 	case a.relaunch <- struct{}{}:
@@ -77,10 +83,14 @@ func wsURL(server, token string) (string, error) {
 	return u.String(), nil
 }
 
-// Run serves until idle for IdleTimeout, or until no connection for ReconnectWindow.
+// Run serves until idle for IdleTimeout, or until no welcomed session for ReconnectWindow.
 func (a *Agent) Run(ctx context.Context) error {
-	lostAt := time.Time{}
+	lostAt := time.Now()
 	for {
+		select { // drop a stale relaunch signal; the session reads the latest server/token
+		case <-a.relaunch:
+		default:
+		}
 		connCtx, cancel := context.WithCancel(ctx)
 		go func() {
 			select {
@@ -89,14 +99,20 @@ func (a *Agent) Run(ctx context.Context) error {
 			case <-connCtx.Done():
 			}
 		}()
-		connected, err := a.session(connCtx)
+		remaining := ReconnectWindow - time.Since(lostAt)
+		if remaining <= 0 {
+			cancel()
+			return errors.New("server unreachable")
+		}
+		welcomed, relaunched, err := a.session(connCtx, min(dialTimeout, remaining))
 		cancel()
 		if errors.Is(err, errIdle) || ctx.Err() != nil {
 			return err
 		}
-		if connected {
-			lostAt = time.Now()
-		} else if lostAt.IsZero() {
+		if st := websocket.CloseStatus(err); st == statusBadToken || st == statusSuperseded {
+			return fmt.Errorf("server rejected agent: %w", err)
+		}
+		if welcomed || relaunched {
 			lostAt = time.Now()
 		}
 		if time.Since(lostAt) > ReconnectWindow {
@@ -119,17 +135,26 @@ func writeJSON(ctx context.Context, c *websocket.Conn, v any) error {
 	return c.Write(ctx, websocket.MessageText, data)
 }
 
-// session runs one WebSocket connection. connected reports whether the dial worked.
-func (a *Agent) session(ctx context.Context) (connected bool, err error) {
+// session runs one WebSocket connection. welcomed reports whether the server
+// accepted us (sent a welcome); relaunched whether Relaunch ran meanwhile.
+func (a *Agent) session(ctx context.Context, dialWait time.Duration) (welcomed, relaunched bool, err error) {
 	a.mu.Lock()
 	target, err := wsURL(a.server, a.token)
+	gen := a.gen
 	a.mu.Unlock()
+	defer func() {
+		a.mu.Lock()
+		relaunched = a.gen != gen
+		a.mu.Unlock()
+	}()
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
-	c, _, err := websocket.Dial(ctx, target, nil)
+	dctx, dcancel := context.WithTimeout(ctx, dialWait)
+	c, _, err := websocket.Dial(dctx, target, nil)
+	dcancel()
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	defer c.CloseNow()
 	c.SetReadLimit(1 << 20)
@@ -137,7 +162,7 @@ func (a *Agent) session(ctx context.Context) (connected bool, err error) {
 	defer cancel(nil)
 
 	if err := writeJSON(ctx, c, helloMsg()); err != nil {
-		return true, err
+		return false, false, err
 	}
 	go a.discoverLoop(ctx, c)
 	go a.pingLoop(ctx, c)
@@ -148,9 +173,9 @@ func (a *Agent) session(ctx context.Context) (connected bool, err error) {
 		if err != nil {
 			if cause := context.Cause(ctx); errors.Is(cause, errIdle) {
 				_ = c.Close(websocket.StatusNormalClosure, "idle")
-				return true, errIdle
+				return welcomed, false, errIdle
 			}
-			return true, err
+			return welcomed, false, err
 		}
 		var msg Incoming
 		if json.Unmarshal(data, &msg) != nil {
@@ -159,9 +184,16 @@ func (a *Agent) session(ctx context.Context) (connected bool, err error) {
 		switch msg.Type {
 		case "welcome":
 			a.mu.Lock()
-			a.token = msg.ResumeToken
+			if msg.ResumeToken != "" && a.gen == gen {
+				a.token = msg.ResumeToken
+				welcomed = true
+			}
 			a.mu.Unlock()
 		case "escl":
+			if len(msg.ID) != IDLen {
+				log.Printf("ignoring escl request with bad id length %d", len(msg.ID))
+				continue
+			}
 			a.mu.Lock()
 			a.lastActivity = time.Now()
 			a.mu.Unlock()
