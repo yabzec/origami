@@ -11,7 +11,7 @@ from tests.helpers import make_text_image
 
 @pytest.fixture
 def pipeline_storage(tmp_path, monkeypatch):
-    s = Storage(tmp_path)
+    s = Storage(tmp_path / "storage")
     monkeypatch.setattr(pipeline, "get_pipeline_storage", lambda: s)
     return s
 
