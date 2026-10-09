@@ -118,3 +118,29 @@ def test_keyword_search_sources_filter(session):
     assert len(hits) == 1
     assert "riassunto" in hits[0].snippet
     assert len(keyword_search(session, "bolletta")) == 2  # default: every source
+
+
+def test_allowed_document_ids_date_range(session):
+    from datetime import date
+
+    from app.services.search import SearchFilters, allowed_document_ids
+    from tests.helpers import seed_document
+
+    early = seed_document(session, "early", [], document_date=date(2026, 1, 10))
+    late = seed_document(session, "late", [], document_date=date(2026, 5, 10))
+    ids = allowed_document_ids(session, SearchFilters(date_from=date(2026, 2, 1)))
+    assert ids == [late.id]
+    ids = allowed_document_ids(session, SearchFilters(date_to=date(2026, 1, 10)))
+    assert ids == [early.id]
+
+
+def test_search_filters_reject_inverted_range():
+    from datetime import date
+
+    import pytest
+    from pydantic import ValidationError
+
+    from app.services.search import SearchFilters
+
+    with pytest.raises(ValidationError):
+        SearchFilters(date_from=date(2026, 3, 1), date_to=date(2026, 2, 1))

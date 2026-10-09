@@ -1,7 +1,8 @@
 import uuid
 from dataclasses import dataclass
+from datetime import date
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from sqlalchemy import text
 from sqlmodel import Session, select
 
@@ -16,6 +17,14 @@ class SearchFilters(BaseModel):
     folder_id: int | None = None
     tag_ids: list[int] = []
     doc_type: str | None = None
+    date_from: date | None = None
+    date_to: date | None = None
+
+    @model_validator(mode="after")
+    def _range_in_order(self) -> "SearchFilters":
+        if self.date_from and self.date_to and self.date_from > self.date_to:
+            raise ValueError("date_from must not be after date_to")
+        return self
 
 
 @dataclass
@@ -45,9 +54,19 @@ def allowed_document_ids(
     session: Session, filters: SearchFilters
 ) -> list[uuid.UUID] | None:
     """None = unfiltered; [] = filters exclude everything."""
-    if filters.folder_id is None and not filters.tag_ids and filters.doc_type is None:
+    if (
+        filters.folder_id is None
+        and not filters.tag_ids
+        and filters.doc_type is None
+        and filters.date_from is None
+        and filters.date_to is None
+    ):
         return None
     query = select(Document.id)
+    if filters.date_from is not None:
+        query = query.where(Document.document_date >= filters.date_from)
+    if filters.date_to is not None:
+        query = query.where(Document.document_date <= filters.date_to)
     if filters.folder_id is not None:
         query = query.where(Document.folder_id.in_(descendant_folder_ids(session, filters.folder_id)))
     if filters.doc_type is not None:

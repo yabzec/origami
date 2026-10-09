@@ -86,3 +86,11 @@ def test_bad_mode_422(auth_client):
 
 def test_search_requires_auth(client):
     assert client.post("/api/search", json={"query": "x"}).status_code == 401
+
+
+def test_search_inverted_date_range_is_422(auth_client):
+    resp = auth_client.post(
+        "/api/search",
+        json={"query": "x", "filters": {"date_from": "2026-03-01", "date_to": "2026-02-01"}},
+    )
+    assert resp.status_code == 422
