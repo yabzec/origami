@@ -1,7 +1,7 @@
 import re
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Request, WebSocket
+from fastapi import APIRouter, Depends, Request, Response, WebSocket
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -26,6 +26,11 @@ class LaunchRequest(BaseModel):
     client_id: str
 
 
+def _check_client_id(client_id: str) -> None:
+    if not CLIENT_ID_RE.match(client_id):
+        raise api_error(422, "invalid_client_id", "client_id must be 8-64 letters, digits or dashes")
+
+
 @router.post("/launch")
 def launch(
     body: LaunchRequest,
@@ -33,11 +38,21 @@ def launch(
     user: User = Depends(get_current_user),
     hub: AgentHub = Depends(get_agent_hub),
 ) -> dict:
-    if not CLIENT_ID_RE.match(body.client_id):
-        raise api_error(422, "invalid_client_id", "client_id must be 8-64 letters, digits or dashes")
+    _check_client_id(body.client_id)
     server = get_settings().public_url or str(request.base_url)
     query = urlencode({"server": server.rstrip("/"), "token": hub.issue_token(user.id, body.client_id)})
     return {"url": f"origami-agent://connect?{query}"}
+
+
+@router.post("/discover", status_code=204)
+def discover(
+    body: LaunchRequest,
+    user: User = Depends(get_current_user),
+    hub: AgentHub = Depends(get_agent_hub),
+) -> Response:
+    _check_client_id(body.client_id)
+    hub.request_discover(user.id, body.client_id)  # nothing to do when not connected
+    return Response(status_code=204)
 
 
 @router.websocket("/ws")
@@ -48,6 +63,12 @@ async def agent_socket(websocket: WebSocket, token: str = "", hub: AgentHub = De
         await websocket.close(code=4401)
         return
     await hub.serve(websocket, owner[0], owner[1])
+
+
+@router.get("/downloads")
+def downloads(user: User = Depends(get_current_user)) -> dict:
+    dist = get_settings().agent_dist_dir
+    return {"platforms": [p for p, name in AGENT_FILES.items() if (dist / name).is_file()]}
 
 
 @router.get("/download/{platform}")

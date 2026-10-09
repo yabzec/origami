@@ -96,3 +96,42 @@ def test_download_accepts_query_token(client, user, tmp_path, monkeypatch):
     finally:
         get_settings.cache_clear()
     assert resp.status_code == 200
+
+
+def test_discover_asks_connected_agent_to_browse(auth_client, agent_hub, user):
+    token = parse_qs(urlparse(launch(auth_client).json()["url"]).query)["token"][0]
+    with auth_client.websocket_connect(f"/api/agent/ws?token={token}") as ws:
+        ws.receive_json()
+        resp = auth_client.post("/api/agent/discover", json={"client_id": CLIENT})
+        assert resp.status_code == 204
+        assert ws.receive_json() == {"type": "discover"}
+
+
+def test_discover_without_agent_is_204(auth_client, agent_hub):
+    assert auth_client.post("/api/agent/discover", json={"client_id": CLIENT}).status_code == 204
+
+
+def test_discover_validates_client_id_and_login(client, auth_client, agent_hub):
+    resp = auth_client.post("/api/agent/discover", json={"client_id": "short"})
+    assert resp.status_code == 422 and resp.json()["error"]["code"] == "invalid_client_id"
+    del auth_client.headers["Authorization"]
+    assert client.post("/api/agent/discover", json={"client_id": CLIENT}).status_code == 401
+
+
+def test_downloads_lists_built_platforms(auth_client, tmp_path, monkeypatch):
+    from app.config import get_settings
+
+    (tmp_path / "origami-agent-linux-amd64").write_bytes(b"bin")
+    (tmp_path / "origami-agent-windows-amd64.exe").write_bytes(b"exe")
+    monkeypatch.setenv("AGENT_DIST_DIR", str(tmp_path))
+    get_settings.cache_clear()
+    try:
+        resp = auth_client.get("/api/agent/downloads")
+    finally:
+        get_settings.cache_clear()
+    assert resp.status_code == 200
+    assert resp.json() == {"platforms": ["windows-amd64", "linux-amd64"]}
+
+
+def test_downloads_requires_login(client):
+    assert client.get("/api/agent/downloads").status_code == 401
