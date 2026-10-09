@@ -7,6 +7,7 @@ Self-hosted document management system: scan, upload, OCR, semantic search, and 
 - **Upload and scan:** PDF, images, video, text, Markdown and office documents (`.doc`, `.docx`, `.odt`, `.rtf`). Office files get a PDF preview made by headless LibreOffice, and Download still returns the original file.
 - **AI description:** the AI summary fills an empty description and is marked "AI generated" until you edit it. Re-process refreshes an AI description and keeps one you edited.
 - **Scan:** reorder pages before saving (drag the handle, or use the ← → buttons on the selected page). The folder picker selects and closes when you click a folder that has no subfolders.
+- **Scan from your own network:** pick **Search local scanners** in the scanner menu to use a Wi-Fi scanner on the network of the computer you are using, even when the server is elsewhere. The browser starts the Origami Agent, which finds eSCL (AirScan) scanners and connects out to the server; no ports, no VPN.
 - **Processing options:** on scan, upload and re-process, switch OCR, AI summary and translation on or off independently. OCR languages are the ones installed on the server, picked with a multi-select. Scan starts with Italian only, upload with `DEFAULT_OCR_LANGUAGES`, and re-process with the languages the document already uses. The document language is detected locally (lingua), so translation works with the summary off.
 - **Tags:** type in the tag field to pick an existing tag or press Enter to create a new one.
 - **Browse:** folders work like a file manager: a breadcrumb, subfolder tiles with document counts, then the documents in that folder. **Root** shows top-level folders and documents without a folder; **All documents** shows everything. Filter by tag, type and document date (from/to); every filter and the order-by menu are kept in the URL. The **×** on a document page goes back to that document's folder. Select several documents (checkbox, Shift-click for a range) to move or delete them together.
@@ -85,6 +86,40 @@ npm run build      # outputs frontend/dist
 In production, build the frontend and run only the backend: FastAPI serves
 `frontend/dist` automatically when it exists, so the Cloudflare tunnel needs
 just the one backend port.
+
+## Client scanner agent
+
+The agent lets a browser use Wi-Fi scanners on its own network. It runs only when the scan page asks for it, and stops after 30 minutes without a scan.
+
+### Build
+
+Needs Go 1.22+ on PATH on the build machine (not on the server or clients):
+
+```bash
+agent/build.sh
+```
+
+This writes Windows and Linux builds to `agent/dist/`. The macOS builds (`origami-agent-darwin-*.zip`) need a Mac: run the same script there and copy the zips into `agent/dist/` on the server. The server serves the files from `AGENT_DIST_DIR` (default `../agent/dist`, relative to `backend/`).
+
+Set `PUBLIC_URL` in `.env` to the address clients use to reach Origami (e.g. `https://origami.example.com`). The agent has no built-in server address: it gets this URL from the launch link, so the same agent build works for any Origami install. When `PUBLIC_URL` is empty, the server uses the address of the incoming request, which is wrong behind a reverse proxy or tunnel that rewrites the host.
+
+### First run on a client
+
+On the scan page open the scanner menu, choose **Search local scanners** and download the agent for your system. Run it once:
+
+- **Windows:** if SmartScreen says “Windows protected your PC”, choose **More info → Run anyway**. Allow it on private networks when the firewall asks.
+- **macOS:** unzip, move **Origami Agent** to Applications, right-click → **Open** once.
+- **Linux:** `chmod +x origami-agent-linux-*` and run it once. It needs `xdg-mime` (package `xdg-utils`).
+
+Keep the file where it is: the browser starts it from that path. Then click **Installed, search now**. The browser asks once whether to open Origami Agent; tick “always allow”.
+
+The agent pairs with the first Origami server that starts it and refuses others. To pair it with another server, run it with `--reset`. A new launch that replaces a running agent's session shows a "switched to a new Origami session" notification. The agent never follows HTTP redirects from scanners.
+
+### Troubleshooting
+
+- **No scanners found:** the scanner must support eSCL/AirScan (look for AirPrint or Mopria Scan in its specs). Guest Wi-Fi with client isolation, or a firewall blocking multicast DNS (UDP 5353), hides the scanner.
+- **Agent not responding:** the browser prompt may have been dismissed, or the agent was moved after the first run. Run it again once, then search again.
+- **"port 47811 is in use by another program or user":** another program or user holds the agent's local port, so the agent exits. Close that program and start the agent again. The second-launch hand-off is authenticated with a per-user key file, `handoff.key`, kept in the user's config directory next to the server pin.
 
 ## Run as a systemd service
 
