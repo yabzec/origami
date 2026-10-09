@@ -8,6 +8,7 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.api.deps import api_error, get_current_user
+from app.api.storage_errors import storage_errors
 from app.api.ocr import check_ocr_languages
 from app.config import get_primary_language
 from app.db import get_session
@@ -26,6 +27,7 @@ from app.models import (
     TranslationStatus,
 )
 from app.services.storage import Storage, get_storage
+from app.services.tree_sync import disk_transaction, lock_documents, relocate_document
 from app.worker.pipeline import delete_translation_segments
 
 router = APIRouter(
@@ -202,16 +204,22 @@ def _delete_documents(session: Session, docs: list[Document]) -> list[tuple]:
 
 
 @router.post("/bulk/move")
-def bulk_move(body: BulkMove, session: Session = Depends(get_session)) -> dict:
+def bulk_move(
+    body: BulkMove,
+    session: Session = Depends(get_session),
+    storage: Storage = Depends(get_storage),
+) -> dict:
     if body.folder_id is not None and session.get(Folder, body.folder_id) is None:
         raise api_error(404, "not_found", "Folder not found")
-    docs, missing = _found_and_missing(session, body.ids)
     now = datetime.now(timezone.utc)
-    for doc in docs:
-        doc.folder_id = body.folder_id
-        doc.updated_at = now
-    session.commit()
-    return {"moved": len(docs), "missing": missing}
+    with storage_errors(), disk_transaction(session, storage) as moves:
+        docs = lock_documents(session, body.ids)
+        found = {d.id for d in docs}
+        for doc in sorted(docs, key=lambda d: (d.created_at, str(d.id))):
+            doc.folder_id = body.folder_id
+            doc.updated_at = now
+            relocate_document(session, storage, moves, doc)
+    return {"moved": len(docs), "missing": [str(i) for i in body.ids if i not in found]}
 
 
 @router.post("/bulk/delete")
@@ -264,8 +272,9 @@ def update_document(
     document_id: uuid.UUID,
     body: DocumentPatch,
     session: Session = Depends(get_session),
+    storage: Storage = Depends(get_storage),
 ) -> dict:
-    doc = get_doc_or_404(session, document_id)
+    get_doc_or_404(session, document_id)
     fields = body.model_dump(exclude_unset=True)
     tag_ids = fields.pop("tag_ids", None)
 
@@ -276,21 +285,24 @@ def update_document(
         if session.get(Folder, fields["folder_id"]) is None:
             raise api_error(404, "not_found", "Folder not found")
 
-    for key, value in fields.items():
-        setattr(doc, key, value)
+    with storage_errors(), disk_transaction(session, storage) as moves:
+        [doc] = lock_documents(session, [document_id])
+        for key, value in fields.items():
+            setattr(doc, key, value)
 
-    if tag_ids is not None:
-        for link in session.exec(
-            select(DocumentTag).where(DocumentTag.document_id == doc.id)
-        ):
-            session.delete(link)
-        for tag_id in tag_ids:
-            if session.get(Tag, tag_id) is None:
-                raise api_error(404, "not_found", f"Tag {tag_id} not found")
-            session.add(DocumentTag(document_id=doc.id, tag_id=tag_id))
+        if tag_ids is not None:
+            for link in session.exec(
+                select(DocumentTag).where(DocumentTag.document_id == doc.id)
+            ):
+                session.delete(link)
+            for tag_id in tag_ids:
+                if session.get(Tag, tag_id) is None:
+                    raise api_error(404, "not_found", f"Tag {tag_id} not found")
+                session.add(DocumentTag(document_id=doc.id, tag_id=tag_id))
 
-    doc.updated_at = datetime.now(timezone.utc)
-    session.commit()
+        if "title" in fields or "folder_id" in fields:
+            relocate_document(session, storage, moves, doc)
+        doc.updated_at = datetime.now(timezone.utc)
     session.refresh(doc)
     return serialize(session, doc)
 

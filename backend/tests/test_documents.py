@@ -334,3 +334,65 @@ def test_delete_removes_ocr_companion(auth_client, session, storage):
 
     assert auth_client.delete(f"/api/documents/{doc.id}").status_code == 204
     assert not companion.exists()
+
+
+def _doc_with_file(session, storage, title, folder_id=None):
+    from app.services.tree_sync import write_document_file
+
+    doc = make_document(session)
+    doc.title = title
+    doc.folder_id = folder_id
+    session.commit()
+    write_document_file(session, storage, doc, ".pdf", b"%PDF")
+    session.refresh(doc)
+    return doc
+
+
+def test_title_edit_renames_file(auth_client, session, storage):
+    doc = _doc_with_file(session, storage, "Old")
+    body = auth_client.patch(f"/api/documents/{doc.id}", json={"title": "New"}).json()
+    assert body["file_path"] == "New.pdf"
+    assert storage.abs_path("New.pdf").exists()
+    assert not storage.abs_path("Old.pdf").exists()
+
+
+def test_unsafe_title_stays_inside_storage(auth_client, session, storage):
+    doc = _doc_with_file(session, storage, "Old")
+    body = auth_client.patch(f"/api/documents/{doc.id}", json={"title": "../.."}).json()
+    assert body["title"] == "../.."
+    assert body["file_path"] == "_.pdf"
+    assert storage.abs_path("_.pdf").exists()
+
+
+def test_folder_change_moves_file(auth_client, session, storage):
+    from app.models import Folder
+
+    folder = Folder(name="Archive")
+    session.add(folder)
+    session.commit()
+    doc = _doc_with_file(session, storage, "Note")
+    body = auth_client.patch(f"/api/documents/{doc.id}", json={"folder_id": folder.id}).json()
+    assert body["file_path"] == "Archive/Note.pdf"
+    assert storage.abs_path("Archive/Note.pdf").exists()
+
+
+def test_failed_patch_keeps_file(auth_client, session, storage):
+    doc = _doc_with_file(session, storage, "Old")
+    resp = auth_client.patch(f"/api/documents/{doc.id}", json={"title": "New", "tag_ids": [999999]})
+    assert resp.status_code == 404
+    assert storage.abs_path("Old.pdf").exists()
+    assert not storage.abs_path("New.pdf").exists()
+
+
+def test_rename_conflict_on_disk_is_409(auth_client, session, storage, monkeypatch):
+    doc = _doc_with_file(session, storage, "Old")
+
+    def refuse(old, new):
+        raise FileExistsError(17, "Already exists", str(storage.abs_path(new)))
+
+    monkeypatch.setattr(storage, "move_file", refuse)
+    resp = auth_client.patch(f"/api/documents/{doc.id}", json={"title": "New"})
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "storage_conflict"
+    session.refresh(doc)
+    assert doc.title == "Old"

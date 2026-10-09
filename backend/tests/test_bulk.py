@@ -61,3 +61,31 @@ def test_bulk_limits(auth_client):
     ids = [str(uuid.uuid4()) for _ in range(501)]
     assert auth_client.post("/api/documents/bulk/delete", json={"ids": ids}).status_code == 422
     assert auth_client.post("/api/documents/bulk/move", json={"ids": ids, "folder_id": None}).status_code == 422
+
+
+def test_bulk_move_same_titles_get_suffixes(auth_client, session, storage):
+    from app.models import DocType, Document, Folder
+    from app.services.tree_sync import write_document_file
+
+    target = Folder(name="Target")
+    session.add(target)
+    session.commit()
+    docs = []
+    for folder_name in ("A", "B"):
+        folder = Folder(name=folder_name)
+        session.add(folder)
+        session.commit()
+        doc = Document(title="X", doc_type=DocType.pdf, folder_id=folder.id)
+        session.add(doc)
+        session.commit()
+        write_document_file(session, storage, doc, ".pdf", folder_name.encode())
+        docs.append(doc)
+
+    resp = auth_client.post(
+        "/api/documents/bulk/move",
+        json={"ids": [str(d.id) for d in docs], "folder_id": target.id},
+    )
+    assert resp.status_code == 200
+    paths = sorted(session.get(Document, d.id).file_path for d in docs)
+    assert paths == ["Target/X (2).pdf", "Target/X.pdf"]
+    assert {storage.abs_path(p).read_bytes() for p in paths} == {b"A", b"B"}
