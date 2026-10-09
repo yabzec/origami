@@ -53,5 +53,13 @@ describe("processing", () => {
       const value = { ...defaultProcessing(), ocrLanguages: "eng" };
       expect(normalizeProcessing(value, ocr)).toBe(value);
     });
+
+    it("turns OCR off when no language is installed", () => {
+      const none = { languages: [], default: "" };
+      const value = { ...defaultProcessing(), ocrLanguages: "eng" };
+      expect(normalizeProcessing(value, none)).toEqual({ ...value, ocrEnabled: false, ocrLanguages: "" });
+      const off = { ...defaultProcessing(), ocrEnabled: false };
+      expect(normalizeProcessing(off, none)).toBe(off);
+    });
   });
 });

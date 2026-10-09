@@ -30,9 +30,10 @@ export function processingPayload(v: ProcessingValues) {
   };
 }
 
-/** Fit the values to the installed OCR languages; the same object when nothing changes. */
+/** Fit the values to the installed OCR languages (none: OCR off); the same object when nothing changes. */
 export function normalizeProcessing(v: ProcessingValues, ocr: OcrLanguagesResponse): ProcessingValues {
   const codes = ocr.languages.map((l) => l.code);
   const ocrLanguages = keepInstalled(v.ocrLanguages, codes, ocr.default);
-  return ocrLanguages === v.ocrLanguages ? v : { ...v, ocrLanguages };
+  const ocrEnabled = v.ocrEnabled && codes.length > 0;
+  return ocrLanguages === v.ocrLanguages && ocrEnabled === v.ocrEnabled ? v : { ...v, ocrEnabled, ocrLanguages };
 }
