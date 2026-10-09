@@ -4,6 +4,7 @@ from enum import StrEnum
 
 from sqlmodel import Field, SQLModel
 
+from app.config import get_default_translation_language
 from app.models.user import utcnow
 
 
@@ -41,6 +42,7 @@ class Document(SQLModel, table=True):
     ocr_enabled: bool = True
     summary_enabled: bool = True  # False: the pipeline skips the AI summary
     translation_enabled: bool = True  # False: no translate_document job is scheduled
+    translation_language: str = Field(default_factory=get_default_translation_language, max_length=8)  # ISO 639-1 target
     document_date: date = Field(default_factory=lambda: utcnow().date())
     detected_language: str | None = None  # ISO 639-1, set by local language detection
     translation_status: str | None = None  # TranslationStatus; None = not needed / not yet processed

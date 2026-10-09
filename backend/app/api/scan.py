@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 from app.api.agent import CLIENT_ID_RE
 from app.api.deps import api_error, get_current_user
 from app.api.documents import serialize
-from app.api.ocr import check_ocr_languages, default_ocr_languages
+from app.api.ocr import check_ocr_languages, check_translation_language, default_ocr_languages
 from app.api.uploads import create_pending_document
 from app.db import get_session
 from app.models import User, DocType, ScanPage, ScanSession, ScanSessionStatus
@@ -51,6 +51,7 @@ class CompileRequest(BaseModel):
     document_date: date | None = None
     ocr_languages: str | None = None
     ocr_enabled: bool | None = None
+    translation_language: str | None = None
     summary_enabled: bool = True
     translation_enabled: bool = True
 
@@ -147,7 +148,7 @@ def scan_page(
     page = ScanPage(
         session_id=session_id,
         page_number=number,
-        image_path=f"tmp/scan_sessions/{session_id}/{filename}",
+        image_path=f"scan_sessions/{session_id}/{filename}",
     )
     db.add(page)
     db.commit()
@@ -168,7 +169,7 @@ def page_preview(
     page = db.get(ScanPage, page_id)
     if page is None:
         raise api_error(404, "not_found", f"Scan page {page_id} not found")
-    return FileResponse(storage.abs_path(page.image_path), media_type="image/png")
+    return FileResponse(storage.tmp_abs(page.image_path), media_type="image/png")
 
 
 @router.delete("/pages/{page_id}", status_code=204)
@@ -180,7 +181,7 @@ def delete_page(
     page = db.get(ScanPage, page_id)
     if page is None:
         raise api_error(404, "not_found", f"Scan page {page_id} not found")
-    storage.abs_path(page.image_path).unlink(missing_ok=True)
+    storage.tmp_abs(page.image_path).unlink(missing_ok=True)
     session_id, removed_number = page.session_id, page.page_number
     db.delete(page)
     db.commit()
@@ -236,6 +237,7 @@ def compile_session(
     ocr_enabled = scan_session.ocr_enabled if body.ocr_enabled is None else body.ocr_enabled
     if ocr_enabled:
         check_ocr_languages(body.ocr_languages)
+    check_translation_language(body.translation_language)
     if scan_session.status != ScanSessionStatus.active:
         raise api_error(409, "session_not_active", "Scan session is not active")
     if not session_pages(db, session_id):
@@ -251,6 +253,7 @@ def compile_session(
         ocr_enabled=ocr_enabled,
         summary_enabled=body.summary_enabled,
         translation_enabled=body.translation_enabled,
+        translation_language=body.translation_language,
         folder_id=body.folder_id,
         tag_ids=body.tag_ids,
         original_filename=None,

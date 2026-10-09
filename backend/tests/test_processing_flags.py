@@ -6,7 +6,7 @@ from tests.test_pipeline import chunks_by_source, make_doc, pipeline_storage, ru
 
 def _text_doc(session, storage, **kwargs):
     doc = make_doc(session, doc_type=DocType.text, title="Brief", **kwargs)
-    rel, _ = storage.store_file(doc.id, ".md", b"Erster Absatz.\n\nZweiter Absatz.")
+    rel, _ = storage.write_file(f"{doc.id}.md", b"Erster Absatz.\n\nZweiter Absatz.")
     doc.file_path = rel
     session.commit()
     return doc

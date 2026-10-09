@@ -7,7 +7,7 @@ from sqlalchemy import delete, func, update
 from sqlalchemy.orm.exc import StaleDataError
 from sqlmodel import Session, select
 
-from app.config import get_primary_language, get_settings
+from app.config import get_settings
 from app.models import Chunk, ChunkSource, DocStatus, DocType, Document, Job, TranslationSegment, TranslationStatus
 from app.services.chunking import chunk_pages, page_texts_from_chunks, segment_pages
 from app.services.convert import OFFICE_EXTENSIONS, ConversionError, office_to_pdf
@@ -23,7 +23,8 @@ from app.services.llm import embed as llm_embed
 from app.services.llm import TranslationDeferred
 from app.services.llm import translate as llm_translate
 from app.services.ocr import images_to_pdf, images_to_searchable_pdf, ocr_image, pdf_to_searchable_pdf
-from app.services.storage import Storage
+from app.services.storage import Storage, companion_name, get_storage, preview_name
+from app.services.tree_sync import write_document_file
 from app.worker.runner import is_final_attempt, register
 
 log = logging.getLogger("origami.pipeline")
@@ -35,7 +36,7 @@ EMBED_BATCH_SIZE = 100  # provider batch limit; translation doubles chunk count
 
 def get_pipeline_storage() -> Storage:
     """Worker-side storage factory (no FastAPI DI in the worker process)."""
-    return Storage(get_settings().storage_path)
+    return get_storage()
 
 
 @register("process_document")
@@ -111,16 +112,14 @@ def _extract_content(
         if not doc.ocr_enabled:
             return []  # photo path: no OCR, no companion pdf; summary via vision
         pdf_bytes, text = ocr_image(path, doc.ocr_languages)
-        storage.store_file(doc.id, ".pdf", pdf_bytes)  # companion searchable PDF
+        storage.write_derived(companion_name(doc.id), pdf_bytes)  # companion searchable PDF
         return [(1, text)]
 
     if doc.doc_type == DocType.pdf:
         pages = extract_pdf_text(path)
         if doc.ocr_enabled and pdf_needs_ocr(pages):
             pdf_bytes, pages = pdf_to_searchable_pdf(path, doc.ocr_languages)
-            rel, size = storage.store_file(doc.id, ".pdf", pdf_bytes)
-            doc.file_path = rel
-            doc.file_size = size
+            write_document_file(session, storage, doc, ".pdf", pdf_bytes)
             doc.ocr_applied = True
         else:
             doc.ocr_applied = False  # original file kept
@@ -135,7 +134,7 @@ def _extract_office(
     session: Session, doc: Document, storage: Storage, path: Path
 ) -> list[tuple[int | None, str]]:
     """Office files are viewed and indexed through a LibreOffice PDF; the original stays the download."""
-    preview = storage.abs_path(doc.preview_path) if doc.preview_path else None
+    preview = storage.derived_abs(doc.preview_path) if doc.preview_path else None
     if preview is None or not preview.is_file():
         try:
             pdf_bytes = office_to_pdf(path)
@@ -146,8 +145,8 @@ def _extract_office(
             doc.preview_path = None
             session.commit()
             return [(None, extract_docx(path))]
-        doc.preview_path = storage.store_preview(doc.id, pdf_bytes)
-        preview = storage.abs_path(doc.preview_path)
+        doc.preview_path = storage.write_derived(preview_name(doc.id), pdf_bytes)
+        preview = storage.derived_abs(doc.preview_path)
     pages = extract_pdf_text(preview)
     doc.page_count = len(pages)
     session.commit()
@@ -164,9 +163,7 @@ def _reocr_pdf(session: Session, doc: Document, storage: Storage) -> list[tuple[
     pages = extract_pdf_text(path)
     if doc.ocr_enabled and (doc.ocr_applied is not False or pdf_needs_ocr(pages)):
         pdf_bytes, pages = pdf_to_searchable_pdf(path, doc.ocr_languages)
-        rel, size = storage.store_file(doc.id, ".pdf", pdf_bytes)
-        doc.file_path = rel
-        doc.file_size = size
+        write_document_file(session, storage, doc, ".pdf", pdf_bytes)
         doc.ocr_applied = True
     doc.page_count = len(pages)
     session.commit()
@@ -188,15 +185,13 @@ def _extract_scan(
             .where(ScanPage.session_id == session_id)
             .order_by(ScanPage.page_number)
         ).all()
-        image_paths = [storage.abs_path(p.image_path) for p in page_rows]
+        image_paths = [storage.tmp_abs(p.image_path) for p in page_rows]
         if doc.ocr_enabled:
             pdf_bytes, pages = images_to_searchable_pdf(image_paths, doc.ocr_languages)
         else:
             pdf_bytes = images_to_pdf(image_paths)
             pages = []
-        rel, size = storage.store_file(doc.id, ".pdf", pdf_bytes)
-        doc.file_path = rel
-        doc.file_size = size
+        write_document_file(session, storage, doc, ".pdf", pdf_bytes)
         doc.ocr_applied = doc.ocr_enabled
     doc.page_count = len(pages)
     scan_session = session.get(ScanSession, session_id)
@@ -284,7 +279,7 @@ def _ensure_summary(session: Session, doc: Document, storage: Storage) -> None:
 def _needs_translation(session: Session, doc: Document) -> bool:
     if not doc.translation_enabled:
         return False
-    if not doc.detected_language or doc.detected_language == get_primary_language():
+    if not doc.detected_language or doc.detected_language == doc.translation_language:
         return False
     if doc.translation_status == TranslationStatus.done and _has_chunks(
         session, doc, ChunkSource.translation
@@ -332,7 +327,7 @@ def _translate_segments(
     session: Session, doc: Document, content_chunks: list[Chunk]
 ) -> list[tuple[int | None, str]]:
     """Translate page segments, committing each one so a retry resumes where this run stopped."""
-    target = get_primary_language()
+    target = doc.translation_language
     pages = page_texts_from_chunks([(c.page_number, c.content) for c in content_chunks])
     stored = {
         s.segment_index: s
@@ -431,7 +426,7 @@ def translate_document(session: Session, payload: dict) -> None:
     if doc is None:
         log.info("translate_document: document %s no longer exists", payload["document_id"])
         return
-    if not doc.detected_language or doc.detected_language == get_primary_language():
+    if not doc.detected_language or doc.detected_language == doc.translation_language:
         # nothing to translate (e.g. the document was re-processed since queueing)
         if doc.translation_status == TranslationStatus.pending:
             _finish_translation(session, doc, None)  # stop the UI polling "pending"
@@ -514,6 +509,7 @@ def _embed_pending_chunks(session: Session, doc: Document) -> None:
 
 SWEEP_INTERVAL = timedelta(hours=1)
 SESSION_MAX_AGE = timedelta(hours=24)
+PART_FILE_MAX_AGE = timedelta(hours=1)
 
 
 @register("sweep_scan_sessions")
@@ -564,6 +560,9 @@ def sweep_scan_sessions(session: Session, payload: dict) -> None:
         session.delete(scan_session)
         session.commit()
         storage.remove_scan_session_dir(sid)
+
+    for part in storage.remove_part_files(PART_FILE_MAX_AGE.total_seconds()):
+        log.info("Removed leftover partial write %s", part)
 
     enqueue(
         session,

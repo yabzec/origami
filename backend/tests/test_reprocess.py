@@ -87,7 +87,7 @@ def _pdf_doc(session, tmp_path, monkeypatch, ocr_applied, text=LONG_TEXT, status
     doc = seed_document(
         session, "Pdf", [], doc_type=DocType.pdf, status=status, ocr_languages="ita", ocr_applied=ocr_applied
     )
-    rel, _ = storage.store_file(doc.id, ".pdf", pdf_bytes)
+    rel, _ = storage.write_file(f"{doc.id}.pdf", pdf_bytes)
     doc.file_path = rel
     session.commit()
     return doc
@@ -165,7 +165,7 @@ def test_normal_pipeline_records_ocred_pdf(session, tmp_path, monkeypatch, llm_s
     raw_pdf = tmp_path / "raw.pdf"
     PILImage.open(img).convert("RGB").save(raw_pdf, "PDF")  # image-only: no text layer
     doc = seed_document(session, "Raw", [], doc_type=DocType.pdf, status=DocStatus.pending)
-    rel, _ = storage.store_file(doc.id, ".pdf", raw_pdf.read_bytes())
+    rel, _ = storage.write_file(f"{doc.id}.pdf", raw_pdf.read_bytes())
     doc.file_path = rel
     session.commit()
     pipeline.process_document(session, {"document_id": str(doc.id)})
@@ -181,7 +181,7 @@ def test_force_ocr_scan_uses_stored_pdf_without_session(session, tmp_path, monke
     img = make_text_image(tmp_path / "s.png", "VERBALE 9")
     pdf_bytes, _ = ocr_image(img, "eng")
     doc = seed_document(session, "Scan", [], doc_type=DocType.scan, status=DocStatus.pending, ocr_applied=True)
-    rel, _ = storage.store_file(doc.id, ".pdf", pdf_bytes)
+    rel, _ = storage.write_file(f"{doc.id}.pdf", pdf_bytes)
     doc.file_path = rel
     session.commit()
 

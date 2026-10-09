@@ -94,3 +94,23 @@ def test_search_inverted_date_range_is_422(auth_client):
         json={"query": "x", "filters": {"date_from": "2026-03-01", "date_to": "2026-02-01"}},
     )
     assert resp.status_code == 422
+
+
+def test_search_fetches_content_flags_in_one_query(auth_client, session, embed_stub, monkeypatch):
+    from app.api import documents, search as search_api
+
+    seed_corpus(session)
+    calls = []
+    real = documents.docs_with_content
+
+    def counting(s, ids):
+        calls.append(list(ids))
+        return real(s, ids)
+
+    monkeypatch.setattr(documents, "docs_with_content", counting)
+    monkeypatch.setattr(search_api, "docs_with_content", counting, raising=False)
+    resp = auth_client.post("/api/search", json={"query": "bolletta luce"})
+    assert resp.status_code == 200
+    assert len(resp.json()["results"]) == 2
+    assert len(calls) == 1 and len(calls[0]) == 2
+    assert all(r["document"]["has_text"] for r in resp.json()["results"])

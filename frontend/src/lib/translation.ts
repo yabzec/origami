@@ -28,7 +28,14 @@ export function translationNote(doc: Pick<Document, "translation_status" | "acti
 }
 
 export function canRetranslate(
-  doc: Pick<Document, "status" | "translatable" | "translation_status">,
+  doc: Pick<Document, "status" | "has_text" | "detected_language" | "translation_status">,
+  target: string,
 ): boolean {
-  return doc.status === "ready" && doc.translatable && doc.translation_status !== "pending";
+  return (
+    doc.status === "ready" &&
+    doc.has_text &&
+    doc.translation_status !== "pending" &&
+    !!doc.detected_language &&
+    doc.detected_language !== target
+  );
 }

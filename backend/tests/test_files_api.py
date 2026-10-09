@@ -4,7 +4,7 @@ from tests.helpers import seed_document
 
 def stored_doc(session, storage, data=b"%PDF-1.7 x", ext=".pdf"):
     doc = seed_document(session, "Doc", [{"content": "c"}])
-    rel, size = storage.store_file(doc.id, ext, data)
+    rel, size = storage.write_file(f"{doc.id}{ext}", data)
     doc.file_path = rel
     session.commit()
     return doc
@@ -68,9 +68,9 @@ def test_file_response_is_not_cached(auth_client, session, storage):
 
 def office_doc(session, storage):
     doc = seed_document(session, "Contratto", [{"content": "c"}], original_filename="contratto.docx")
-    rel, _ = storage.store_file(doc.id, ".docx", b"PK original docx")
+    rel, _ = storage.write_file(f"{doc.id}.docx", b"PK original docx")
     doc.file_path = rel
-    doc.preview_path = storage.store_preview(doc.id, b"%PDF-1.7 preview")
+    doc.preview_path = storage.write_derived(f"{doc.id}.preview.pdf", b"%PDF-1.7 preview")
     session.commit()
     return doc
 
@@ -108,7 +108,7 @@ def test_preview_param_without_preview_serves_file(auth_client, session, storage
 
 def test_preview_missing_on_disk_falls_back_to_file(auth_client, session, storage):
     doc = office_doc(session, storage)
-    storage.abs_path(doc.preview_path).unlink()
+    storage.derived_abs(doc.preview_path).unlink()
     resp = auth_client.get(f"/api/documents/{doc.id}/file?preview=1")
     assert resp.status_code == 200
     assert resp.content == b"PK original docx"

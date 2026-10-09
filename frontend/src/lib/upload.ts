@@ -1,3 +1,5 @@
+import type { ProcessingValues } from "./processing";
+
 export interface UploadFields {
   title?: string;
   folderId?: number | null;
@@ -6,6 +8,7 @@ export interface UploadFields {
   ocrEnabled?: boolean;
   summaryEnabled?: boolean;
   translationEnabled?: boolean;
+  translationLanguage?: string;
   documentDate?: string;
 }
 
@@ -25,6 +28,18 @@ export function buildUploadForm(file: File, fields: UploadFields): FormData {
   if (fields.ocrEnabled === false) form.append("ocr_enabled", "false");
   if (fields.summaryEnabled === false) form.append("summary_enabled", "false");
   if (fields.translationEnabled === false) form.append("translation_enabled", "false");
+  if (fields.translationLanguage) form.append("translation_language", fields.translationLanguage);
   if (fields.documentDate) form.append("document_date", fields.documentDate);
   return form;
+}
+
+/** Upload form fields for the shared processing options; the target is sent only with translation on. */
+export function uploadProcessingFields(p: ProcessingValues) {
+  return {
+    ocrLanguages: p.ocrLanguages || undefined,
+    ocrEnabled: p.ocrEnabled,
+    summaryEnabled: p.summaryEnabled,
+    translationEnabled: p.translationEnabled,
+    translationLanguage: p.translationEnabled ? p.translationLanguage || undefined : undefined,
+  };
 }

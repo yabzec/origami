@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildUploadForm, fileStem } from "./upload";
+import { buildUploadForm, fileStem, uploadProcessingFields } from "./upload";
+import { defaultProcessing } from "./processing";
 
 describe("buildUploadForm", () => {
   const file = new File([new Uint8Array([1])], "bolletta marzo.pdf", { type: "application/pdf" });
@@ -59,5 +60,18 @@ describe("fileStem", () => {
     expect(fileStem("bolletta marzo.pdf")).toBe("bolletta marzo");
     expect(fileStem("archive.tar.gz")).toBe("archive.tar");
     expect(fileStem("noext")).toBe("noext");
+  });
+});
+
+describe("translation language in uploads", () => {
+  it("sends the target only when translation is on", () => {
+    const on = buildUploadForm(new File(["x"], "a.pdf"), uploadProcessingFields({ ...defaultProcessing(), translationLanguage: "en" }));
+    expect(on.get("translation_language")).toBe("en");
+    const off = buildUploadForm(
+      new File(["x"], "a.pdf"),
+      uploadProcessingFields({ ...defaultProcessing(), translationEnabled: false, translationLanguage: "en" }),
+    );
+    expect(off.get("translation_language")).toBeNull();
+    expect(off.get("translation_enabled")).toBe("false");
   });
 });

@@ -105,3 +105,62 @@ def test_upload_with_document_date(auth_client, session, storage):
 def test_upload_office_formats_are_text(auth_client, session, storage):
     for name in ("lettera.odt", "vecchio.doc", "nota.rtf", "contratto.docx"):
         assert upload(auth_client, name).json()["doc_type"] == DocType.text
+
+
+def test_upload_places_file_in_folder_tree(auth_client, session, storage):
+    from app.models import Folder
+
+    home = Folder(name="Home")
+    session.add(home)
+    session.commit()
+    bills = Folder(name="Bills", parent_id=home.id)
+    session.add(bills)
+    session.commit()
+
+    first = auth_client.post(
+        "/api/documents/upload",
+        files={"file": ("ACME.pdf", b"%PDF-1", "application/pdf")},
+        data={"folder_id": str(bills.id), "title": "Invoice"},
+    ).json()
+    second = auth_client.post(
+        "/api/documents/upload",
+        files={"file": ("other.PDF", b"%PDF-2", "application/pdf")},
+        data={"folder_id": str(bills.id), "title": "Invoice"},
+    ).json()
+    assert first["file_path"] == "Home/Bills/Invoice.pdf"
+    assert second["file_path"] == "Home/Bills/Invoice (2).pdf"
+    assert storage.abs_path("Home/Bills/Invoice (2).pdf").read_bytes() == b"%PDF-2"
+
+
+def test_upload_write_failure_leaves_no_document(auth_client, session, storage, monkeypatch):
+    from app.models import Document
+
+    def boom(*args, **kwargs):
+        raise PermissionError(13, "Permission denied", "x")
+
+    monkeypatch.setattr(storage, "write_file", boom)
+    resp = auth_client.post(
+        "/api/documents/upload",
+        files={"file": ("a.pdf", b"%PDF-1", "application/pdf")},
+    )
+    assert resp.status_code == 500
+    assert "storage_error" in resp.text
+    session.expire_all()
+    assert session.exec(select(Document)).all() == []
+
+
+def test_upload_translation_language(auth_client, storage):
+    ok = auth_client.post(
+        "/api/documents/upload",
+        files={"file": ("a.txt", b"hello", "text/plain")},
+        data={"translation_language": "en"},
+    )
+    assert ok.json()["translation_language"] == "en"
+    default = auth_client.post("/api/documents/upload", files={"file": ("b.txt", b"x", "text/plain")})
+    assert default.json()["translation_language"] == "it"
+    bad = auth_client.post(
+        "/api/documents/upload",
+        files={"file": ("c.txt", b"x", "text/plain")},
+        data={"translation_language": "xx"},
+    )
+    assert bad.status_code == 422

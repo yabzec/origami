@@ -1,3 +1,5 @@
+from sqlmodel import select
+
 from app.services.scanner import ScannerOffline
 
 
@@ -176,4 +178,16 @@ def test_cancel_compiling_session_is_409(auth_client, fake_scanner, storage, ses
     assert resp.json()["error"]["code"] == "session_not_active"
     pages = session.exec(select(ScanPage).where(ScanPage.session_id == sid)).all()
     assert len(pages) == 1
-    assert storage.abs_path(pages[0].image_path).exists()
+    assert storage.tmp_abs(pages[0].image_path).exists()
+
+
+def test_scan_pages_live_in_tmp_root(auth_client, fake_scanner, storage, session):
+    from app.models import ScanPage
+
+    sid = auth_client.post("/api/scan/sessions", json={}).json()["id"]
+    auth_client.post(f"/api/scan/sessions/{sid}/pages", json={})
+    page = session.exec(select(ScanPage)).one()
+    assert page.image_path.startswith(f"scan_sessions/{sid}/")
+    assert storage.tmp_abs(page.image_path).is_file()
+    assert storage.tmp_scans_dir == storage.tmp_root / "scan_sessions"
+    assert not (storage.root / "tmp").exists()

@@ -37,6 +37,8 @@ export interface Document {
   ocr_enabled: boolean;
   summary_enabled: boolean;
   translation_enabled: boolean;
+  translation_language: string;
+  has_text: boolean;
   translatable: boolean;
   document_date: string;
   detected_language: string | null;
@@ -132,6 +134,8 @@ export interface OcrLanguage {
 export interface OcrLanguagesResponse {
   languages: OcrLanguage[];
   default: string;
+  translation_languages: OcrLanguage[];
+  translation_default: string;
 }
 
 export interface BulkResult {

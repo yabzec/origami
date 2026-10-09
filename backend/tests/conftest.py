@@ -17,6 +17,10 @@ from app.config import Settings, get_settings
 Settings.model_config["env_file"] = None
 os.environ.setdefault("LITELLM_MODE", "PRODUCTION")  # litellm loads ../.env into os.environ on import in DEV mode
 os.environ.setdefault("JWT_SECRET", "test-secret-" + "x" * 32)  # >=32 bytes: avoids InsecureKeyLengthWarning
+import tempfile  # noqa: E402
+
+# Never let a test (or the startup layout check) touch the developer's real STORAGE_PATH.
+os.environ["STORAGE_PATH"] = tempfile.mkdtemp(prefix="origami-test-storage-")
 get_settings.cache_clear()
 
 from app.db import get_session  # noqa: E402
@@ -115,7 +119,7 @@ def storage(tmp_path):
     from app.services.storage import Storage, get_storage as real_get_storage
     from app.main import app as main_app
 
-    s = Storage(tmp_path)
+    s = Storage(tmp_path / "storage")  # derived/ and tmp/ become siblings inside tmp_path
     main_app.dependency_overrides[real_get_storage] = lambda: s
     yield s
     main_app.dependency_overrides.pop(real_get_storage, None)

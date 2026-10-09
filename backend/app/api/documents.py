@@ -8,8 +8,8 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.api.deps import api_error, get_current_user
-from app.api.ocr import check_ocr_languages
-from app.config import get_primary_language
+from app.api.storage_errors import storage_errors
+from app.api.ocr import check_ocr_languages, check_translation_language
 from app.db import get_session
 from app.models import (
     Chunk,
@@ -26,6 +26,7 @@ from app.models import (
     TranslationStatus,
 )
 from app.services.storage import Storage, get_storage
+from app.services.tree_sync import disk_transaction, lock_documents, lock_tree, relocate_document
 from app.worker.pipeline import delete_translation_segments
 
 router = APIRouter(
@@ -106,12 +107,14 @@ def serialize(
 ) -> dict:
     if active_jobs is None:
         active_jobs = active_jobs_for(session, [doc.id])
-    language_differs = bool(doc.detected_language) and doc.detected_language != get_primary_language()
-    if language_differs and with_content is None:
+    if with_content is None:
         with_content = docs_with_content(session, [doc.id])
+    has_text = doc.id in with_content
+    language_differs = bool(doc.detected_language) and doc.detected_language != doc.translation_language
     return {
         **doc.model_dump(),
-        "translatable": language_differs and doc.id in with_content,
+        "has_text": has_text,
+        "translatable": language_differs and has_text,
         "tags": [t.model_dump() for t in doc_tags(session, doc)],
         "active_job": active_jobs.get(str(doc.id)),
     }
@@ -185,33 +188,34 @@ class BulkMove(BulkIds):
     folder_id: int | None
 
 
-def _found_and_missing(session: Session, ids: list[uuid.UUID]) -> tuple[list[Document], list[str]]:
-    docs = list(session.exec(select(Document).where(Document.id.in_(ids))))
-    found = {d.id for d in docs}
-    return docs, [str(i) for i in ids if i not in found]
-
-
-def _delete_documents(session: Session, docs: list[Document]) -> list[str | None]:
-    """Cancel queued jobs and delete rows (no commit); returns the file paths to remove after commit."""
-    rel_paths: list[str | None] = []
+def _delete_documents(session: Session, docs: list[Document]) -> list[tuple]:
+    """Cancel queued jobs and delete rows (no commit); returns the files to remove after commit."""
+    files: list[tuple] = []
     for doc in docs:
-        rel_paths += [doc.file_path, doc.preview_path]
+        files.append((doc.file_path, doc.preview_path, doc.id))
         _cancel_queued_jobs(session, doc)
         session.delete(doc)  # chunks, document_tags and translation segments cascade via FK
-    return rel_paths
+    return files
 
 
 @router.post("/bulk/move")
-def bulk_move(body: BulkMove, session: Session = Depends(get_session)) -> dict:
+def bulk_move(
+    body: BulkMove,
+    session: Session = Depends(get_session),
+    storage: Storage = Depends(get_storage),
+) -> dict:
     if body.folder_id is not None and session.get(Folder, body.folder_id) is None:
         raise api_error(404, "not_found", "Folder not found")
-    docs, missing = _found_and_missing(session, body.ids)
     now = datetime.now(timezone.utc)
-    for doc in docs:
-        doc.folder_id = body.folder_id
-        doc.updated_at = now
-    session.commit()
-    return {"moved": len(docs), "missing": missing}
+    with storage_errors(), disk_transaction(session, storage) as moves:
+        lock_tree(session)  # before the row locks: same order as write_document_file
+        docs = lock_documents(session, body.ids)
+        found = {d.id for d in docs}
+        for doc in sorted(docs, key=lambda d: (d.created_at, str(d.id))):
+            doc.folder_id = body.folder_id
+            doc.updated_at = now
+            relocate_document(session, storage, moves, doc)
+    return {"moved": len(docs), "missing": [str(i) for i in body.ids if i not in found]}
 
 
 @router.post("/bulk/delete")
@@ -220,11 +224,13 @@ def bulk_delete(
     session: Session = Depends(get_session),
     storage: Storage = Depends(get_storage),
 ) -> dict:
-    docs, missing = _found_and_missing(session, body.ids)
-    rel_paths = _delete_documents(session, docs)
+    docs = lock_documents(session, body.ids)  # file paths as of the lock, not a stale read
+    found = {d.id for d in docs}
+    missing = [str(i) for i in body.ids if i not in found]
+    files = _delete_documents(session, docs)
     session.commit()
-    for rel in rel_paths:
-        storage.delete_document_file(rel)
+    for file_rel, preview, doc_id in files:
+        storage.delete_document_files(file_rel, preview, doc_id)
     return {"deleted": len(docs), "missing": missing}
 
 
@@ -251,7 +257,7 @@ def document_text(
         "variant": variant,
         "detected_language": doc.detected_language,
         "translation_status": doc.translation_status,
-        "translation_language": get_primary_language(),
+        "translation_language": doc.translation_language,
         "chunks": [
             {"chunk_index": c.chunk_index, "page_number": c.page_number, "content": c.content}
             for c in chunks
@@ -264,8 +270,9 @@ def update_document(
     document_id: uuid.UUID,
     body: DocumentPatch,
     session: Session = Depends(get_session),
+    storage: Storage = Depends(get_storage),
 ) -> dict:
-    doc = get_doc_or_404(session, document_id)
+    get_doc_or_404(session, document_id)
     fields = body.model_dump(exclude_unset=True)
     tag_ids = fields.pop("tag_ids", None)
 
@@ -276,21 +283,26 @@ def update_document(
         if session.get(Folder, fields["folder_id"]) is None:
             raise api_error(404, "not_found", "Folder not found")
 
-    for key, value in fields.items():
-        setattr(doc, key, value)
+    with storage_errors(), disk_transaction(session, storage) as moves:
+        if "title" in fields or "folder_id" in fields:
+            lock_tree(session)  # before the row lock: same order as write_document_file
+        [doc] = lock_documents(session, [document_id])
+        for key, value in fields.items():
+            setattr(doc, key, value)
 
-    if tag_ids is not None:
-        for link in session.exec(
-            select(DocumentTag).where(DocumentTag.document_id == doc.id)
-        ):
-            session.delete(link)
-        for tag_id in tag_ids:
-            if session.get(Tag, tag_id) is None:
-                raise api_error(404, "not_found", f"Tag {tag_id} not found")
-            session.add(DocumentTag(document_id=doc.id, tag_id=tag_id))
+        if tag_ids is not None:
+            for link in session.exec(
+                select(DocumentTag).where(DocumentTag.document_id == doc.id)
+            ):
+                session.delete(link)
+            for tag_id in tag_ids:
+                if session.get(Tag, tag_id) is None:
+                    raise api_error(404, "not_found", f"Tag {tag_id} not found")
+                session.add(DocumentTag(document_id=doc.id, tag_id=tag_id))
 
-    doc.updated_at = datetime.now(timezone.utc)
-    session.commit()
+        if "title" in fields or "folder_id" in fields:
+            relocate_document(session, storage, moves, doc)
+        doc.updated_at = datetime.now(timezone.utc)
     session.refresh(doc)
     return serialize(session, doc)
 
@@ -301,11 +313,12 @@ def delete_document(
     session: Session = Depends(get_session),
     storage: Storage = Depends(get_storage),
 ) -> None:
-    doc = get_doc_or_404(session, document_id)
-    rel_paths = _delete_documents(session, [doc])
+    get_doc_or_404(session, document_id)
+    docs = lock_documents(session, [document_id])  # file path as of the lock, not a stale read
+    files = _delete_documents(session, docs)
     session.commit()
-    for rel in rel_paths:
-        storage.delete_document_file(rel)
+    for file_rel, preview, doc_id in files:
+        storage.delete_document_files(file_rel, preview, doc_id)
 
 
 class ReprocessRequest(BaseModel):
@@ -313,6 +326,7 @@ class ReprocessRequest(BaseModel):
     ocr_enabled: bool = True
     summary_enabled: bool = True
     translation_enabled: bool = True
+    translation_language: str | None = None
 
 
 @router.post("/{document_id}/reprocess")
@@ -325,6 +339,7 @@ def reprocess_document(
     doc = get_doc_or_404(session, document_id)
     if body.ocr_enabled:
         check_ocr_languages(body.ocr_languages)
+    check_translation_language(body.translation_language)
     if doc.status in (DocStatus.pending, DocStatus.processing):
         raise api_error(409, "document_busy", "Document is still being processed")
     if doc.doc_type == DocType.video:
@@ -356,6 +371,8 @@ def reprocess_document(
     doc.ocr_enabled = body.ocr_enabled
     doc.summary_enabled = body.summary_enabled
     doc.translation_enabled = body.translation_enabled
+    if body.translation_language:
+        doc.translation_language = body.translation_language
     if doc.summary and doc.description == doc.summary:
         doc.description = ""  # still the AI text: the new summary refills it; edited text is kept
     doc.summary = None
@@ -371,16 +388,27 @@ def reprocess_document(
     return serialize(session, doc)
 
 
+class RetranslateRequest(BaseModel):
+    translation_language: str | None = None
+
+
 @router.post("/{document_id}/retranslate")
-def retranslate_document(document_id: uuid.UUID, session: Session = Depends(get_session)) -> dict:
+def retranslate_document(
+    document_id: uuid.UUID,
+    body: RetranslateRequest | None = None,
+    session: Session = Depends(get_session),
+) -> dict:
     doc = get_doc_or_404(session, document_id)
+    target = body.translation_language if body and body.translation_language else None
+    check_translation_language(target)
     session.refresh(doc, with_for_update=True)  # same lock as reprocess and translate_document
+    target = target or doc.translation_language
     if doc.status != DocStatus.ready:
         raise api_error(409, "document_busy", "Document is not ready (still processing or failed)")
     if doc.translation_status == TranslationStatus.pending:
         raise api_error(409, "translation_busy", "A translation is already in progress")
-    if not doc.detected_language or doc.detected_language == get_primary_language():
-        raise api_error(409, "nothing_to_translate", "The document is already in the primary language")
+    if not doc.detected_language or doc.detected_language == target:
+        raise api_error(409, "nothing_to_translate", "The document is already in the target language")
     if not docs_with_content(session, [doc.id]):
         raise api_error(409, "nothing_to_translate", "The document has no extracted text to translate")
     _cancel_queued_jobs(session, doc)
@@ -389,6 +417,7 @@ def retranslate_document(document_id: uuid.UUID, session: Session = Depends(get_
     ):
         session.delete(chunk)
     delete_translation_segments(session, doc.id)
+    doc.translation_language = target
     doc.translation_enabled = True
     doc.translation_status = TranslationStatus.pending
     doc.updated_at = datetime.now(timezone.utc)
@@ -427,6 +456,6 @@ def _scan_session_with_pages(session: Session, storage: Storage, doc: Document) 
     if scan_session_id is None:
         return None
     pages = session.exec(select(ScanPage).where(ScanPage.session_id == scan_session_id)).all()
-    if not pages or not all(storage.abs_path(p.image_path).exists() for p in pages):
+    if not pages or not all(storage.tmp_abs(p.image_path).exists() for p in pages):
         return None
     return scan_session_id

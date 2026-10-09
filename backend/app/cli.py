@@ -72,6 +72,40 @@ def print_models() -> None:
         print("  ".join(cell.ljust(w) for cell, w in zip(row, widths)).rstrip())
 
 
+def migrate_storage_cmd(dry_run: bool, check: bool, fix: bool) -> None:
+    from app.services.storage import get_storage
+    from app.services.storage_migration import ReservedFolderExists, check_storage, migrate_storage
+
+    storage = get_storage()
+    with Session(engine) as session:
+        if check or fix:
+            report = check_storage(session, storage, fix=fix)
+            for rel in report.missing:
+                print(f"missing on disk: {rel}")
+            for rel in report.unreferenced:
+                print(f"not in database: {rel}")
+            for rel in report.parts:
+                print(f"partial write{' (removed)' if fix else ''}: {rel}")
+            print("Storage OK" if report.ok else "Storage has problems (see above)")
+            raise SystemExit(0 if report.ok or fix else 1)
+        try:
+            report = migrate_storage(session, storage, dry_run=dry_run)
+        except ReservedFolderExists as exc:
+            print(f"Error: {exc}")
+            raise SystemExit(1)
+    for old, new in report.moved:
+        print(f"{'would move' if dry_run else 'moved'}: {old} -> {new}")
+    for rel in report.missing:
+        print(f"missing source (database updated anyway): {rel}")
+    for name in report.quarantined:
+        print(f"quarantined to {storage.derived_abs('orphans/' + name)}: {name}")
+    for name in report.leftovers:
+        print(f"left in files/: {name}")
+    if dry_run:
+        print("Dry run: nothing changed. Names may get (2), (3) suffixes in the real run.")
+    print(f"{len(report.moved)} item(s) {'to move' if dry_run else 'moved'}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="origami")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -82,6 +116,10 @@ def main() -> None:
     p_email.add_argument("email")
     sub.add_parser("test-email", help="send a test email to every user with an email")
     sub.add_parser("list-models", help="list the models offered by the LLM_MODEL provider")
+    p_migrate = sub.add_parser("migrate-storage", help="move files to the folder tree layout")
+    p_migrate.add_argument("--dry-run", action="store_true", help="print the moves, change nothing")
+    p_migrate.add_argument("--check", action="store_true", help="report database/disk drift")
+    p_migrate.add_argument("--fix", action="store_true", help="with --check: remove partial writes")
     args = parser.parse_args()
     if args.command == "create-user":
         create_user(args.username)
@@ -91,6 +129,8 @@ def main() -> None:
         send_test_email()
     elif args.command == "list-models":
         print_models()
+    elif args.command == "migrate-storage":
+        migrate_storage_cmd(args.dry_run, args.check, args.fix)
 
 
 if __name__ == "__main__":

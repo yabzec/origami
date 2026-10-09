@@ -9,6 +9,8 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://origami:origami@localhost:5432/origami"
     storage_path: Path = Path("./storage")
+    derived_path: str = ""  # empty → <storage_path>/../derived (office previews, OCR companions)
+    tmp_path: str = ""  # empty → <storage_path>/../tmp (scan sessions)
     jwt_secret: str = "dev-secret"
     jwt_expire_days: int = 30
     llm_model: str = "gemini/gemini-2.5-flash"
@@ -24,6 +26,7 @@ class Settings(BaseSettings):
     embedding_api_base: str = ""
     default_ocr_languages: str = "ita+eng"
     primary_language: str = "it"
+    default_translation_language: str = ""  # ISO 639-1; empty → primary_language
     llm_tpm_limit: int = 0  # provider tokens-per-minute limit for translation; 0 = no throttle
     translation_segment_chars: int = 6000  # max source characters per translation call
     rag_top_k: int = 8
@@ -51,3 +54,9 @@ def get_primary_language() -> str:
     Single lookup point: a future per-user profile setting replaces this body.
     """
     return get_settings().primary_language
+
+
+def get_default_translation_language() -> str:
+    """Configured default translation target (not checked against installed languages)."""
+    settings = get_settings()
+    return settings.default_translation_language.strip() or settings.primary_language

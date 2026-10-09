@@ -1,5 +1,7 @@
 import { useEffect } from "react";
 import { OcrLanguageSelect } from "@/components/OcrLanguageSelect";
+import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { useOcrLanguages } from "@/hooks/useOcrLanguages";
 import { normalizeProcessing, type ProcessingValues } from "@/lib/processing";
 
@@ -55,6 +57,22 @@ export function ProcessingOptions({
         />
         Translation
       </label>
+      {value.translationEnabled && (data?.translation_languages.length ?? 0) > 0 && (
+        <div className="pl-6">
+          <Label htmlFor={`${idPrefix}-tr-lang`}>Translate to</Label>
+          <Select
+            id={`${idPrefix}-tr-lang`}
+            value={value.translationLanguage}
+            onChange={(e) => set({ translationLanguage: e.target.value })}
+          >
+            {data?.translation_languages.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.name}
+              </option>
+            ))}
+          </Select>
+        </div>
+      )}
     </fieldset>
   );
 }

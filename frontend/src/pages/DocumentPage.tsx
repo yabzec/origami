@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FolderPicker } from "@/components/FolderPicker";
@@ -11,6 +12,7 @@ import { STATUS_VARIANTS } from "@/components/DocumentCard";
 import { ProcessingOptions } from "@/components/ProcessingOptions";
 import { TagInput } from "@/components/TagInput";
 import { useNow } from "@/hooks/useNow";
+import { useOcrLanguages } from "@/hooks/useOcrLanguages";
 import { api, ApiError, fileUrl } from "@/lib/api";
 import { browseQuery, DEFAULT_BROWSE } from "@/lib/browseParams";
 import { isAiDescription, nextDescription } from "@/lib/description";
@@ -97,11 +99,15 @@ export function DocumentPage() {
   const [tagIds, setTagIds] = useState<number[]>([]);
   const [documentDate, setDocumentDate] = useState("");
   const [processing, setProcessing] = useState<ProcessingValues>(defaultProcessing);
+  const { data: ocrLanguages } = useOcrLanguages();
+  const [retranslateTarget, setRetranslateTarget] = useState<string | null>(null);
   const lastStatus = useRef<string | null>(null);
   const lastTranslation = useRef<string | null>(null);
   const now = useNow();
 
   const hydratedForDocId = useRef<string | null>(null);
+
+  useEffect(() => setRetranslateTarget(null), [id]); // a picked target belongs to one document
   const serverDescription = useRef<string | null>(null);
 
   useEffect(() => {
@@ -164,7 +170,10 @@ export function DocumentPage() {
     },
   });
   const retranslate = useMutation({
-    mutationFn: () => api.post<Document>(`/api/documents/${id}/retranslate`),
+    mutationFn: () =>
+      api.post<Document>(`/api/documents/${id}/retranslate`, {
+        translation_language: retranslateTarget ?? doc?.translation_language,
+      }),
     onSuccess: (updated) => {
       qc.setQueryData(["document", id], updated);
       qc.invalidateQueries({ queryKey: ["document-text", id] });
@@ -279,12 +288,27 @@ export function DocumentPage() {
                 {reprocess.error instanceof ApiError ? reprocess.error.message : "Re-process failed"}
               </p>
             )}
-            {doc.translatable && (
+            {doc.has_text && (
               <>
+                <p className="text-xs text-zinc-500">
+                  {doc.translation_status === "done" ? "Translated to" : "Translation target:"}{" "}
+                  {languageLabel(doc.translation_language)}
+                </p>
+                <Select
+                  aria-label="Translation language"
+                  value={retranslateTarget ?? doc.translation_language}
+                  onChange={(e) => setRetranslateTarget(e.target.value)}
+                >
+                  {(ocrLanguages?.translation_languages ?? []).map((l) => (
+                    <option key={l.code} value={l.code}>
+                      {l.name}
+                    </option>
+                  ))}
+                </Select>
                 <Button
                   variant="outline"
                   className="w-full"
-                  disabled={retranslate.isPending || !canRetranslate(doc)}
+                  disabled={retranslate.isPending || !canRetranslate(doc, retranslateTarget ?? doc.translation_language)}
                   onClick={() => retranslate.mutate()}
                 >
                   {retranslate.isPending ? "Starting…" : "Re-translate"}
