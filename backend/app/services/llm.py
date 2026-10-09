@@ -1,11 +1,16 @@
 import base64
 import json
 import logging
+import math
 import os
 import re
+import threading
+import time
 import urllib.parse
 import urllib.request
+from collections import deque
 from pathlib import Path
+from typing import Callable
 
 import litellm
 
@@ -95,6 +100,79 @@ def describe(text: str | None = None, image_path: Path | None = None) -> str:
     return parse_summary(resp.choices[0].message.content)
 
 
+WINDOW_SECONDS = 60.0
+RATE_LIMIT_RETRIES = 5
+DEFAULT_RATE_LIMIT_WAIT = 60.0
+CHARS_PER_TOKEN = 3.5
+
+_clock: Callable[[], float] = time.monotonic  # replaced in tests
+_sleep: Callable[[float], None] = time.sleep
+
+
+class TokenBudget:
+    """Sliding 60 s token window for one process. limit <= 0 disables throttling."""
+
+    def __init__(self, limit_per_minute: int, clock: Callable[[], float], sleep: Callable[[float], None]):
+        self.limit = limit_per_minute
+        self._clock, self._sleep = clock, sleep
+        self._events: deque[list] = deque()  # [timestamp, tokens]; tokens corrected after the call
+        self._lock = threading.Lock()
+
+    def acquire(self, tokens: int) -> list | None:
+        if self.limit <= 0:
+            return None
+        tokens = min(tokens, self.limit)  # one oversized call must not wait forever
+        while True:
+            with self._lock:
+                now = self._clock()
+                while self._events and now - self._events[0][0] >= WINDOW_SECONDS:
+                    self._events.popleft()
+                if sum(e[1] for e in self._events) + tokens <= self.limit:
+                    entry = [now, tokens]
+                    self._events.append(entry)
+                    return entry
+                wait = self._events[0][0] + WINDOW_SECONDS - now
+            self._sleep(max(wait, 0.05))
+
+
+_translate_budget: TokenBudget | None = None
+
+
+def reset_translate_budget() -> None:
+    global _translate_budget
+    _translate_budget = None
+
+
+def _budget() -> TokenBudget:
+    global _translate_budget
+    limit = get_settings().llm_tpm_limit
+    if _translate_budget is None or _translate_budget.limit != limit:
+        _translate_budget = TokenBudget(limit, lambda: _clock(), lambda s: _sleep(s))
+    return _translate_budget
+
+
+def _estimate_tokens(model: str, text: str) -> int:
+    """Input tokens times two: the translation is about as long as the source."""
+    try:
+        tokens = litellm.token_counter(model=model, text=text)
+    except Exception:
+        tokens = len(text) / CHARS_PER_TOKEN
+    return math.ceil(tokens * 2)
+
+
+def rate_limit_wait(exc: Exception) -> float:
+    """Seconds to wait after a 429: retry-after header, then the provider's message, then 60 s."""
+    headers = getattr(getattr(exc, "response", None), "headers", None) or {}
+    try:
+        return float(headers.get("retry-after"))
+    except (TypeError, ValueError):
+        pass
+    match = re.search(r"try again in (?:(\d+)m)?([\d.]+)s", str(exc))
+    if match:
+        return int(match.group(1) or 0) * 60 + float(match.group(2))
+    return DEFAULT_RATE_LIMIT_WAIT
+
+
 def translate(text: str, target_language: str) -> str:
     settings = get_settings()
     kw = _kw(settings.llm_api_key, settings.llm_api_base)
@@ -102,12 +180,26 @@ def translate(text: str, target_language: str) -> str:
         f"Translate the following text into {language_name(target_language)}. Preserve line "
         "breaks, numbers, names, and dates. Output only the translation, with no comments."
     )
-    resp = litellm.completion(
-        model=settings.llm_model,
-        messages=[{"role": "user", "content": f"{prompt}\n\n---\n\n{text}"}],
-        **kw,
-    )
-    return resp.choices[0].message.content.strip()
+    content = f"{prompt}\n\n---\n\n{text}"
+    budget = _budget()
+    for attempt in range(RATE_LIMIT_RETRIES + 1):
+        entry = budget.acquire(_estimate_tokens(settings.llm_model, content))
+        try:
+            resp = litellm.completion(
+                model=settings.llm_model, messages=[{"role": "user", "content": content}], **kw
+            )
+        except litellm.RateLimitError as exc:
+            if attempt == RATE_LIMIT_RETRIES:
+                raise
+            wait = rate_limit_wait(exc)
+            log.warning("Translation rate-limited; retrying in %.1fs (%d/%d)", wait, attempt + 1, RATE_LIMIT_RETRIES)
+            _sleep(wait)
+            continue
+        actual = getattr(getattr(resp, "usage", None), "total_tokens", None)
+        if entry is not None and isinstance(actual, int):
+            entry[1] = actual
+        return resp.choices[0].message.content.strip()
+    raise AssertionError("unreachable")
 
 
 def complete(messages: list[dict], stream: bool = False):
