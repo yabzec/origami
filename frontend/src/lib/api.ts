@@ -43,11 +43,41 @@ async function request<T>(
   return data as T;
 }
 
+/** multipart POST with upload progress (fetch has no upload progress events). */
+function uploadForm<T>(path: string, form: FormData, onProgress?: (percent: number) => void): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", path);
+    const token = getToken();
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () => {
+      let data: unknown = null;
+      try {
+        data = JSON.parse(xhr.responseText);
+      } catch {
+        data = null;
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(data as T);
+        return;
+      }
+      const err = (data as { error?: { code?: string; message?: string; detail?: unknown } })?.error;
+      reject(new ApiError(xhr.status, err?.code ?? "unknown_error", err?.message ?? (xhr.statusText || "Upload failed"), err?.detail));
+    };
+    xhr.onerror = () => reject(new ApiError(0, "network_error", "Network error"));
+    xhr.send(form);
+  });
+}
+
 export const api = {
   get: <T>(path: string) => request<T>("GET", path),
   post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
   patch: <T>(path: string, body?: unknown) => request<T>("PATCH", path, body),
   del: (path: string) => request<void>("DELETE", path),
+  upload: uploadForm,
   postForm: <T>(path: string, form: FormData) => request<T>("POST", path, undefined, form),
 };
 
