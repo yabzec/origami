@@ -54,11 +54,10 @@ function Thumb({
     >
       <button
         type="button"
-        className="block w-full cursor-grab active:cursor-grabbing"
+        className="block w-full"
         onClick={onSelect}
-        title={`Show page ${page.page_number} (drag to reorder)`}
-        {...attributes}
-        {...listeners}
+        title={`Show page ${page.page_number}`}
+        aria-label={`Show page ${page.page_number}`}
       >
         {url ? (
           <img src={url} alt={`Page ${page.page_number}`} className="h-32 w-full rounded object-cover" />
@@ -80,6 +79,17 @@ function Thumb({
         ) : (
           <span className="w-6" />
         )}
+        <button
+          type="button"
+          disabled={disabled}
+          aria-label={`Drag page ${page.page_number}`}
+          title="Drag to reorder"
+          className="h-6 w-6 cursor-grab rounded hover:bg-zinc-100 active:cursor-grabbing disabled:opacity-30"
+          {...attributes}
+          {...listeners}
+        >
+          ⠿
+        </button>
         <span>p. {page.page_number}</span>
         {selected && (
           <button

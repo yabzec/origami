@@ -9,17 +9,21 @@ export async function applyReorder({
   next,
   dispatch,
   post = api.post,
+  isCurrent,
 }: {
   sessionId: number;
   previous: ScanPageInfo[];
   next: ScanPageInfo[];
   dispatch: (action: ScanAction) => void;
   post?: (path: string, body: unknown) => Promise<unknown>;
+  /** False once the session was discarded or replaced; a late failure is then ignored. */
+  isCurrent: () => boolean;
 }): Promise<void> {
   dispatch({ type: "PAGES_REORDERED", pages: next });
   try {
     await post(`/api/scan/sessions/${sessionId}/reorder`, { page_ids: next.map((p) => p.id) });
   } catch (err) {
+    if (!isCurrent()) return;
     dispatch({ type: "PAGES_REORDERED", pages: previous });
     dispatch({
       type: "SCAN_FAILED",

@@ -39,6 +39,7 @@ export function ScanPage() {
     queryFn: () => api.get<{ devices: ScanDevice[]; default: string | null }>("/api/scan/devices"),
   });
 
+  const [reordering, setReordering] = useState(false);
   const [device, setDevice] = useState<string | null>(null);
   const chosenDevice = device ?? deviceData?.default ?? null;
   const [processing, setProcessing] = useState<ProcessingValues>(defaultProcessing);
@@ -146,11 +147,23 @@ export function ScanPage() {
     }
   };
 
-  const movePageTo = (pageId: number, toIndex: number) => {
-    if (state.sessionId === null) return;
+  const movePageTo = async (pageId: number, toIndex: number) => {
+    const sessionId = state.sessionId;
+    if (sessionId === null || reordering) return;
     const next = movePage(state.pages, pageId, toIndex);
     if (next === state.pages) return;
-    void applyReorder({ sessionId: state.sessionId, previous: state.pages, next, dispatch });
+    setReordering(true);
+    try {
+      await applyReorder({
+        sessionId,
+        previous: state.pages,
+        next,
+        dispatch,
+        isCurrent: () => isCurrent(sessionId),
+      });
+    } finally {
+      setReordering(false);
+    }
   };
 
   const finish = async () => {
@@ -229,7 +242,7 @@ export function ScanPage() {
             <PageCarousel
               pages={state.pages}
               selectedPageId={state.selectedPageId}
-              disabled={state.phase !== "ready"}
+              disabled={state.phase !== "ready" || reordering}
               onSelect={selectPage}
               onDelete={deletePage}
               onMove={movePageTo}

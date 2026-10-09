@@ -14,7 +14,7 @@ const next = [
 it("applies the new order first, then saves it", async () => {
   const dispatch = vi.fn();
   const post = vi.fn().mockResolvedValue({});
-  await applyReorder({ sessionId: 7, previous, next, dispatch, post });
+  await applyReorder({ sessionId: 7, previous, next, dispatch, post, isCurrent: () => true });
   expect(dispatch).toHaveBeenCalledTimes(1);
   expect(dispatch).toHaveBeenCalledWith({ type: "PAGES_REORDERED", pages: next });
   expect(post).toHaveBeenCalledWith("/api/scan/sessions/7/reorder", { page_ids: [2, 1] });
@@ -23,10 +23,17 @@ it("applies the new order first, then saves it", async () => {
 it("rolls back and reports the error when saving fails", async () => {
   const dispatch = vi.fn();
   const post = vi.fn().mockRejectedValue(new ApiError(422, "invalid_order", "bad order"));
-  await applyReorder({ sessionId: 7, previous, next, dispatch, post });
+  await applyReorder({ sessionId: 7, previous, next, dispatch, post, isCurrent: () => true });
   expect(dispatch.mock.calls.map((c) => c[0])).toEqual([
     { type: "PAGES_REORDERED", pages: next },
     { type: "PAGES_REORDERED", pages: previous },
     { type: "SCAN_FAILED", code: "invalid_order", message: "bad order" },
   ]);
+});
+
+it("does nothing more when the session changed before the save failed", async () => {
+  const dispatch = vi.fn();
+  const post = vi.fn().mockRejectedValue(new ApiError(422, "invalid_order", "bad order"));
+  await applyReorder({ sessionId: 7, previous, next, dispatch, post, isCurrent: () => false });
+  expect(dispatch.mock.calls.map((c) => c[0])).toEqual([{ type: "PAGES_REORDERED", pages: next }]);
 });

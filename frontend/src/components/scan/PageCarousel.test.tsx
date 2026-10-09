@@ -29,3 +29,15 @@ it("hides the arrows on unselected pages and disables them at the ends", () => {
   expect(screen.getByRole("button", { name: "Move page 1 left" })).toBeDisabled();
   expect(screen.queryByRole("button", { name: "Move page 2 left" })).not.toBeInTheDocument();
 });
+
+it("selects a page from its thumbnail, with click or keyboard", async () => {
+  const onSelect = vi.fn();
+  render(
+    <PageCarousel pages={pages} selectedPageId={1} disabled={false} onSelect={onSelect} onDelete={vi.fn()} onMove={vi.fn()} />,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Show page 2" }));
+  expect(onSelect).toHaveBeenLastCalledWith(2);
+  screen.getByRole("button", { name: "Show page 3" }).focus();
+  await userEvent.keyboard("{Enter}");
+  expect(onSelect).toHaveBeenLastCalledWith(3);
+});
