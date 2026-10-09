@@ -21,7 +21,7 @@ TESSERACT_TO_ISO = {
     "afr": "af", "ara": "ar", "bul": "bg", "cat": "ca", "ces": "cs", "chi_sim": "zh", "chi_tra": "zh",
     "dan": "da", "deu": "de", "ell": "el", "eng": "en", "est": "et", "fin": "fi", "fra": "fr",
     "heb": "he", "hin": "hi", "hrv": "hr", "hun": "hu", "ind": "id", "ita": "it", "jpn": "ja",
-    "kor": "ko", "lat": "la", "lav": "lv", "lit": "lt", "nld": "nl", "nor": "no", "pol": "pl",
+    "kor": "ko", "lat": "la", "lav": "lv", "lit": "lt", "nld": "nl", "nor": "nb", "pol": "pl",
     "por": "pt", "ron": "ro", "rus": "ru", "slk": "sk", "slv": "sl", "spa": "es", "srp": "sr",
     "swe": "sv", "tur": "tr", "ukr": "uk", "vie": "vi",
 }

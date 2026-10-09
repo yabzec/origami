@@ -186,3 +186,10 @@ def test_languages_endpoint_lists_translation_targets(auth_client, installed):
         {"code": "it", "name": "Italian"},
     ]
     assert body["translation_default"] == "it"
+
+
+def test_norwegian_maps_to_bokmal_code():
+    from app.services.ocr_language_names import iso_language, iso_language_name
+
+    assert iso_language("nor") == "nb"  # lingua reports Norwegian Bokmal as "nb"
+    assert iso_language_name("nb") == "Norwegian"
