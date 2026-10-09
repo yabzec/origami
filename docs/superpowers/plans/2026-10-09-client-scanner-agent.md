@@ -25,6 +25,7 @@
 - `localStorage` keys: `origami.clientId`, `origami.agentInstalled`. Every access in `try/catch`.
 - No admin rights needed on the client; URL handler registered for the current user only.
 - Persisted text (code comments, commits, README) in plain English.
+- No server address is compiled into the agent. The server URL comes only from the `PUBLIC_URL` env var (fallback: request base URL) and reaches the agent through the launch link. Examples use `https://origami.example.com`.
 
 ### Deviations from the spec (decided while planning, tell the user at handoff)
 
@@ -1059,7 +1060,7 @@ Expected: FAIL (404 on `/api/agent/launch`, fixture import ok)
 In `backend/app/config.py`, after `soffice_path`, add:
 
 ```python
-    public_url: str = ""  # e.g. https://origami.yabzec.uk — server URL handed to the client scanner agent; empty → request base URL
+    public_url: str = ""  # e.g. https://origami.example.com — public server URL handed to the client scanner agent; empty → request base URL
     agent_dist_dir: Path = Path("../agent/dist")  # built agent binaries served by /api/agent/download
 ```
 
@@ -1129,6 +1130,15 @@ def download(platform: str, user: User = Depends(get_current_user_flexible)) -> 
     return FileResponse(path, filename=name, media_type="application/octet-stream")
 ```
 
+In `.env.example`, after `APP_BASE_URL=`, add:
+
+```
+# Public URL clients use to reach Origami; handed to the client scanner agent. Empty = request base URL.
+PUBLIC_URL=
+# Folder with the built scanner agent files (agent/build.sh output), relative to backend/.
+AGENT_DIST_DIR=../agent/dist
+```
+
 In `backend/app/main.py`, change the import to
 `from app.api import agent, auth, chat, documents, files, folders, ocr, scan, search, tags, uploads`
 and add `app.include_router(agent.router)` before `app.include_router(auth.router)`.
@@ -1141,7 +1151,7 @@ Expected: all PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/app/api/agent.py backend/app/config.py backend/app/main.py backend/tests/conftest.py backend/tests/test_agent_api.py
+git add .env.example backend/app/api/agent.py backend/app/config.py backend/app/main.py backend/tests/conftest.py backend/tests/test_agent_api.py
 git commit -m "feat: agent launch token, WebSocket and download endpoints"
 ```
 
@@ -4064,7 +4074,7 @@ agent/build.sh
 
 This writes Windows and Linux builds to `agent/dist/`. The macOS builds (`origami-agent-darwin-*.zip`) need a Mac: run the same script there and copy the zips into `agent/dist/` on the server. The server serves the files from `AGENT_DIST_DIR` (default `../agent/dist`, relative to `backend/`).
 
-Set `PUBLIC_URL` (e.g. `https://origami.yabzec.uk`) in `.env` so the agent gets the public address, not the internal one.
+Set `PUBLIC_URL` in `.env` to the address clients use to reach Origami (e.g. `https://origami.example.com`). The agent has no built-in server address: it gets this URL from the launch link, so the same agent build works for any Origami install. When `PUBLIC_URL` is empty, the server uses the address of the incoming request, which is wrong behind a reverse proxy or tunnel that rewrites the host.
 
 ### First run on a client
 
@@ -4086,7 +4096,7 @@ The agent pairs with the first Origami server that starts it and refuses others.
 
 - [ ] **Step 2: Manual end-to-end check**
 
-With the service running behind `origami.yabzec.uk`, `PUBLIC_URL` set and `agent/build.sh` run:
+With the service running behind its public URL (for this install `https://origami.yabzec.uk`), `PUBLIC_URL` set to it and `agent/build.sh` run:
 
 1. On a client on another network than the server, with a Wi-Fi eSCL scanner: open Scan, open the scanner menu, choose **Search local scanners**. Expected: install panel (first time).
 2. Download, run once, click **Installed, search now**. Expected: browser prompt; then the scanner appears under "This computer's network" while the menu stays open, with "1 found".
