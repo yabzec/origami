@@ -107,7 +107,10 @@ export function BrowsePage() {
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
     setDragging(false);
-    void pickedFromDataTransfer(e.dataTransfer).then(receive);
+    setBulkError(null);
+    pickedFromDataTransfer(e.dataTransfer)
+      .then(receive)
+      .catch(() => setBulkError("Could not read the dropped files"));
   };
 
   return (

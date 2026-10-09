@@ -106,6 +106,8 @@ export function DocumentPage() {
   const now = useNow();
 
   const hydratedForDocId = useRef<string | null>(null);
+
+  useEffect(() => setRetranslateTarget(null), [id]); // a picked target belongs to one document
   const serverDescription = useRef<string | null>(null);
 
   useEffect(() => {
@@ -289,7 +291,8 @@ export function DocumentPage() {
             {doc.has_text && (
               <>
                 <p className="text-xs text-zinc-500">
-                  Translated to {languageLabel(doc.translation_language)}
+                  {doc.translation_status === "done" ? "Translated to" : "Translation target:"}{" "}
+                  {languageLabel(doc.translation_language)}
                 </p>
                 <Select
                   aria-label="Translation language"
