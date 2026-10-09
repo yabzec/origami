@@ -42,7 +42,7 @@ class Document(SQLModel, table=True):
     summary_enabled: bool = True  # False: the pipeline skips the AI summary
     translation_enabled: bool = True  # False: no translate_document job is scheduled
     document_date: date = Field(default_factory=lambda: utcnow().date())
-    detected_language: str | None = None  # ISO 639-1, set by the summary step
+    detected_language: str | None = None  # ISO 639-1, set by local language detection
     translation_status: str | None = None  # TranslationStatus; None = not needed / not yet processed
     # True: stored PDF text layer produced by Tesseract; False: original file kept; None: unknown (legacy)
     ocr_applied: bool | None = None
