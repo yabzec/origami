@@ -59,15 +59,17 @@ describe("translationNote", () => {
 });
 
 describe("canRetranslate", () => {
-  const base = { status: "ready", translatable: true, translation_status: "done" } as const;
-  it("allows a ready, translatable document with no translation running", () => {
-    expect(canRetranslate(base)).toBe(true);
-    expect(canRetranslate({ ...base, translation_status: null })).toBe(true);
-    expect(canRetranslate({ ...base, translation_status: "failed" })).toBe(true);
+  const ready = { status: "ready", has_text: true, detected_language: "de", translation_status: "done" } as const;
+
+  it("allows a target other than the document language", () => {
+    expect(canRetranslate(ready, "it")).toBe(true);
   });
-  it("refuses while busy or when nothing needs translating", () => {
-    expect(canRetranslate({ ...base, translation_status: "pending" })).toBe(false);
-    expect(canRetranslate({ ...base, status: "processing" })).toBe(false);
-    expect(canRetranslate({ ...base, translatable: false })).toBe(false);
+
+  it("refuses the document's own language, missing text, pending or not ready", () => {
+    expect(canRetranslate(ready, "de")).toBe(false);
+    expect(canRetranslate({ ...ready, has_text: false }, "it")).toBe(false);
+    expect(canRetranslate({ ...ready, translation_status: "pending" }, "it")).toBe(false);
+    expect(canRetranslate({ ...ready, status: "processing" }, "it")).toBe(false);
+    expect(canRetranslate({ ...ready, detected_language: null }, "it")).toBe(false);
   });
 });

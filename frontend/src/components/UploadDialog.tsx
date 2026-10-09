@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { FolderPicker } from "@/components/FolderPicker";
 import { useUploadDocument } from "@/hooks/useDocuments";
 import { ApiError } from "@/lib/api";
-import { buildUploadForm, fileStem } from "@/lib/upload";
+import { buildUploadForm, fileStem, uploadProcessingFields } from "@/lib/upload";
 import { ProcessingOptions } from "@/components/ProcessingOptions";
 import { TagInput } from "@/components/TagInput";
 import { defaultProcessing, type ProcessingValues } from "@/lib/processing";
@@ -40,10 +40,7 @@ export function UploadDialog({
         title: title || fileStem(file.name),
         folderId,
         tagIds,
-        ocrLanguages: processing.ocrLanguages || undefined,
-        ocrEnabled: processing.ocrEnabled,
-        summaryEnabled: processing.summaryEnabled,
-        translationEnabled: processing.translationEnabled,
+        ...uploadProcessingFields(processing),
         documentDate,
       }),
       {

@@ -10,7 +10,7 @@ import { useLeaveGuard } from "@/hooks/useLeaveGuard";
 import { useLocalScanSearch } from "@/hooks/useLocalScanSearch";
 import { api, ApiError, getToken } from "@/lib/api";
 import { devicePollInterval, getClientId, initialSearch, isLocalDevice, type SearchState } from "@/lib/localScan";
-import { processingPayload, scanProcessing, type ProcessingValues } from "@/lib/processing";
+import { defaultProcessing, processingPayload, type ProcessingValues } from "@/lib/processing";
 import { applyReorder } from "@/lib/scanReorder";
 import {
   initialScanState,
@@ -61,7 +61,7 @@ export function ScanPage() {
   }, [search.phase, search.startedAt, refetchDevices]);
 
   const [reordering, setReordering] = useState(false);
-  const [processing, setProcessing] = useState<ProcessingValues>(scanProcessing);
+  const [processing, setProcessing] = useState<ProcessingValues>(defaultProcessing);
   const [fields, setFields] = useState<ScanFormFields>(emptyScanForm);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
