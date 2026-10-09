@@ -5,12 +5,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { DocFilters, FilterField, type DocFilterValues } from "@/components/DocFilters";
 import { STATUS_VARIANTS } from "@/components/DocumentCard";
 import { useFolders } from "@/hooks/useFolders";
 import { useTags } from "@/hooks/useTags";
 import { api, ApiError } from "@/lib/api";
 import { splitHighlights } from "@/lib/snippets";
-import { DOC_TYPES } from "@/lib/types";
 import type { SearchResponse } from "@/lib/types";
 
 function Snippet({ text }: { text: string }) {
@@ -33,10 +33,7 @@ export function SearchPage() {
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<"hybrid" | "semantic" | "keyword">("hybrid");
   const [folderId, setFolderId] = useState<number | null>(null);
-  const [tagId, setTagId] = useState<number | null>(null);
-  const [docType, setDocType] = useState<string | null>(null);
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [filters, setFilters] = useState<DocFilterValues>({ tagId: null, docType: null, dateFrom: null, dateTo: null });
   const { data: folders } = useFolders();
   const { data: tags } = useTags();
 
@@ -47,10 +44,10 @@ export function SearchPage() {
         mode,
         filters: {
           folder_id: folderId,
-          tag_ids: tagId !== null ? [tagId] : [],
-          doc_type: docType,
-          date_from: dateFrom || null,
-          date_to: dateTo || null,
+          tag_ids: filters.tagId !== null ? [filters.tagId] : [],
+          doc_type: filters.docType,
+          date_from: filters.dateFrom,
+          date_to: filters.dateTo,
         },
         limit: 10,
       }),
@@ -64,55 +61,41 @@ export function SearchPage() {
   return (
     <div className="p-6">
       <h2 className="mb-4 text-lg font-semibold">Search</h2>
-      <form onSubmit={onSubmit} className="mb-6 flex flex-wrap items-center gap-2">
-        <Input
-          className="max-w-md"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search your documents…"
-        />
-        <Select className="w-32" value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
-          <option value="hybrid">Hybrid</option>
-          <option value="semantic">Semantic</option>
-          <option value="keyword">Keyword</option>
-        </Select>
-        <Select
-          className="w-36"
-          value={folderId ?? ""}
-          onChange={(e) => setFolderId(e.target.value ? Number(e.target.value) : null)}
-        >
-          <option value="">All folders</option>
-          {(folders ?? []).map((f) => (
-            <option key={f.id} value={f.id}>
-              {f.name}
-            </option>
-          ))}
-        </Select>
-        <Select
-          className="w-32"
-          value={tagId ?? ""}
-          onChange={(e) => setTagId(e.target.value ? Number(e.target.value) : null)}
-        >
-          <option value="">All tags</option>
-          {(tags ?? []).map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
-          ))}
-        </Select>
-        <Select className="w-28" value={docType ?? ""} onChange={(e) => setDocType(e.target.value || null)}>
-          <option value="">All types</option>
-          {DOC_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </Select>
-        <Input type="date" aria-label="From date" className="w-40" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-        <Input type="date" aria-label="To date" className="w-40" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-        <Button type="submit" disabled={search.isPending}>
-          {search.isPending ? "Searching…" : "Search"}
-        </Button>
+      <form onSubmit={onSubmit} className="mb-6 space-y-4">
+        <div className="mx-auto flex max-w-2xl gap-2">
+          <Input
+            className="flex-1"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search your documents…"
+          />
+          <Button type="submit" disabled={search.isPending}>
+            {search.isPending ? "Searching…" : "Search"}
+          </Button>
+        </div>
+        <DocFilters value={filters} tags={tags ?? []} onChange={(patch) => setFilters({ ...filters, ...patch })}>
+          <FilterField label="Mode">
+            <Select className="w-32" value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
+              <option value="hybrid">Hybrid</option>
+              <option value="semantic">Semantic</option>
+              <option value="keyword">Keyword</option>
+            </Select>
+          </FilterField>
+          <FilterField>
+            <Select
+              className="w-36"
+              value={folderId ?? ""}
+              onChange={(e) => setFolderId(e.target.value ? Number(e.target.value) : null)}
+            >
+              <option value="">All folders</option>
+              {(folders ?? []).map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name}
+                </option>
+              ))}
+            </Select>
+          </FilterField>
+        </DocFilters>
       </form>
 
       {search.isError && (

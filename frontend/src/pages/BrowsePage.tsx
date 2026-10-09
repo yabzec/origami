@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { useSearchParams } from "react-router";
 import { BulkActionBar } from "@/components/BulkActionBar";
+import { DocFilters, FilterField } from "@/components/DocFilters";
 import { DocumentCard } from "@/components/DocumentCard";
 import { UploadDialog } from "@/components/UploadDialog";
 import { Breadcrumb, FolderTiles } from "@/components/FolderTiles";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useBulkDelete, useBulkMove, useDeleteDocument, useDocuments } from "@/hooks/useDocuments";
 import { useFolders } from "@/hooks/useFolders";
@@ -22,7 +22,6 @@ import {
 import { childrenOf } from "@/lib/folderTree";
 import { parseSort, SORT_OPTIONS } from "@/lib/sorting";
 import { shouldClearOnEscape } from "@/lib/selection";
-import { DOC_TYPES } from "@/lib/types";
 
 export function BrowsePage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -95,70 +94,10 @@ export function BrowsePage() {
           Drop to upload
         </div>
       )}
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      <div className="mb-4 flex items-center gap-3">
         <h2 className="flex-1 text-lg font-semibold">
           {params.all ? "All documents" : "Documents"}
         </h2>
-        <Select
-          className="w-52"
-          aria-label="Order by"
-          value={params.sort}
-          onChange={(e) => update({ sort: parseSort(e.target.value) })}
-        >
-          {SORT_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </Select>
-        <Select
-          className="w-40"
-          value={params.tagId ?? ""}
-          onChange={(e) =>
-            update({ tagId: e.target.value ? Number(e.target.value) : null })
-          }
-        >
-          <option value="">All tags</option>
-          {(tags ?? []).map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
-          ))}
-        </Select>
-        <Select
-          className="w-32"
-          value={params.docType ?? ""}
-          onChange={(e) => update({ docType: e.target.value || null })}
-        >
-          <option value="">All types</option>
-          {DOC_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </Select>
-        <Input
-          type="date"
-          aria-label="From date"
-          className="w-40"
-          value={params.dateFrom ?? ""}
-          onChange={(e) => update({ dateFrom: e.target.value || null })}
-        />
-        <Input
-          type="date"
-          aria-label="To date"
-          className="w-40"
-          value={params.dateTo ?? ""}
-          onChange={(e) => update({ dateTo: e.target.value || null })}
-        />
-        {(params.dateFrom || params.dateTo) && (
-          <Button
-            variant="ghost"
-            onClick={() => update({ dateFrom: null, dateTo: null })}
-          >
-            Clear dates
-          </Button>
-        )}
         <Button onClick={() => fileInput.current?.click()}>Upload</Button>
         <input
           ref={fileInput}
@@ -170,6 +109,23 @@ export function BrowsePage() {
             e.target.value = "";
           }}
         />
+      </div>
+      <div className="mb-4">
+        <DocFilters value={params} tags={tags ?? []} onChange={update}>
+          <FilterField label="Order by">
+            <Select
+              className="w-52"
+              value={params.sort}
+              onChange={(e) => update({ sort: parseSort(e.target.value) })}
+            >
+              {SORT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+          </FilterField>
+        </DocFilters>
       </div>
       {badRange && (
         <p className="mb-3 text-sm text-red-600">

@@ -12,6 +12,11 @@ export function defaultProcessing(): ProcessingValues {
   return { ocrEnabled: true, ocrLanguages: "", summaryEnabled: true, translationEnabled: true };
 }
 
+/** Scans are mostly Italian paperwork: OCR in Italian only unless the user picks otherwise. */
+export function scanProcessing(): ProcessingValues {
+  return { ...defaultProcessing(), ocrLanguages: "ita" };
+}
+
 export function processingFromDocument(doc: Document): ProcessingValues {
   return {
     ocrEnabled: doc.ocr_enabled,

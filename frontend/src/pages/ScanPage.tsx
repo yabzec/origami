@@ -8,7 +8,7 @@ import { emptyScanForm, ScanSidebar, type ScanFormFields } from "@/components/sc
 import { ScanToolbar } from "@/components/scan/ScanToolbar";
 import { useLeaveGuard } from "@/hooks/useLeaveGuard";
 import { api, ApiError, getToken } from "@/lib/api";
-import { defaultProcessing, processingPayload, type ProcessingValues } from "@/lib/processing";
+import { processingPayload, scanProcessing, type ProcessingValues } from "@/lib/processing";
 import { applyReorder } from "@/lib/scanReorder";
 import {
   initialScanState,
@@ -42,7 +42,7 @@ export function ScanPage() {
   const [reordering, setReordering] = useState(false);
   const [device, setDevice] = useState<string | null>(null);
   const chosenDevice = device ?? deviceData?.default ?? null;
-  const [processing, setProcessing] = useState<ProcessingValues>(defaultProcessing);
+  const [processing, setProcessing] = useState<ProcessingValues>(scanProcessing);
   const [fields, setFields] = useState<ScanFormFields>(emptyScanForm);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);

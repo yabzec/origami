@@ -96,7 +96,7 @@ export function FolderTree({
   const tree = buildFolderTree(folders ?? []);
 
   return (
-    <div>
+    <div className="[&_button]:cursor-pointer">
       <div className="mb-1 flex items-center justify-between px-2">
         <span className="text-xs font-semibold uppercase text-zinc-400">Folders</span>
         <button

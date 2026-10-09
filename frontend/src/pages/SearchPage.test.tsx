@@ -82,8 +82,8 @@ it("sends the date range with the search", async () => {
   });
   renderPage();
   await userEvent.type(screen.getByPlaceholderText("Search your documents…"), "bolletta");
-  fireEvent.change(screen.getByLabelText("From date"), { target: { value: "2026-01-01" } });
-  fireEvent.change(screen.getByLabelText("To date"), { target: { value: "2026-03-31" } });
+  fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-01-01" } });
+  fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-03-31" } });
   await userEvent.click(screen.getByRole("button", { name: "Search" }));
   const call = fetchMock.mock.calls.find(([url]) => url === "/api/search");
   expect(JSON.parse(call![1].body).filters).toMatchObject({ date_from: "2026-01-01", date_to: "2026-03-31" });

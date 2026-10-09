@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultProcessing, normalizeProcessing, processingFromDocument, processingPayload } from "./processing";
+import { defaultProcessing, normalizeProcessing, scanProcessing, processingFromDocument, processingPayload } from "./processing";
 import type { Document } from "./types";
 
 describe("processing", () => {
@@ -10,6 +10,10 @@ describe("processing", () => {
       summaryEnabled: true,
       translationEnabled: true,
     });
+  });
+
+  it("scans default to Italian OCR only", () => {
+    expect(scanProcessing()).toEqual({ ...defaultProcessing(), ocrLanguages: "ita" });
   });
 
   it("maps to the API payload; empty languages become null", () => {

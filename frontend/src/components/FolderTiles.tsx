@@ -20,7 +20,7 @@ export function FolderTiles({
           key={f.id}
           type="button"
           onClick={() => onOpen(f.id)}
-          className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white p-3 text-left hover:shadow"
+          className="flex cursor-pointer items-center gap-2 rounded-lg border border-zinc-200 bg-white p-3 text-left hover:shadow"
         >
           <span aria-hidden="true" className="text-xl">
             📁
@@ -47,7 +47,7 @@ export function Breadcrumb({
   onNavigate: (id: number | null) => void;
 }) {
   const path = folderPath(folders, folderId);
-  const crumb = "text-sm text-zinc-500 hover:text-zinc-900 hover:underline";
+  const crumb = "cursor-pointer text-sm text-zinc-500 hover:text-zinc-900 hover:underline";
   return (
     <nav aria-label="Breadcrumb" className="mb-3 flex flex-wrap items-center gap-1">
       {path.length === 0 ? (
