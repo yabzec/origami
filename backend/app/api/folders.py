@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
@@ -56,8 +57,15 @@ def create_folder(body: FolderCreate, session: Session = Depends(get_session)) -
 
 
 @router.get("")
-def list_folders(session: Session = Depends(get_session)) -> list[Folder]:
-    return list(session.exec(select(Folder)))
+def list_folders(session: Session = Depends(get_session)) -> list[dict]:
+    counts = dict(
+        session.exec(
+            select(Document.folder_id, func.count())
+            .where(Document.folder_id.is_not(None))
+            .group_by(Document.folder_id)
+        ).all()
+    )
+    return [{**f.model_dump(), "document_count": counts.get(f.id, 0)} for f in session.exec(select(Folder))]
 
 
 @router.patch("/{folder_id}")

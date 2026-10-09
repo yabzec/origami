@@ -88,6 +88,7 @@ def serialize(session: Session, doc: Document, active_jobs: dict[str, dict] | No
         active_jobs = active_jobs_for(session, [doc.id])
     return {
         **doc.model_dump(),
+        "translatable": bool(doc.detected_language) and doc.detected_language != get_primary_language(),
         "tags": [t.model_dump() for t in doc_tags(session, doc)],
         "active_job": active_jobs.get(str(doc.id)),
     }
@@ -112,16 +113,28 @@ SORT_ORDER = {
 
 @router.get("")
 def list_documents(
-    folder_id: int | None = None,
+    folder_id: str | None = None,
     tag_id: int | None = None,
     doc_type: str | None = None,
     status: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
     sort: DocumentSort = "date_desc",
     session: Session = Depends(get_session),
 ) -> list[dict]:
+    if date_from is not None and date_to is not None and date_from > date_to:
+        raise api_error(422, "invalid_date_range", "date_from must not be after date_to")
     query = select(Document)
-    if folder_id is not None:
-        query = query.where(Document.folder_id == folder_id)
+    if folder_id == "root":
+        query = query.where(Document.folder_id.is_(None))
+    elif folder_id is not None:
+        if not folder_id.isdigit():
+            raise api_error(422, "validation_error", "folder_id must be an integer or 'root'")
+        query = query.where(Document.folder_id == int(folder_id))
+    if date_from is not None:
+        query = query.where(Document.document_date >= date_from)
+    if date_to is not None:
+        query = query.where(Document.document_date <= date_to)
     if doc_type is not None:
         query = query.where(Document.doc_type == doc_type)
     if status is not None:
