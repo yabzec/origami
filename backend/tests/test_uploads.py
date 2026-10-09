@@ -147,3 +147,20 @@ def test_upload_write_failure_leaves_no_document(auth_client, session, storage, 
     assert "storage_error" in resp.text
     session.expire_all()
     assert session.exec(select(Document)).all() == []
+
+
+def test_upload_translation_language(auth_client, storage):
+    ok = auth_client.post(
+        "/api/documents/upload",
+        files={"file": ("a.txt", b"hello", "text/plain")},
+        data={"translation_language": "en"},
+    )
+    assert ok.json()["translation_language"] == "en"
+    default = auth_client.post("/api/documents/upload", files={"file": ("b.txt", b"x", "text/plain")})
+    assert default.json()["translation_language"] == "it"
+    bad = auth_client.post(
+        "/api/documents/upload",
+        files={"file": ("c.txt", b"x", "text/plain")},
+        data={"translation_language": "xx"},
+    )
+    assert bad.status_code == 422

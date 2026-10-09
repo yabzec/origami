@@ -9,8 +9,7 @@ from sqlmodel import Session, select
 
 from app.api.deps import api_error, get_current_user
 from app.api.storage_errors import storage_errors
-from app.api.ocr import check_ocr_languages
-from app.config import get_primary_language
+from app.api.ocr import check_ocr_languages, check_translation_language
 from app.db import get_session
 from app.models import (
     Chunk,
@@ -108,12 +107,14 @@ def serialize(
 ) -> dict:
     if active_jobs is None:
         active_jobs = active_jobs_for(session, [doc.id])
-    language_differs = bool(doc.detected_language) and doc.detected_language != get_primary_language()
-    if language_differs and with_content is None:
+    if with_content is None:
         with_content = docs_with_content(session, [doc.id])
+    has_text = doc.id in with_content
+    language_differs = bool(doc.detected_language) and doc.detected_language != doc.translation_language
     return {
         **doc.model_dump(),
-        "translatable": language_differs and doc.id in with_content,
+        "has_text": has_text,
+        "translatable": language_differs and has_text,
         "tags": [t.model_dump() for t in doc_tags(session, doc)],
         "active_job": active_jobs.get(str(doc.id)),
     }
@@ -259,7 +260,7 @@ def document_text(
         "variant": variant,
         "detected_language": doc.detected_language,
         "translation_status": doc.translation_status,
-        "translation_language": get_primary_language(),
+        "translation_language": doc.translation_language,
         "chunks": [
             {"chunk_index": c.chunk_index, "page_number": c.page_number, "content": c.content}
             for c in chunks
@@ -325,6 +326,7 @@ class ReprocessRequest(BaseModel):
     ocr_enabled: bool = True
     summary_enabled: bool = True
     translation_enabled: bool = True
+    translation_language: str | None = None
 
 
 @router.post("/{document_id}/reprocess")
@@ -337,6 +339,7 @@ def reprocess_document(
     doc = get_doc_or_404(session, document_id)
     if body.ocr_enabled:
         check_ocr_languages(body.ocr_languages)
+    check_translation_language(body.translation_language)
     if doc.status in (DocStatus.pending, DocStatus.processing):
         raise api_error(409, "document_busy", "Document is still being processed")
     if doc.doc_type == DocType.video:
@@ -368,6 +371,8 @@ def reprocess_document(
     doc.ocr_enabled = body.ocr_enabled
     doc.summary_enabled = body.summary_enabled
     doc.translation_enabled = body.translation_enabled
+    if body.translation_language:
+        doc.translation_language = body.translation_language
     if doc.summary and doc.description == doc.summary:
         doc.description = ""  # still the AI text: the new summary refills it; edited text is kept
     doc.summary = None
@@ -383,16 +388,27 @@ def reprocess_document(
     return serialize(session, doc)
 
 
+class RetranslateRequest(BaseModel):
+    translation_language: str | None = None
+
+
 @router.post("/{document_id}/retranslate")
-def retranslate_document(document_id: uuid.UUID, session: Session = Depends(get_session)) -> dict:
+def retranslate_document(
+    document_id: uuid.UUID,
+    body: RetranslateRequest | None = None,
+    session: Session = Depends(get_session),
+) -> dict:
     doc = get_doc_or_404(session, document_id)
+    target = body.translation_language if body and body.translation_language else None
+    check_translation_language(target)
     session.refresh(doc, with_for_update=True)  # same lock as reprocess and translate_document
+    target = target or doc.translation_language
     if doc.status != DocStatus.ready:
         raise api_error(409, "document_busy", "Document is not ready (still processing or failed)")
     if doc.translation_status == TranslationStatus.pending:
         raise api_error(409, "translation_busy", "A translation is already in progress")
-    if not doc.detected_language or doc.detected_language == get_primary_language():
-        raise api_error(409, "nothing_to_translate", "The document is already in the primary language")
+    if not doc.detected_language or doc.detected_language == target:
+        raise api_error(409, "nothing_to_translate", "The document is already in the target language")
     if not docs_with_content(session, [doc.id]):
         raise api_error(409, "nothing_to_translate", "The document has no extracted text to translate")
     _cancel_queued_jobs(session, doc)
@@ -401,6 +417,7 @@ def retranslate_document(document_id: uuid.UUID, session: Session = Depends(get_
     ):
         session.delete(chunk)
     delete_translation_segments(session, doc.id)
+    doc.translation_language = target
     doc.translation_enabled = True
     doc.translation_status = TranslationStatus.pending
     doc.updated_at = datetime.now(timezone.utc)

@@ -664,3 +664,25 @@ def test_image_ocr_companion_goes_to_derived(session, pipeline_storage, llm_stub
     run(session, doc)
     assert pipeline_storage.derived_abs(companion_name(doc.id)).exists()
     assert sorted(p.name for p in pipeline_storage.root.iterdir()) == ["Foto.png"]
+
+
+def test_translation_uses_document_target(session, pipeline_storage, llm_stub):
+    llm_stub["language"] = "it"
+    doc = make_doc(session, doc_type=DocType.text, title="Nota", translation_language="en")
+    pipeline_storage.write_file("Nota.md", "Testo italiano da tradurre.".encode())
+    doc.file_path = "Nota.md"
+    session.commit()
+    run(session, doc)
+    job = session.exec(select(Job).where(Job.type == "translate_document")).one()
+    pipeline.translate_document(session, job.payload)
+    assert {target for _, target in llm_stub["translate"]} == {"en"}
+
+
+def test_no_translation_when_detected_equals_target(session, pipeline_storage, llm_stub):
+    llm_stub["language"] = "de"
+    doc = make_doc(session, doc_type=DocType.text, title="Notiz", translation_language="de")
+    pipeline_storage.write_file("Notiz.md", "Deutscher Text.".encode())
+    doc.file_path = "Notiz.md"
+    session.commit()
+    run(session, doc)
+    assert session.exec(select(Job).where(Job.type == "translate_document")).first() is None

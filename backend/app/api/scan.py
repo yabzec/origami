@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 from app.api.agent import CLIENT_ID_RE
 from app.api.deps import api_error, get_current_user
 from app.api.documents import serialize
-from app.api.ocr import check_ocr_languages, default_ocr_languages
+from app.api.ocr import check_ocr_languages, check_translation_language, default_ocr_languages
 from app.api.uploads import create_pending_document
 from app.db import get_session
 from app.models import User, DocType, ScanPage, ScanSession, ScanSessionStatus
@@ -51,6 +51,7 @@ class CompileRequest(BaseModel):
     document_date: date | None = None
     ocr_languages: str | None = None
     ocr_enabled: bool | None = None
+    translation_language: str | None = None
     summary_enabled: bool = True
     translation_enabled: bool = True
 
@@ -236,6 +237,7 @@ def compile_session(
     ocr_enabled = scan_session.ocr_enabled if body.ocr_enabled is None else body.ocr_enabled
     if ocr_enabled:
         check_ocr_languages(body.ocr_languages)
+    check_translation_language(body.translation_language)
     if scan_session.status != ScanSessionStatus.active:
         raise api_error(409, "session_not_active", "Scan session is not active")
     if not session_pages(db, session_id):
@@ -251,6 +253,7 @@ def compile_session(
         ocr_enabled=ocr_enabled,
         summary_enabled=body.summary_enabled,
         translation_enabled=body.translation_enabled,
+        translation_language=body.translation_language,
         folder_id=body.folder_id,
         tag_ids=body.tag_ids,
         original_filename=None,

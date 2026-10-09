@@ -15,6 +15,7 @@ from typing import Callable
 import litellm
 
 from app.config import get_primary_language, get_settings
+from app.services.ocr_language_names import iso_language_name
 
 LANGUAGE_NAMES = {"it": "Italian", "en": "English", "de": "German", "fr": "French", "es": "Spanish"}
 
@@ -22,7 +23,7 @@ log = logging.getLogger("origami.llm")
 
 
 def language_name(code: str) -> str:
-    return LANGUAGE_NAMES.get(code, code)
+    return LANGUAGE_NAMES.get(code) or iso_language_name(code)
 
 
 def _describe_prompt(target_language: str) -> str:

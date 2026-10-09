@@ -7,7 +7,12 @@ from sqlmodel import Session
 from app.api.deps import api_error, get_current_user
 from app.api.documents import serialize
 from app.api.storage_errors import storage_errors
-from app.api.ocr import check_ocr_languages, default_ocr_languages
+from app.api.ocr import (
+    check_ocr_languages,
+    check_translation_language,
+    default_ocr_languages,
+    default_translation_language,
+)
 from app.db import get_session
 from app.models import DocType, Document, DocumentTag, Folder, Tag
 from app.services.jobs import enqueue
@@ -49,6 +54,7 @@ def create_pending_document(
     ocr_enabled: bool = True,
     summary_enabled: bool = True,
     translation_enabled: bool = True,
+    translation_language: str | None = None,
     folder_id: int | None,
     tag_ids: list[int],
     original_filename: str | None,
@@ -66,6 +72,7 @@ def create_pending_document(
         description=description,
         doc_type=doc_type,
         ocr_languages=ocr_languages,
+        translation_language=translation_language or default_translation_language(),
         ocr_enabled=ocr_enabled,
         summary_enabled=summary_enabled,
         translation_enabled=translation_enabled,
@@ -102,12 +109,14 @@ def upload_document(
     ocr_enabled: bool = Form(default=True),
     summary_enabled: bool = Form(default=True),
     translation_enabled: bool = Form(default=True),
+    translation_language: str | None = Form(default=None),
     document_date: date | None = Form(default=None),
     session: Session = Depends(get_session),
     storage: Storage = Depends(get_storage),
 ) -> dict:
     if ocr_enabled:
         check_ocr_languages(ocr_languages)
+    check_translation_language(translation_language)
     ext = Path(file.filename or "").suffix.lower()
     doc_type = EXTENSION_MAP.get(ext)
     if doc_type is None:
@@ -121,6 +130,7 @@ def upload_document(
         ocr_enabled=ocr_enabled,
         summary_enabled=summary_enabled,
         translation_enabled=translation_enabled,
+        translation_language=translation_language,
         folder_id=folder_id,
         tag_ids=parse_tag_ids(tag_ids),
         original_filename=file.filename,

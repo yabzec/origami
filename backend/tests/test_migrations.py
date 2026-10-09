@@ -117,3 +117,26 @@ def test_retry_migration_raises_max_attempts_of_open_jobs_only(engine):
         command.upgrade(cfg, "head")
         with engine.begin() as conn:
             conn.execute(text("DELETE FROM jobs WHERE type LIKE 'mig_%'"))
+
+
+def test_translation_language_backfilled(engine):
+    cfg = _cfg()
+    command.downgrade(cfg, "a6c3e8f15d29")
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "INSERT INTO documents (id, title, description, doc_type, ocr_languages, ocr_enabled, "
+                "summary_enabled, translation_enabled, document_date, status, created_at, updated_at) "
+                "VALUES (gen_random_uuid(), 'Backfill', '', 'pdf', 'ita', true, true, true, "
+                "'2026-01-01', 'ready', now(), now())"
+            ))
+        command.upgrade(cfg, "head")
+        with engine.begin() as conn:
+            value = conn.execute(
+                text("SELECT translation_language FROM documents WHERE title = 'Backfill'")
+            ).scalar_one()
+        assert value == "it"
+    finally:
+        command.upgrade(cfg, "head")
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM documents WHERE title = 'Backfill'"))

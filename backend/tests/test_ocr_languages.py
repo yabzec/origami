@@ -65,7 +65,12 @@ def test_languages_endpoint_default_falls_back_to_first_installed(auth_client, i
 
 def test_languages_endpoint_nothing_installed(auth_client, installed):
     installed([])
-    assert auth_client.get("/api/ocr/languages").json() == {"languages": [], "default": ""}
+    assert auth_client.get("/api/ocr/languages").json() == {
+        "languages": [],
+        "default": "",
+        "translation_languages": [],
+        "translation_default": "it",
+    }
 
 
 def _assert_unknown(resp, code="xyz"):
@@ -148,3 +153,36 @@ def test_upload_and_scan_fallback_default_uses_installed_languages(
     assert resp.status_code == 201
     assert session.get(Document, resp.json()["id"]).ocr_languages == "eng"
     assert scan.json()["ocr_languages"] == "eng"
+
+
+def test_translation_languages_map_and_dedupe(installed):
+    from app.api.ocr import translation_languages
+
+    installed(["eng", "ita", "chi_sim", "chi_tra", "lat", "zzz"])
+    assert translation_languages() == ["zh", "en", "it", "la"]  # sorted by name: Chinese, English, Italian, Latin
+
+
+def test_translation_default_falls_back(installed, monkeypatch):
+    from app.api.ocr import default_translation_language
+    from app.config import get_settings
+
+    installed(["eng", "deu"])
+    monkeypatch.setenv("DEFAULT_TRANSLATION_LANGUAGE", "fr")
+    get_settings.cache_clear()
+    try:
+        assert default_translation_language() == "en"  # first by name: English, German
+        monkeypatch.setenv("DEFAULT_TRANSLATION_LANGUAGE", "en")
+        get_settings.cache_clear()
+        assert default_translation_language() == "en"
+    finally:
+        get_settings.cache_clear()
+
+
+def test_languages_endpoint_lists_translation_targets(auth_client, installed):
+    installed(["eng", "ita"])
+    body = auth_client.get("/api/ocr/languages").json()
+    assert body["translation_languages"] == [
+        {"code": "en", "name": "English"},
+        {"code": "it", "name": "Italian"},
+    ]
+    assert body["translation_default"] == "it"

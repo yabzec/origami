@@ -7,7 +7,7 @@ from sqlalchemy import delete, func, update
 from sqlalchemy.orm.exc import StaleDataError
 from sqlmodel import Session, select
 
-from app.config import get_primary_language, get_settings
+from app.config import get_settings
 from app.models import Chunk, ChunkSource, DocStatus, DocType, Document, Job, TranslationSegment, TranslationStatus
 from app.services.chunking import chunk_pages, page_texts_from_chunks, segment_pages
 from app.services.convert import OFFICE_EXTENSIONS, ConversionError, office_to_pdf
@@ -279,7 +279,7 @@ def _ensure_summary(session: Session, doc: Document, storage: Storage) -> None:
 def _needs_translation(session: Session, doc: Document) -> bool:
     if not doc.translation_enabled:
         return False
-    if not doc.detected_language or doc.detected_language == get_primary_language():
+    if not doc.detected_language or doc.detected_language == doc.translation_language:
         return False
     if doc.translation_status == TranslationStatus.done and _has_chunks(
         session, doc, ChunkSource.translation
@@ -327,7 +327,7 @@ def _translate_segments(
     session: Session, doc: Document, content_chunks: list[Chunk]
 ) -> list[tuple[int | None, str]]:
     """Translate page segments, committing each one so a retry resumes where this run stopped."""
-    target = get_primary_language()
+    target = doc.translation_language
     pages = page_texts_from_chunks([(c.page_number, c.content) for c in content_chunks])
     stored = {
         s.segment_index: s
@@ -426,7 +426,7 @@ def translate_document(session: Session, payload: dict) -> None:
     if doc is None:
         log.info("translate_document: document %s no longer exists", payload["document_id"])
         return
-    if not doc.detected_language or doc.detected_language == get_primary_language():
+    if not doc.detected_language or doc.detected_language == doc.translation_language:
         # nothing to translate (e.g. the document was re-processed since queueing)
         if doc.translation_status == TranslationStatus.pending:
             _finish_translation(session, doc, None)  # stop the UI polling "pending"

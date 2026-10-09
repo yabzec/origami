@@ -103,3 +103,34 @@ def test_translate_job_without_content_chunks_clears_pending(session, llm_stub):
     session.refresh(doc)
     assert doc.translation_status is None
     assert llm_stub["translate"] == []
+
+
+def test_retranslate_to_other_target(auth_client, session):
+    from tests.helpers import seed_document
+
+    doc = seed_document(
+        session, "Brief", [{"content": "Ein Brief."}],
+        detected_language="de", translation_language="it", translation_status="done",
+    )
+    resp = auth_client.post(f"/api/documents/{doc.id}/retranslate", json={"translation_language": "en"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["translation_language"] == "en"
+    assert resp.json()["translation_status"] == "pending"
+
+
+def test_retranslate_to_own_language_is_409(auth_client, session):
+    from tests.helpers import seed_document
+
+    doc = seed_document(session, "Brief", [{"content": "Ein Brief."}], detected_language="de")
+    resp = auth_client.post(f"/api/documents/{doc.id}/retranslate", json={"translation_language": "de"})
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "nothing_to_translate"
+
+
+def test_retranslate_unknown_target_is_422(auth_client, session):
+    from tests.helpers import seed_document
+
+    doc = seed_document(session, "Brief", [{"content": "Ein Brief."}], detected_language="de")
+    resp = auth_client.post(f"/api/documents/{doc.id}/retranslate", json={"translation_language": "xx"})
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "unknown_translation_language"
