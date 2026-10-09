@@ -8,9 +8,9 @@ import type { Folder } from "@/lib/types";
 import { FolderPicker } from "./FolderPicker";
 
 const FOLDERS: Folder[] = [
-  { id: 1, name: "Bollette", parent_id: null, created_at: "2026-01-01" },
-  { id: 2, name: "2026", parent_id: 1, created_at: "2026-01-01" },
-  { id: 3, name: "Assicurazioni", parent_id: null, created_at: "2026-01-01" },
+  { id: 1, name: "Bollette", parent_id: null, created_at: "2026-01-01", document_count: 0 },
+  { id: 2, name: "2026", parent_id: 1, created_at: "2026-01-01", document_count: 0 },
+  { id: 3, name: "Assicurazioni", parent_id: null, created_at: "2026-01-01", document_count: 0 },
 ];
 
 const fetchMock = vi.fn();
@@ -42,17 +42,24 @@ function renderPicker(initial: number | null = null, onDialogClose = vi.fn()) {
   return { trigger: screen.getByLabelText("Folder"), onDialogClose };
 }
 
-it("drills down and selects the folder at every click", async () => {
+it("drills into folders with children and closes on a folder without children", async () => {
   const { trigger } = renderPicker();
   expect(trigger).toHaveTextContent("(root)");
   await userEvent.click(trigger);
   await userEvent.click(await screen.findByRole("button", { name: "Bollette" }));
   expect(trigger).toHaveTextContent("Bollette");
+  expect(screen.getByRole("dialog", { name: "Choose folder" })).toBeInTheDocument(); // has children: stays open
   await userEvent.click(screen.getByRole("button", { name: "2026" }));
   expect(trigger).toHaveTextContent("Bollette / 2026");
-  expect(screen.getByText("No subfolders")).toBeInTheDocument();
+  expect(screen.queryByRole("dialog", { name: "Choose folder" })).not.toBeInTheDocument(); // leaf: closed
+});
+
+it("Back and Done still work while browsing", async () => {
+  const { trigger } = renderPicker();
+  await userEvent.click(trigger);
+  await userEvent.click(await screen.findByRole("button", { name: "Bollette" }));
   await userEvent.click(screen.getByRole("button", { name: /back/i }));
-  expect(screen.getByRole("button", { name: "2026" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Assicurazioni" })).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Done" }));
   expect(screen.queryByRole("dialog", { name: "Choose folder" })).not.toBeInTheDocument();
 });

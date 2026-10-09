@@ -7,6 +7,7 @@ const folder = (id: number, name: string, parent_id: number | null = null): Fold
   name,
   parent_id,
   created_at: "2026-01-01",
+  document_count: 0,
 });
 
 describe("buildFolderTree", () => {

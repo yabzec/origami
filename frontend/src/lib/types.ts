@@ -9,6 +9,7 @@ export interface Folder {
   name: string;
   parent_id: number | null;
   created_at: string;
+  document_count: number;
 }
 
 export type DocType = "scan" | "pdf" | "text" | "image" | "video";
@@ -34,6 +35,9 @@ export interface Document {
   doc_type: DocType;
   ocr_languages: string;
   ocr_enabled: boolean;
+  summary_enabled: boolean;
+  translation_enabled: boolean;
+  translatable: boolean;
   document_date: string;
   detected_language: string | null;
   translation_status: TranslationStatus | null;
@@ -113,3 +117,19 @@ export type ChatEvent =
   | { type: "delta"; text: string }
   | { type: "done" }
   | { type: "error"; code: string; message: string };
+
+export interface OcrLanguage {
+  code: string;
+  name: string;
+}
+
+export interface OcrLanguagesResponse {
+  languages: OcrLanguage[];
+  default: string;
+}
+
+export interface BulkResult {
+  moved?: number;
+  deleted?: number;
+  missing: string[];
+}

@@ -100,7 +100,8 @@ export function FolderPicker({
                   type="button"
                   onClick={() => {
                     onChange(f.id);
-                    setLevel(f.id);
+                    if (childrenOf(folders, f.id).length > 0) setLevel(f.id);
+                    else setOpen(false); // nothing below: the choice is final
                   }}
                   className={cn(itemClass, value === f.id && "bg-zinc-100 font-medium")}
                 >
