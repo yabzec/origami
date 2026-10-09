@@ -26,17 +26,32 @@ def test_fake_backend_scripted_error():
         backend.scan(dpi=300, mode="Color")
 
 
-def test_scan_locked_rejects_concurrent_use():
+def test_scan_locked_rejects_concurrent_use_of_same_device():
     backend = FakeScannerBackend()
-    acquired = scanner._scan_lock.acquire()
-    assert acquired
+    lock = scanner.device_lock("fake:0")
+    assert lock.acquire()
     try:
         with pytest.raises(ScannerBusy):
-            scan_locked(backend)
+            scan_locked(backend, device="fake:0")
     finally:
-        scanner._scan_lock.release()
-    # once released, scanning works again
-    assert scan_locked(backend).startswith(b"\x89PNG")
+        lock.release()
+    assert scan_locked(backend, device="fake:0").startswith(b"\x89PNG")
+
+
+def test_scan_locked_allows_other_device_while_one_is_busy():
+    backend = FakeScannerBackend()
+    lock = scanner.device_lock("fake:0")
+    assert lock.acquire()
+    try:
+        assert scan_locked(backend, device="agent:abcdefgh:uuid-1").startswith(b"\x89PNG")
+        assert scanner.device_busy("fake:0")
+        assert not scanner.device_busy("agent:abcdefgh:uuid-1")
+    finally:
+        lock.release()
+
+
+def test_default_device_shares_one_lock():
+    assert scanner.device_lock(None) is scanner.device_lock("")
 
 
 def test_scanimage_stderr_mapping():

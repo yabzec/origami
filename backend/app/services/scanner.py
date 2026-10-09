@@ -169,27 +169,41 @@ class FakeScannerBackend:
         return list(self._devices)
 
 
-_scan_lock = threading.Lock()
+_locks: dict[str, threading.Lock] = {}
+_locks_guard = threading.Lock()
+
+
+def device_lock(device: str | None) -> threading.Lock:
+    """One lock per device id; None and "" both mean the server's default scanner."""
+    key = device or ""
+    with _locks_guard:
+        return _locks.setdefault(key, threading.Lock())
+
+
+def device_busy(device: str | None) -> bool:
+    return device_lock(device).locked()
 
 
 def scan_locked(
     backend: ScannerBackend, dpi: int = 300, mode: str = "Color", device: str | None = None
 ) -> bytes:
-    if not _scan_lock.acquire(blocking=False):
+    lock = device_lock(device)
+    if not lock.acquire(blocking=False):
         raise ScannerBusy("Another scan is in progress")
     try:
         return backend.scan(dpi=dpi, mode=mode, device=device)
     finally:
-        _scan_lock.release()
+        lock.release()
 
 
 def preview_locked(backend: ScannerBackend, device: str | None = None) -> bytes:
-    if not _scan_lock.acquire(blocking=False):
+    lock = device_lock(device)
+    if not lock.acquire(blocking=False):
         raise ScannerBusy("Another scan is in progress")
     try:
         return backend.preview(device=device)
     finally:
-        _scan_lock.release()
+        lock.release()
 
 
 _default_backend: ScannerBackend = ScanimageBackend()

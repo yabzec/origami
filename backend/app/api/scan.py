@@ -12,8 +12,7 @@ from app.api.uploads import create_pending_document
 from app.db import get_session
 from app.models import DocType, ScanPage, ScanSession, ScanSessionStatus
 from app.services.jobs import enqueue
-from app.services.scanner import ScannerBackend, get_scanner, preview_locked, scan_locked
-from app.services import scanner as scanner_module
+from app.services.scanner import ScannerBackend, device_busy, get_scanner, preview_locked, scan_locked
 from app.services.storage import Storage, get_storage
 
 router = APIRouter(
@@ -71,11 +70,10 @@ def session_pages(db: Session, session_id: int) -> list[ScanPage]:
 
 
 @router.get("/status")
-def scan_status(backend: ScannerBackend = Depends(get_scanner)) -> dict:
-    return {
-        "available": backend.available(),
-        "busy": scanner_module._scan_lock.locked(),
-    }
+def scan_status(
+    device: str | None = None, backend: ScannerBackend = Depends(get_scanner)
+) -> dict:
+    return {"available": backend.available(), "busy": device_busy(device)}
 
 
 @router.get("/devices")
