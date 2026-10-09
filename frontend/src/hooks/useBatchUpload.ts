@@ -8,7 +8,7 @@ const deps: BatchDeps = {
     api
       .post<{ folder_id: number | null }>("/api/folders/ensure-path", { parent_id: parentId, segments })
       .then((r) => r.folder_id),
-  upload: (form, onProgress) => api.upload("/api/documents/upload", form, onProgress),
+  upload: (form, onProgress, signal) => api.upload("/api/documents/upload", form, onProgress, signal),
 };
 
 export function useBatchUpload() {
