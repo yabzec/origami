@@ -56,7 +56,7 @@ def test_page_texts_roundtrip_hard_split_paragraph():
 
 def test_page_texts_roundtrip_overlap_starting_with_space():
     # the overlap tail of a chunk can begin with whitespace, which chunk_pages strips
-    page = "\n\n".join("a" * 74 + " " + "b" * 20 for _ in range(6))
+    page = "\n\n".join("a" * 75 + " " + "b" * 19 for _ in range(6))
     assert _roundtrip([(1, page)]) == [(1, page)]
 
 
