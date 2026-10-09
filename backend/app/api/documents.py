@@ -26,7 +26,7 @@ from app.models import (
     TranslationStatus,
 )
 from app.services.storage import Storage, get_storage
-from app.services.tree_sync import disk_transaction, lock_documents, relocate_document
+from app.services.tree_sync import disk_transaction, lock_documents, lock_tree, relocate_document
 from app.worker.pipeline import delete_translation_segments
 
 router = APIRouter(
@@ -188,12 +188,6 @@ class BulkMove(BulkIds):
     folder_id: int | None
 
 
-def _found_and_missing(session: Session, ids: list[uuid.UUID]) -> tuple[list[Document], list[str]]:
-    docs = list(session.exec(select(Document).where(Document.id.in_(ids))))
-    found = {d.id for d in docs}
-    return docs, [str(i) for i in ids if i not in found]
-
-
 def _delete_documents(session: Session, docs: list[Document]) -> list[tuple]:
     """Cancel queued jobs and delete rows (no commit); returns the files to remove after commit."""
     files: list[tuple] = []
@@ -214,6 +208,7 @@ def bulk_move(
         raise api_error(404, "not_found", "Folder not found")
     now = datetime.now(timezone.utc)
     with storage_errors(), disk_transaction(session, storage) as moves:
+        lock_tree(session)  # before the row locks: same order as write_document_file
         docs = lock_documents(session, body.ids)
         found = {d.id for d in docs}
         for doc in sorted(docs, key=lambda d: (d.created_at, str(d.id))):
@@ -229,7 +224,9 @@ def bulk_delete(
     session: Session = Depends(get_session),
     storage: Storage = Depends(get_storage),
 ) -> dict:
-    docs, missing = _found_and_missing(session, body.ids)
+    docs = lock_documents(session, body.ids)  # file paths as of the lock, not a stale read
+    found = {d.id for d in docs}
+    missing = [str(i) for i in body.ids if i not in found]
     files = _delete_documents(session, docs)
     session.commit()
     for file_rel, preview, doc_id in files:
@@ -287,6 +284,8 @@ def update_document(
             raise api_error(404, "not_found", "Folder not found")
 
     with storage_errors(), disk_transaction(session, storage) as moves:
+        if "title" in fields or "folder_id" in fields:
+            lock_tree(session)  # before the row lock: same order as write_document_file
         [doc] = lock_documents(session, [document_id])
         for key, value in fields.items():
             setattr(doc, key, value)
@@ -314,8 +313,9 @@ def delete_document(
     session: Session = Depends(get_session),
     storage: Storage = Depends(get_storage),
 ) -> None:
-    doc = get_doc_or_404(session, document_id)
-    files = _delete_documents(session, [doc])
+    get_doc_or_404(session, document_id)
+    docs = lock_documents(session, [document_id])  # file path as of the lock, not a stale read
+    files = _delete_documents(session, docs)
     session.commit()
     for file_rel, preview, doc_id in files:
         storage.delete_document_files(file_rel, preview, doc_id)

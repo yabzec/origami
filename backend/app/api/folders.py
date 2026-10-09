@@ -10,7 +10,7 @@ from app.api.storage_errors import storage_errors
 from app.models import Document, Folder
 from app.services.storage import Storage, get_storage
 from app.services.tree_paths import folder_rel_dir
-from app.services.tree_sync import disk_name_taken, disk_transaction
+from app.services.tree_sync import disk_name_taken, disk_transaction, lock_tree
 
 router = APIRouter(
     prefix="/api/folders", tags=["folders"], dependencies=[Depends(get_current_user)]
@@ -56,12 +56,14 @@ def create_folder(
     session: Session = Depends(get_session),
     storage: Storage = Depends(get_storage),
 ) -> Folder:
-    if body.parent_id is not None:
-        get_folder_or_404(session, body.parent_id)
-    if disk_name_taken(session, body.parent_id, body.name):
-        raise api_error(409, "duplicate_folder", "Sibling folder with same name exists")
     folder = Folder(name=body.name, parent_id=body.parent_id)
     with storage_errors(), disk_transaction(session, storage):
+        lock_tree(session)
+        session.expire_all()  # read the tree as of the lock
+        if body.parent_id is not None:
+            get_folder_or_404(session, body.parent_id)
+        if disk_name_taken(session, body.parent_id, body.name):
+            raise api_error(409, "duplicate_folder", "Sibling folder with same name exists")
         session.add(folder)
         try:
             session.flush()
@@ -91,18 +93,20 @@ def update_folder(
     session: Session = Depends(get_session),
     storage: Storage = Depends(get_storage),
 ) -> Folder:
-    folder = get_folder_or_404(session, folder_id)
     fields = body.model_dump(exclude_unset=True)
-    if "parent_id" in fields and fields["parent_id"] is not None:
-        get_folder_or_404(session, fields["parent_id"])
-        if is_descendant(session, fields["parent_id"], folder_id):
-            raise api_error(409, "folder_cycle", "Cannot move a folder under itself")
-    new_parent = fields.get("parent_id", folder.parent_id)
-    new_name = fields.get("name", folder.name)
-    if disk_name_taken(session, new_parent, new_name, exclude_id=folder_id):
-        raise api_error(409, "duplicate_folder", "Sibling folder with same name exists")
-    old_dir = folder_rel_dir(session, folder_id)
     with storage_errors(), disk_transaction(session, storage) as moves:
+        lock_tree(session)
+        session.expire_all()  # read the tree as of the lock
+        folder = get_folder_or_404(session, folder_id)
+        if "parent_id" in fields and fields["parent_id"] is not None:
+            get_folder_or_404(session, fields["parent_id"])
+            if is_descendant(session, fields["parent_id"], folder_id):
+                raise api_error(409, "folder_cycle", "Cannot move a folder under itself")
+        new_parent = fields.get("parent_id", folder.parent_id)
+        new_name = fields.get("name", folder.name)
+        if disk_name_taken(session, new_parent, new_name, exclude_id=folder_id):
+            raise api_error(409, "duplicate_folder", "Sibling folder with same name exists")
+        old_dir = folder_rel_dir(session, folder_id)
         for key, value in fields.items():
             setattr(folder, key, value)
         try:
@@ -130,6 +134,8 @@ def delete_folder(
     session: Session = Depends(get_session),
     storage: Storage = Depends(get_storage),
 ) -> None:
+    lock_tree(session)
+    session.expire_all()  # read the tree as of the lock
     folder = get_folder_or_404(session, folder_id)
     has_children = session.exec(
         select(Folder).where(Folder.parent_id == folder_id)
@@ -146,6 +152,8 @@ def delete_folder(
 
 
 def _child_folder_id(session: Session, storage: Storage, parent_id: int | None, name: str) -> int:
+    lock_tree(session)  # held until the commit below (or the end of the request)
+    session.expire_all()  # read the tree as of the lock
     same_parent = Folder.parent_id.is_(None) if parent_id is None else Folder.parent_id == parent_id
     existing = session.exec(select(Folder).where(same_parent, Folder.name == name)).first()
     if existing is not None:

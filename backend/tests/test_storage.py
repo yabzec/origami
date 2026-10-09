@@ -160,3 +160,36 @@ def test_old_layout_detection(tmp_path):
     assert storage.has_old_layout() is True
     with pytest.raises(OldStorageLayout, match="migrate-storage"):
         require_new_layout(storage)
+
+
+def test_write_uses_a_unique_part_name(tmp_path, monkeypatch):
+    storage = make_storage(tmp_path)
+    seen = []
+    real_replace = os.replace
+
+    def spy(src, dst):
+        seen.append(os.path.basename(src))
+        return real_replace(src, dst)
+
+    monkeypatch.setattr("app.services.storage.os.replace", spy)
+    storage.write_file("x.pdf", b"1")
+    storage.write_file("x.pdf", b"2")
+    assert len(set(seen)) == 2
+    assert all(n.startswith("x.pdf.") and n.endswith(".part") for n in seen)
+
+
+def test_remove_part_files_skips_vanished_file(tmp_path, monkeypatch):
+    storage = make_storage(tmp_path)
+    part = storage.abs_path("gone.pdf.part")
+    storage.make_dir("")
+    part.write_bytes(b"")
+    past = time.time() - 7200
+    os.utime(part, (past, past))
+    real_unlink = type(part).unlink
+
+    def racing_unlink(self, missing_ok=False):
+        real_unlink(self)  # another sweep removed it first
+        raise FileNotFoundError(str(self))
+
+    monkeypatch.setattr(type(part), "unlink", racing_unlink)
+    assert storage.remove_part_files(3600) == []

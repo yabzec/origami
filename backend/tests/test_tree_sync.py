@@ -135,3 +135,120 @@ def test_write_document_file_commit_failure_keeps_file_on_overwrite(session, sto
         write_document_file(session, store, doc, ".pdf", b"new!")
     monkeypatch.undo()
     assert store.abs_path("Invoice.pdf").exists()
+
+
+def _blocked_while_tree_locked(engine, work):
+    """Run `work(session)` in a thread while another session holds the tree lock.
+
+    Returns (finished_while_locked, error)."""
+    import threading
+
+    from sqlmodel import Session
+
+    from app.services.tree_sync import lock_tree
+
+    errors = []
+
+    def run():
+        with Session(engine) as other:
+            try:
+                work(other)
+            except BaseException as exc:  # surfaced by the test
+                errors.append(exc)
+
+    with Session(engine) as holder:
+        lock_tree(holder)
+        thread = threading.Thread(target=run)
+        thread.start()
+        thread.join(0.7)
+        finished_while_locked = not thread.is_alive()
+        holder.commit()  # releases the advisory lock
+    thread.join(10)
+    assert not thread.is_alive()
+    return finished_while_locked, errors[0] if errors else None
+
+
+def test_write_document_file_waits_for_tree_lock_and_same_titles_stay_distinct(session, engine, store):
+    from sqlmodel import Session
+
+    first, second = make_doc(session), make_doc(session)
+
+    def write_second(other):
+        doc = other.get(Document, second.id)
+        write_document_file(other, store, doc, ".pdf", b"second")
+
+    import threading
+
+    from app.services.tree_sync import lock_tree
+
+    done = threading.Event()
+
+    def run():
+        with Session(engine) as other:
+            write_second(other)
+        done.set()
+
+    with Session(engine) as holder:
+        lock_tree(holder)
+        thread = threading.Thread(target=run)
+        thread.start()
+        assert not done.wait(0.7), "write_document_file did not wait for the tree lock"
+        doc = holder.get(Document, first.id)
+        write_document_file(holder, store, doc, ".pdf", b"first")  # commits: releases the lock
+    thread.join(10)
+    assert done.is_set()
+    session.expire_all()
+    a, b = session.get(Document, first.id), session.get(Document, second.id)
+    assert {a.file_path, b.file_path} == {"Invoice.pdf", "Invoice (2).pdf"}
+    assert store.abs_path(a.file_path).read_bytes() == b"first"
+    assert store.abs_path(b.file_path).read_bytes() == b"second"
+    assert not list(store.root.rglob("*.part"))
+
+
+def test_folder_rename_waits_for_tree_lock(session, engine, store):
+    from app.api.folders import FolderPatch, update_folder
+
+    folder = Folder(name="Bills")
+    session.add(folder)
+    session.commit()
+    finished, error = _blocked_while_tree_locked(
+        engine, lambda other: update_folder(folder.id, FolderPatch(name="Old bills"), other, store)
+    )
+    assert error is None
+    assert not finished, "update_folder did not wait for the tree lock"
+    session.expire_all()
+    assert session.get(Folder, folder.id).name == "Old bills"
+
+
+@pytest.mark.parametrize("bulk", [False, True])
+def test_delete_removes_the_file_a_concurrent_rename_moved(session, engine, store, bulk):
+    import threading
+
+    from sqlmodel import Session
+
+    from app.api.documents import BulkIds, bulk_delete, delete_document
+
+    doc = make_doc(session)
+    write_document_file(session, store, doc, ".pdf", b"1")
+    done = threading.Event()
+
+    def run():
+        with Session(engine) as other:
+            if bulk:
+                bulk_delete(BulkIds(ids=[doc.id]), other, store)
+            else:
+                delete_document(doc.id, other, store)
+        done.set()
+
+    with Session(engine) as holder:
+        with disk_transaction(holder, store) as moves:
+            [locked] = lock_documents(holder, [doc.id])
+            thread = threading.Thread(target=run)
+            thread.start()
+            assert not done.wait(0.7), "delete did not wait for the row lock"
+            locked.title = "Renamed"
+            relocate_document(holder, store, moves, locked)
+    thread.join(10)
+    assert done.is_set()
+    assert not store.abs_path("Renamed.pdf").exists()
+    assert not store.abs_path("Invoice.pdf").exists()

@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from pathlib import PurePosixPath
 from typing import BinaryIO
 
+from sqlalchemy import text
 from sqlmodel import Session, select
 
 from app.models import Document, Folder
@@ -58,6 +59,15 @@ def disk_transaction(session: Session, storage: Storage):
         raise
 
 
+# Fixed key of the transaction-scoped advisory lock that serializes every tree path computation.
+TREE_LOCK_KEY = 7_202_610_009
+
+
+def lock_tree(session: Session) -> None:
+    """Serialize path computations and tree moves until this transaction ends (re-entrant)."""
+    session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": TREE_LOCK_KEY})
+
+
 def lock_documents(session: Session, ids: list[uuid.UUID]) -> list[Document]:
     """Row-lock documents (same lock the worker takes before writing a file)."""
     if not ids:
@@ -66,6 +76,7 @@ def lock_documents(session: Session, ids: list[uuid.UUID]) -> list[Document]:
         session.exec(
             select(Document)
             .where(Document.id.in_(ids))
+            .order_by(Document.id)  # one lock order for every caller
             .with_for_update()
             .execution_options(populate_existing=True)
         )
@@ -86,7 +97,8 @@ def relocate_document(session: Session, storage: Storage, moves: MoveLog, doc: D
 def write_document_file(
     session: Session, storage: Storage, doc: Document, ext: str, data: bytes | BinaryIO
 ) -> None:
-    """Write the document file under the row lock (serialized with renames), then commit."""
+    """Write the document file under the tree and row locks (serialized with renames), then commit."""
+    lock_tree(session)  # first, so the lock order is always tree lock, then row locks
     session.flush()
     session.refresh(doc, with_for_update=True)
     ext = ext.lower()

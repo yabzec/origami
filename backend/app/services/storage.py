@@ -49,9 +49,9 @@ class Storage:
     # --- writes ---
     @staticmethod
     def _write_atomic(target: Path, data: bytes | BinaryIO) -> int:
-        """Write `<name>.part` next to the target, then replace: readers never see half a file."""
+        """Write `<name>.<random>.part` next to the target, then replace: readers never see half a file."""
         target.parent.mkdir(parents=True, exist_ok=True)
-        part = target.with_name(target.name + PART_SUFFIX)
+        part = target.with_name(f"{target.name}.{uuid.uuid4().hex}{PART_SUFFIX}")
         try:
             with part.open("wb") as out:
                 if isinstance(data, (bytes, bytearray)):
@@ -135,9 +135,12 @@ class Storage:
             if not base.is_dir():
                 continue
             for part in base.rglob("*" + PART_SUFFIX):
-                if part.is_file() and part.stat().st_mtime < cutoff:
-                    part.unlink(missing_ok=True)
-                    removed.append(part)
+                try:
+                    if part.is_file() and part.stat().st_mtime < cutoff:
+                        part.unlink()
+                        removed.append(part)
+                except FileNotFoundError:  # finished or removed meanwhile
+                    continue
         return removed
 
     # --- scan sessions ---
