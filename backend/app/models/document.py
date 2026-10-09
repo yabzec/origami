@@ -39,6 +39,8 @@ class Document(SQLModel, table=True):
     doc_type: str  # DocType
     ocr_languages: str = "ita+eng"
     ocr_enabled: bool = True
+    summary_enabled: bool = True  # False: the pipeline skips the AI summary
+    translation_enabled: bool = True  # False: no translate_document job is scheduled
     document_date: date = Field(default_factory=lambda: utcnow().date())
     detected_language: str | None = None  # ISO 639-1, set by the summary step
     translation_status: str | None = None  # TranslationStatus; None = not needed / not yet processed

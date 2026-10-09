@@ -221,6 +221,8 @@ def delete_document(
 class ReprocessRequest(BaseModel):
     ocr_languages: str
     ocr_enabled: bool = True
+    summary_enabled: bool = True
+    translation_enabled: bool = True
 
 
 @router.post("/{document_id}/reprocess")
@@ -260,6 +262,8 @@ def reprocess_document(
         session.delete(chunk)
     doc.ocr_languages = body.ocr_languages
     doc.ocr_enabled = body.ocr_enabled
+    doc.summary_enabled = body.summary_enabled
+    doc.translation_enabled = body.translation_enabled
     if doc.summary and doc.description == doc.summary:
         doc.description = ""  # still the AI text: the new summary refills it; edited text is kept
     doc.summary = None

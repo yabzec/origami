@@ -53,3 +53,10 @@ def test_user_email_and_job_max_attempts_default(engine):
     assert user_cols["email"]["nullable"] is True
     job_cols = {c["name"]: c for c in inspector.get_columns("jobs")}
     assert job_cols["max_attempts"]["default"] == "5"
+
+
+def test_document_processing_flag_columns(engine):
+    cols = {c["name"]: c for c in inspect(engine).get_columns("documents")}
+    for name in ("summary_enabled", "translation_enabled"):
+        assert cols[name]["nullable"] is False
+        assert cols[name]["default"] == "true"

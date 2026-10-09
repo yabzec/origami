@@ -234,7 +234,7 @@ def _content_chunks(session: Session, doc: Document) -> list[Chunk]:
 
 
 def _ensure_summary(session: Session, doc: Document, storage: Storage) -> None:
-    if doc.doc_type == DocType.video or doc.summary is not None:
+    if doc.doc_type == DocType.video or doc.summary is not None or not doc.summary_enabled:
         return
     text = "\n\n".join(c.content for c in _content_chunks(session, doc)).strip()
     if doc.doc_type == DocType.image and len(text) < IMAGE_SUMMARY_TEXT_THRESHOLD:
@@ -268,6 +268,8 @@ def _ensure_summary(session: Session, doc: Document, storage: Storage) -> None:
 
 
 def _needs_translation(session: Session, doc: Document) -> bool:
+    if not doc.translation_enabled:
+        return False
     if not doc.detected_language or doc.detected_language == get_primary_language():
         return False
     if doc.translation_status == TranslationStatus.done and _has_chunks(

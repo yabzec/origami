@@ -50,6 +50,8 @@ class CompileRequest(BaseModel):
     document_date: date | None = None
     ocr_languages: str | None = None
     ocr_enabled: bool | None = None
+    summary_enabled: bool = True
+    translation_enabled: bool = True
 
 
 def get_session_or_404(db: Session, session_id: int) -> ScanSession:
@@ -227,6 +229,8 @@ def compile_session(
         doc_type=DocType.scan,
         ocr_languages=body.ocr_languages or scan_session.ocr_languages,
         ocr_enabled=scan_session.ocr_enabled if body.ocr_enabled is None else body.ocr_enabled,
+        summary_enabled=body.summary_enabled,
+        translation_enabled=body.translation_enabled,
         folder_id=body.folder_id,
         tag_ids=body.tag_ids,
         original_filename=None,
