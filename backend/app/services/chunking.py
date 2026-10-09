@@ -45,3 +45,39 @@ def _split_text(text: str, size: int, overlap: int) -> list[str]:
     if current:
         pieces.append(current)
     return pieces
+
+
+def page_texts_from_chunks(
+    chunks: list[tuple[int | None, str]], overlap: int = 200
+) -> list[tuple[int | None, str]]:
+    """Rebuild page texts from chunk_pages() output by removing the overlap between chunks.
+
+    When a chunk does not start with the previous chunk's tail, it is kept whole after a
+    paragraph break: duplicating a little text is better than losing any.
+    """
+    pages: list[list] = []  # [page_number, text, previous chunk]
+    for page_number, content in chunks:
+        if not pages or pages[-1][0] != page_number:
+            pages.append([page_number, content, content])
+            continue
+        entry = pages[-1]
+        tail = entry[2][-overlap:] if overlap else ""
+        for candidate in (tail, tail.lstrip()):
+            if candidate and content.startswith(candidate):
+                entry[1] += content[len(candidate):]
+                break
+        else:
+            entry[1] += "\n\n" + content
+        entry[2] = content
+    return [(page_number, text) for page_number, text, _ in pages]
+
+
+def segment_pages(
+    pages: list[tuple[int | None, str]], max_chars: int
+) -> list[tuple[int | None, str]]:
+    """Translation units: one per page, long pages split on paragraphs, no overlap."""
+    return [
+        (page_number, piece)
+        for page_number, text in pages
+        for piece in _split_text(text, max_chars, 0)
+    ]

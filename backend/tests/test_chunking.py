@@ -1,4 +1,4 @@
-from app.services.chunking import chunk_pages
+from app.services.chunking import chunk_pages, page_texts_from_chunks, segment_pages
 
 
 def test_empty_and_blank_pages_produce_nothing():
@@ -35,3 +35,45 @@ def test_oversized_single_paragraph_is_hard_split():
 def test_chunks_never_span_pages():
     chunks = chunk_pages([(1, "Pagina uno."), (2, "Pagina due.")])
     assert [c["page_number"] for c in chunks] == [1, 2]
+
+
+def _roundtrip(pages, size=100, overlap=20):
+    chunks = [(c["page_number"], c["content"]) for c in chunk_pages(pages, size=size, overlap=overlap)]
+    return page_texts_from_chunks(chunks, overlap=overlap)
+
+
+def test_page_texts_roundtrip_paragraphs():
+    paragraphs = [f"Paragraph number {i} has some words in it." for i in range(12)]
+    page = "\n\n".join(paragraphs)
+    assert _roundtrip([(1, page), (2, "Short page.")]) == [(1, page), (2, "Short page.")]
+
+
+def test_page_texts_roundtrip_hard_split_paragraph():
+    long_paragraph = "".join(f"w{i:03d} " for i in range(90)).strip()  # ~450 chars, no blank lines
+    page = f"Intro line.\n\n{long_paragraph}\n\nOutro line."
+    assert _roundtrip([(3, page)]) == [(3, page)]
+
+
+def test_page_texts_roundtrip_overlap_starting_with_space():
+    # the overlap tail of a chunk can begin with whitespace, which chunk_pages strips
+    page = "\n\n".join("a" * 79 + " " + "b" * 15 for _ in range(6))
+    assert _roundtrip([(1, page)]) == [(1, page)]
+
+
+def test_page_texts_keeps_chunk_when_overlap_does_not_match():
+    assert page_texts_from_chunks([(1, "first"), (1, "unrelated")]) == [(1, "first\n\nunrelated")]
+
+
+def test_page_texts_none_page_numbers_group_together():
+    assert page_texts_from_chunks([(None, "a"), (None, "b")], overlap=0) == [(None, "a\n\nb")]
+
+
+def test_segment_pages_splits_long_pages_without_overlap():
+    page = "\n\n".join(["x" * 40] * 5)  # 5 paragraphs of 40 chars
+    segments = segment_pages([(1, page), (2, "   "), (3, "short")], max_chars=100)
+    assert segments == [
+        (1, "x" * 40 + "\n\n" + "x" * 40),
+        (1, "x" * 40 + "\n\n" + "x" * 40),
+        (1, "x" * 40),
+        (3, "short"),
+    ]
