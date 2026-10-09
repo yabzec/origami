@@ -3,7 +3,7 @@ from datetime import date, datetime, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlmodel import Session, select
 
@@ -149,6 +149,60 @@ def list_documents(
     return [serialize(session, d, active_jobs) for d in docs]
 
 
+BULK_MAX = 500
+
+
+class BulkIds(BaseModel):
+    ids: list[uuid.UUID] = Field(min_length=1, max_length=BULK_MAX)
+
+
+class BulkMove(BulkIds):
+    folder_id: int | None
+
+
+def _found_and_missing(session: Session, ids: list[uuid.UUID]) -> tuple[list[Document], list[str]]:
+    docs = list(session.exec(select(Document).where(Document.id.in_(ids))))
+    found = {d.id for d in docs}
+    return docs, [str(i) for i in ids if i not in found]
+
+
+def _delete_documents(session: Session, docs: list[Document]) -> list[str | None]:
+    """Cancel queued jobs and delete rows (no commit); returns the file paths to remove after commit."""
+    rel_paths: list[str | None] = []
+    for doc in docs:
+        rel_paths += [doc.file_path, doc.preview_path]
+        _cancel_queued_jobs(session, doc)
+        session.delete(doc)  # chunks, document_tags and translation segments cascade via FK
+    return rel_paths
+
+
+@router.post("/bulk/move")
+def bulk_move(body: BulkMove, session: Session = Depends(get_session)) -> dict:
+    if body.folder_id is not None and session.get(Folder, body.folder_id) is None:
+        raise api_error(404, "not_found", "Folder not found")
+    docs, missing = _found_and_missing(session, body.ids)
+    now = datetime.now(timezone.utc)
+    for doc in docs:
+        doc.folder_id = body.folder_id
+        doc.updated_at = now
+    session.commit()
+    return {"moved": len(docs), "missing": missing}
+
+
+@router.post("/bulk/delete")
+def bulk_delete(
+    body: BulkIds,
+    session: Session = Depends(get_session),
+    storage: Storage = Depends(get_storage),
+) -> dict:
+    docs, missing = _found_and_missing(session, body.ids)
+    rel_paths = _delete_documents(session, docs)
+    session.commit()
+    for rel in rel_paths:
+        storage.delete_document_file(rel)
+    return {"deleted": len(docs), "missing": missing}
+
+
 @router.get("/{document_id}")
 def get_document(document_id: uuid.UUID, session: Session = Depends(get_session)) -> dict:
     return serialize(session, get_doc_or_404(session, document_id))
@@ -223,9 +277,7 @@ def delete_document(
     storage: Storage = Depends(get_storage),
 ) -> None:
     doc = get_doc_or_404(session, document_id)
-    rel_paths = [doc.file_path, doc.preview_path]
-    _cancel_queued_jobs(session, doc)
-    session.delete(doc)  # chunks and document_tags cascade via FK
+    rel_paths = _delete_documents(session, [doc])
     session.commit()
     for rel in rel_paths:
         storage.delete_document_file(rel)
