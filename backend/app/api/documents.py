@@ -325,7 +325,7 @@ class ReprocessRequest(BaseModel):
     ocr_languages: str
     ocr_enabled: bool = True
     summary_enabled: bool = True
-    translation_enabled: bool = True
+    translation_enabled: bool | None = None  # None: keep the document's setting
     translation_language: str | None = None
 
 
@@ -370,7 +370,8 @@ def reprocess_document(
     doc.ocr_languages = body.ocr_languages
     doc.ocr_enabled = body.ocr_enabled
     doc.summary_enabled = body.summary_enabled
-    doc.translation_enabled = body.translation_enabled
+    if body.translation_enabled is not None:
+        doc.translation_enabled = body.translation_enabled
     if body.translation_language:
         doc.translation_language = body.translation_language
     if doc.summary and doc.description == doc.summary:

@@ -27,7 +27,8 @@ export function buildUploadForm(file: File, fields: UploadFields): FormData {
   if (fields.ocrLanguages) form.append("ocr_languages", fields.ocrLanguages);
   if (fields.ocrEnabled === false) form.append("ocr_enabled", "false");
   if (fields.summaryEnabled === false) form.append("summary_enabled", "false");
-  if (fields.translationEnabled === false) form.append("translation_enabled", "false");
+  // the server default is off, so send the flag whenever it is set
+  if (fields.translationEnabled !== undefined) form.append("translation_enabled", String(fields.translationEnabled));
   if (fields.translationLanguage) form.append("translation_language", fields.translationLanguage);
   if (fields.documentDate) form.append("document_date", fields.documentDate);
   return form;

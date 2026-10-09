@@ -51,7 +51,7 @@ function fakeDeps(overrides: Partial<BatchDeps> = {}) {
   return { deps: { ensurePath, upload, ...overrides }, ensurePath, upload, uploads };
 }
 
-const options = { folderId: 1, tagIds: [7], processing: { ...defaultProcessing(), translationLanguage: "en" } };
+const options = { folderId: 1, tagIds: [7], processing: { ...defaultProcessing(), translationEnabled: true, translationLanguage: "en" } };
 
 describe("runBatch", () => {
   it("resolves each folder once and uploads every file", async () => {

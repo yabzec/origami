@@ -3,12 +3,12 @@ import { defaultProcessing, normalizeProcessing, processingFromDocument, process
 import type { Document } from "./types";
 
 describe("processing", () => {
-  it("defaults everything on with the server's default languages", () => {
+  it("defaults OCR and summary on, translation off, with the server's default languages", () => {
     expect(defaultProcessing()).toEqual({
       ocrEnabled: true,
       ocrLanguages: "",
       summaryEnabled: true,
-      translationEnabled: true,
+      translationEnabled: false,
       translationLanguage: "",
     });
   });
@@ -18,7 +18,7 @@ describe("processing", () => {
       ocr_enabled: true,
       ocr_languages: null,
       summary_enabled: false,
-      translation_enabled: true,
+      translation_enabled: false,
       translation_language: null,
     });
   });
