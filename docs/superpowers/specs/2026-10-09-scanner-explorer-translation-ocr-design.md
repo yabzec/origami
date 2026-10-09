@@ -283,3 +283,16 @@ In `backend/app/services/llm.py`, for `translate`:
 - Pagination of the document list.
 - Throttling the summary and embedding calls. Only translation is throttled, but the throttle helper is written so these calls could use it later.
 - A translation provider other than the configured LLM.
+
+## 9. Implementation notes (changes made during implementation)
+
+These decisions were taken while building and reviewing the feature. Where they differ from the sections above, this section describes the shipped behaviour.
+
+- **Tag input keys (2.4):** Enter selects an exact name match, otherwise it creates the typed name. If the user moved the highlight with the arrow keys since the last keystroke, Enter picks the highlighted suggestion instead.
+- **Page reorder (2.2):** a page is dragged by a separate handle on its thumbnail; clicking the thumbnail (or pressing Enter on it) still selects the page. Only one reorder is saved at a time, and a failed save is ignored if the scan session was discarded meanwhile.
+- **OCR language order (5):** the order number next to a checked language is hidden from screen readers.
+- **Processing options (2.3, 5):** once the installed languages are known, codes that are no longer installed are dropped from the form (falling back to the server default). With no language installed, OCR is switched off in the request. The server does not validate `ocr_languages` when OCR is off, and its own fallback default only uses installed languages.
+- **Selection (3.3):** the card checkbox stays in the tab order and is always visible on small screens. Esc does not clear the selection when it is closing a dialog. Uploads also refresh the folder tile counts.
+- **Re-translate (4.1):** also requires the document to be `ready` and to have extracted text; `translatable` has the same condition. A translation job for a document without extracted text clears the pending status.
+- **Throttle (4.3):** when the token budget or a 429 needs a wait longer than 5 seconds, the translation job is re-queued at that time (saved segments are kept, no attempt is used), so the single worker keeps processing other documents. After a 429 the rejected request no longer counts against the budget. The saved-segment hash includes the target language.
+- **Known limits:** a provider that keeps answering with long waits makes translation re-queue indefinitely (it never reaches `failed`). Search results compute `translatable` with one small query per foreign-language hit.
