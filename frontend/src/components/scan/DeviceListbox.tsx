@@ -7,7 +7,7 @@ const SEARCH_ID = "__search__";
 function searchLabel(search: SearchState): string | null {
   switch (search.phase) {
     case "searching":
-      return "Searching…";
+      return search.found > 0 ? `Searching… ${search.found} found` : "Searching…";
     case "found":
       return `${search.found} found`;
     case "none":
@@ -132,7 +132,6 @@ export function DeviceListbox({
   );
 
   const status = searchLabel(search);
-  
   return (
     <div ref={rootRef} className="relative w-64" onKeyDown={onRootKeyDown} onBlur={onRootBlur}>
       <button

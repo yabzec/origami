@@ -137,4 +137,10 @@ describe("DeviceListbox", () => {
     await userEvent.tab();
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
+
+  it("shows the live count while searching", async () => {
+    setup([server, local], { phase: "searching", startedAt: 0, found: 1 });
+    await userEvent.click(screen.getByRole("combobox", { name: /scanner/i }));
+    expect(screen.getByText(/Searching… 1 found/)).toBeInTheDocument();
+  });
 });
