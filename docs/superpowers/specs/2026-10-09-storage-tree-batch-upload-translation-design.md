@@ -138,7 +138,7 @@ Sibling folders already have unique names in the database, so a folder rename or
 ### 5.3 API
 
 - `GET /api/ocr/languages` adds `translation_languages: [{"code": "it", "name": "Italian"}]` and `translation_default`.
-- `translation_language` is accepted (optional, default from env) on: upload, scan session create and compile, re-process. Re-translate takes an optional body `{"translation_language": "en"}`; changing it re-translates to the new target.
+- `translation_language` is accepted (optional, default from env) on: upload, scan compile, re-process. Re-translate takes an optional body `{"translation_language": "en"}`; changing it re-translates to the new target.
 - `GET /api/documents/{id}` and `/text` return the document's `translation_language` (today `/text` returns `PRIMARY_LANGUAGE`).
 
 ### 5.4 Model and pipeline
