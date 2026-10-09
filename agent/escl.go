@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const maxBody = 200 << 20 // 200 MB: far above a 600 dpi colour page
+var maxBody int64 = 200 << 20 // 200 MB: far above a 600 dpi colour page
 
 var safePath = regexp.MustCompile(`^[A-Za-z0-9._\-/]+$`)
 
@@ -38,9 +38,13 @@ type Executor struct {
 
 func osName() string { return runtime.GOOS + "/" + runtime.GOARCH }
 
+// noRedirects stops the client from following a scanner redirect to another host.
+func noRedirects(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
 func newHTTPClient() *http.Client {
 	return &http.Client{
-		Timeout: 130 * time.Second,
+		Timeout:       130 * time.Second,
+		CheckRedirect: noRedirects,
 		Transport: &http.Transport{
 			// _uscans._tcp scanners use self-signed certificates.
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
@@ -73,13 +77,18 @@ func (e *Executor) Do(ctx context.Context, uuid, method, path, body string) Resu
 	if body != "" {
 		req.Header.Set("Content-Type", "text/xml")
 	}
-	resp, err := e.Client.Do(req)
+	client := *e.Client
+	client.CheckRedirect = noRedirects
+	resp, err := client.Do(req)
 	if err != nil {
 		return Result{Status: http.StatusBadGateway}
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
 	if err != nil {
+		return Result{Status: http.StatusBadGateway}
+	}
+	if int64(len(data)) > maxBody {
 		return Result{Status: http.StatusBadGateway}
 	}
 	headers := map[string]string{}

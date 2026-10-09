@@ -1,18 +1,38 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 )
 
-func fakeScanner(t *testing.T) (*httptest.Server, *[]string) {
-	var hits []string
+// hitLog records requests seen by a fake server; safe for concurrent use.
+type hitLog struct {
+	mu   sync.Mutex
+	hits []string
+}
+
+func (h *hitLog) add(s string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.hits = append(h.hits, s)
+}
+
+func (h *hitLog) all() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]string(nil), h.hits...)
+}
+
+func fakeScanner(t *testing.T) (*httptest.Server, *hitLog) {
+	log := &hitLog{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		hits = append(hits, r.Method+" "+r.URL.Path+" "+string(body))
+		log.add(r.Method + " " + r.URL.Path + " " + string(body))
 		switch r.URL.Path {
 		case "/eSCL/ScanJobs":
 			w.Header().Set("Location", "http://"+r.Host+"/eSCL/ScanJobs/7")
@@ -25,7 +45,7 @@ func fakeScanner(t *testing.T) (*httptest.Server, *[]string) {
 		}
 	}))
 	t.Cleanup(srv.Close)
-	return srv, &hits
+	return srv, log
 }
 
 func executorFor(srv *httptest.Server) *Executor {
@@ -36,7 +56,7 @@ func executorFor(srv *httptest.Server) *Executor {
 }
 
 func TestDoPostsAndRewritesLocation(t *testing.T) {
-	srv, hits := fakeScanner(t)
+	srv, log := fakeScanner(t)
 	res := executorFor(srv).Do(context.Background(), "u1", "POST", "ScanJobs", "<xml/>")
 	if res.Status != 201 {
 		t.Fatalf("status %d", res.Status)
@@ -44,8 +64,8 @@ func TestDoPostsAndRewritesLocation(t *testing.T) {
 	if res.Headers["Location"] != "ScanJobs/7" {
 		t.Fatalf("location %q", res.Headers["Location"])
 	}
-	if (*hits)[0] != "POST /eSCL/ScanJobs <xml/>" {
-		t.Fatalf("hit %q", (*hits)[0])
+	if got := log.all(); got[0] != "POST /eSCL/ScanJobs <xml/>" {
+		t.Fatalf("hit %q", got[0])
 	}
 }
 
@@ -58,7 +78,7 @@ func TestDoReturnsBody(t *testing.T) {
 }
 
 func TestDoRejectsWithoutCallingScanner(t *testing.T) {
-	srv, hits := fakeScanner(t)
+	srv, log := fakeScanner(t)
 	ex := executorFor(srv)
 	cases := []struct{ uuid, method, path string }{
 		{"other", "GET", "ScannerCapabilities"},
@@ -74,8 +94,8 @@ func TestDoRejectsWithoutCallingScanner(t *testing.T) {
 			t.Errorf("%+v: want 403, got %d", c, res.Status)
 		}
 	}
-	if len(*hits) != 0 {
-		t.Fatalf("scanner was called: %v", *hits)
+	if got := log.all(); len(got) != 0 {
+		t.Fatalf("scanner was called: %v", got)
 	}
 }
 
@@ -91,5 +111,37 @@ func TestRelativeLocation(t *testing.T) {
 		if got := relativeLocation(base, in); got != want {
 			t.Errorf("%s: got %q want %q", in, got, want)
 		}
+	}
+}
+
+func TestDoDoesNotFollowRedirects(t *testing.T) {
+	second, secondLog := fakeScanner(t)
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", second.URL+"/eSCL/ScanJobs/7")
+		w.WriteHeader(http.StatusFound)
+	}))
+	t.Cleanup(first.Close)
+	res := executorFor(first).Do(context.Background(), "u1", "GET", "ScanJobs/7", "")
+	if res.Status != http.StatusFound {
+		t.Fatalf("want 302 returned as-is, got %d", res.Status)
+	}
+	if got := secondLog.all(); len(got) != 0 {
+		t.Fatalf("redirect target was called: %v", got)
+	}
+}
+
+func TestDoRejectsOversizeBody(t *testing.T) {
+	old := maxBody
+	maxBody = 4
+	t.Cleanup(func() { maxBody = old })
+	srv, _ := fakeScanner(t)
+	res := executorFor(srv).Do(context.Background(), "u1", "GET", "ScanJobs/7/NextDocument", "")
+	if res.Status != http.StatusBadGateway || res.Body != nil {
+		t.Fatalf("oversize body: want 502 without body, got %d len %d", res.Status, len(res.Body))
+	}
+	maxBody = 8
+	res = executorFor(srv).Do(context.Background(), "u1", "GET", "ScanJobs/7/NextDocument", "")
+	if res.Status != 200 || !bytes.Equal(res.Body, []byte("JPEGDATA")) {
+		t.Fatalf("body at limit must pass, got %d %q", res.Status, res.Body)
 	}
 }
