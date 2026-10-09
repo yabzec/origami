@@ -23,6 +23,7 @@ from app.models import (
     JobStatus,
     ScanPage,
     Tag,
+    TranslationStatus,
 )
 from app.services.storage import Storage, get_storage
 from app.worker.pipeline import delete_translation_segments
@@ -341,6 +342,33 @@ def reprocess_document(
     doc.updated_at = datetime.now(timezone.utc)
     # same row enqueue() would create, committed together with the reset (atomic)
     session.add(Job(type="process_document", payload=payload, run_at=datetime.now(timezone.utc)))
+    session.commit()
+    session.refresh(doc)
+    return serialize(session, doc)
+
+
+@router.post("/{document_id}/retranslate")
+def retranslate_document(document_id: uuid.UUID, session: Session = Depends(get_session)) -> dict:
+    doc = get_doc_or_404(session, document_id)
+    session.refresh(doc, with_for_update=True)  # same lock as reprocess and translate_document
+    if doc.status in (DocStatus.pending, DocStatus.processing):
+        raise api_error(409, "document_busy", "Document is still being processed")
+    if doc.translation_status == TranslationStatus.pending:
+        raise api_error(409, "translation_busy", "A translation is already in progress")
+    if not doc.detected_language or doc.detected_language == get_primary_language():
+        raise api_error(409, "nothing_to_translate", "The document is already in the primary language")
+    _cancel_queued_jobs(session, doc)
+    for chunk in session.exec(
+        select(Chunk).where(Chunk.document_id == doc.id, Chunk.source == ChunkSource.translation)
+    ):
+        session.delete(chunk)
+    delete_translation_segments(session, doc.id)
+    doc.translation_enabled = True
+    doc.translation_status = TranslationStatus.pending
+    doc.updated_at = datetime.now(timezone.utc)
+    session.add(
+        Job(type="translate_document", payload={"document_id": str(doc.id)}, run_at=datetime.now(timezone.utc))
+    )
     session.commit()
     session.refresh(doc)
     return serialize(session, doc)
