@@ -95,12 +95,18 @@ def write_document_file(
         rel = old
     else:
         rel = document_rel_path(session, storage, doc, ext)
-    rel, size = storage.write_file(rel, data)
+    try:
+        rel, size = storage.write_file(rel, data)
+        doc.file_path = rel
+        doc.file_size = size
+        session.commit()
+    except BaseException:
+        session.rollback()
+        if rel != old:
+            storage.delete_file(rel)
+        raise
     if old and old != rel:
         storage.delete_file(old)
-    doc.file_path = rel
-    doc.file_size = size
-    session.commit()
 
 
 def disk_name_taken(

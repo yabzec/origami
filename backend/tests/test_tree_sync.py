@@ -112,3 +112,26 @@ def test_storage_errors_mapping(tmp_path):
     assert broken.value.status_code == 500
     assert broken.value.detail["error"]["code"] == "storage_error"
     assert "y" in broken.value.detail["error"]["message"]
+
+
+def test_write_document_file_commit_failure_keeps_old_file_on_ext_change(session, store, monkeypatch):
+    doc = make_doc(session)
+    write_document_file(session, store, doc, ".png", b"png")
+    monkeypatch.setattr(session, "commit", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    with pytest.raises(RuntimeError):
+        write_document_file(session, store, doc, ".pdf", b"%PDF")
+    monkeypatch.undo()
+    session.refresh(doc)
+    assert doc.file_path == "Invoice.png"
+    assert store.abs_path("Invoice.png").read_bytes() == b"png"
+    assert not store.abs_path("Invoice.pdf").exists()
+
+
+def test_write_document_file_commit_failure_keeps_file_on_overwrite(session, store, monkeypatch):
+    doc = make_doc(session)
+    write_document_file(session, store, doc, ".pdf", b"old")
+    monkeypatch.setattr(session, "commit", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    with pytest.raises(RuntimeError):
+        write_document_file(session, store, doc, ".pdf", b"new!")
+    monkeypatch.undo()
+    assert store.abs_path("Invoice.pdf").exists()
