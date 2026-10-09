@@ -152,3 +152,27 @@ def test_deferral_is_dropped_when_translation_was_reset(session, pipeline_storag
     doc = translate(session, doc)
     assert doc.translation_status is None
     assert session.exec(select(Job)).all() == []
+
+
+def test_segment_for_another_target_language_is_translated_again(session, pipeline_storage, llm_stub):
+    doc = _german(session, pages=1)
+    session.add(TranslationSegment(
+        document_id=doc.id, segment_index=0, page_number=1,
+        source_hash=pipeline._source_hash("en\nSeite 1 Text."), text="[en] Seite 1 Text.",
+    ))
+    session.commit()
+    doc = translate(session, doc)  # primary language is "it"
+    assert [t for t, _ in llm_stub["translate"]] == ["Seite 1 Text."]
+    assert chunks_by_source(session, doc)[ChunkSource.translation][0].content == "[it] Seite 1 Text."
+
+
+def test_segment_for_the_same_target_is_reused(session, pipeline_storage, llm_stub):
+    doc = _german(session, pages=1)
+    session.add(TranslationSegment(
+        document_id=doc.id, segment_index=0, page_number=1,
+        source_hash=pipeline._source_hash("it\nSeite 1 Text."), text="saved",
+    ))
+    session.commit()
+    doc = translate(session, doc)
+    assert llm_stub["translate"] == []
+    assert chunks_by_source(session, doc)[ChunkSource.translation][0].content == "saved"

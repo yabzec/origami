@@ -340,7 +340,7 @@ def _translate_segments(
     }
     translated: list[tuple[int | None, str]] = []
     for index, (page_number, source) in enumerate(segment_pages(pages, translation_segment_chars())):
-        digest = _source_hash(source)
+        digest = _source_hash(f"{target}\n{source}")  # a new primary language invalidates segments
         row = stored.get(index)
         if row is None or row.source_hash != digest:
             text = llm_translate(source, target)
