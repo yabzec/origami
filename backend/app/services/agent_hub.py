@@ -19,6 +19,9 @@ from fastapi import WebSocket, WebSocketDisconnect
 log = logging.getLogger(__name__)
 
 TOKEN_TTL_SECONDS = 120
+# a fresh resume token is sent this often, so an unexpired one always
+# exists when the agent reconnects after a network drop
+RESUME_REFRESH_SECONDS = 60
 ID_LEN = 16
 AGENT_VERSION = "0.1.0"
 
@@ -93,6 +96,7 @@ class AgentHub:
     async def serve(self, ws: WebSocket, user_id: int, client_id: str) -> None:
         key = (user_id, client_id)
         agent = _Agent(ws=ws, loop=asyncio.get_running_loop())
+        refresh: asyncio.Task | None = None
         with self._lock:
             old = self._agents.get(key)
             self._agents[key] = agent
@@ -105,6 +109,7 @@ class AgentHub:
                 except Exception:  # noqa: BLE001 - old socket may be dead already
                     pass
             await ws.send_json({"type": "welcome", "resume_token": self.issue_token(user_id, client_id)})
+            refresh = asyncio.create_task(self._refresh_resume(ws, user_id, client_id))
             while True:
                 msg = await ws.receive()
                 if msg["type"] == "websocket.disconnect":
@@ -119,11 +124,21 @@ class AgentHub:
         except (WebSocketDisconnect, RuntimeError, OSError):
             pass
         finally:
+            if refresh is not None:
+                refresh.cancel()
             agent.closed = True
             with self._lock:
                 if self._agents.get(key) is agent:
                     del self._agents[key]
             self._fail_pending(agent)
+
+    async def _refresh_resume(self, ws: WebSocket, user_id: int, client_id: str) -> None:
+        try:
+            while True:
+                await asyncio.sleep(RESUME_REFRESH_SECONDS)
+                await ws.send_json({"type": "welcome", "resume_token": self.issue_token(user_id, client_id)})
+        except (WebSocketDisconnect, RuntimeError, OSError):
+            pass  # socket closed; serve() cleans up
 
     def _on_message(self, agent: _Agent, msg: dict) -> None:
         kind = msg.get("type")
@@ -211,6 +226,22 @@ class AgentHub:
             raise AgentTimeout()
         except (RuntimeError, WebSocketDisconnect):
             raise AgentOffline()  # socket closed while sending
+
+    def request_discover(self, user_id: int, client_id: str) -> bool:
+        """Ask the agent to browse for scanners now. False when not connected."""
+        with self._lock:
+            agent = self._agents.get((user_id, client_id))
+        if agent is None or agent.closed:
+            return False
+
+        async def send() -> None:
+            await agent.ws.send_json({"type": "discover"})
+
+        try:
+            asyncio.run_coroutine_threadsafe(send(), agent.loop).result(5)
+            return True
+        except (RuntimeError, OSError, WebSocketDisconnect, concurrent.futures.TimeoutError, TimeoutError):
+            return False
 
 
 _hub = AgentHub()

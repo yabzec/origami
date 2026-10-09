@@ -168,3 +168,31 @@ def test_request_after_disconnect_is_offline_fast():
             threading.Event().wait(0.02)
         with pytest.raises(AgentOffline):
             hub.request(1, "client-abc", "u1", "GET", "ScannerCapabilities", timeout=30)
+
+
+def test_resume_token_is_refreshed_while_connected(monkeypatch):
+    from app.services import agent_hub as agent_hub_module
+
+    monkeypatch.setattr(agent_hub_module, "RESUME_REFRESH_SECONDS", 0.05)
+    hub = AgentHub()
+    with TestClient(make_app(hub)) as client, client.websocket_connect("/ws/1/client-abc") as ws:
+        first = ws.receive_json()
+        second = ws.receive_json()
+    assert first["type"] == second["type"] == "welcome"
+    assert first["resume_token"] != second["resume_token"]
+    for token in (first["resume_token"], second["resume_token"]):
+        assert hub.consume_token(token) == (1, "client-abc")
+        assert hub.consume_token(token) is None
+
+
+def test_request_discover():
+    hub = AgentHub()
+    assert hub.request_discover(1, "client-abc") is False
+    with TestClient(make_app(hub)) as client, client.websocket_connect("/ws/1/client-abc") as ws:
+        ws.receive_json()
+        for _ in range(50):
+            if hub.connected(1, "client-abc"):
+                break
+            threading.Event().wait(0.02)
+        assert hub.request_discover(1, "client-abc") is True
+        assert ws.receive_json() == {"type": "discover"}
