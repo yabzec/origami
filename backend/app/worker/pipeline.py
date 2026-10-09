@@ -417,7 +417,8 @@ def translate_document(session: Session, payload: dict) -> None:
         if doc.translation_status == TranslationStatus.pending:
             _finish_translation(session, doc, None)  # stop the UI polling "pending"
         return
-    if not doc.translation_enabled:
+    if not doc.translation_enabled or not _has_chunks(session, doc, ChunkSource.content):
+        # disabled, or no extracted text (e.g. an image summarised by vision)
         if doc.translation_status == TranslationStatus.pending:
             _finish_translation(session, doc, None)
         return

@@ -1,6 +1,6 @@
 from datetime import date
 
-from app.models import Document, DocStatus, DocType
+from app.models import Chunk, ChunkSource, Document, DocStatus, DocType
 
 
 def make(session, title, **kwargs):
@@ -57,6 +57,8 @@ def test_folders_include_direct_document_counts(auth_client, session):
 
 def test_translatable_flag(auth_client, session):
     german = make(session, "de", detected_language="de")
+    session.add(Chunk(document_id=german.id, chunk_index=0, source=ChunkSource.content, content="Brief"))
+    session.commit()
     italian = make(session, "it", detected_language="it")
     unknown = make(session, "none")
     flags = {d["title"]: d["translatable"] for d in auth_client.get("/api/documents").json()}

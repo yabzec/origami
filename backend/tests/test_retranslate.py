@@ -67,3 +67,39 @@ def test_retranslate_then_worker_translates(auth_client, session, llm_stub):
         )
     ]
     assert contents == ["[it] Seite eins"]
+
+
+def test_retranslate_requires_content_chunks(auth_client, session):
+    # an older vision-summarised image: language known, but no content chunks to translate
+    doc = seed_document(session, "Foto", [], detected_language="de", doc_type="image")
+    assert auth_client.get(f"/api/documents/{doc.id}").json()["translatable"] is False
+    listed = auth_client.get("/api/documents").json()
+    assert [d["translatable"] for d in listed] == [False]
+    assert _code(auth_client.post(f"/api/documents/{doc.id}/retranslate")) == "nothing_to_translate"
+    assert session.exec(select(Job)).all() == []
+
+
+def test_translatable_needs_content_chunks_in_list(auth_client, session):
+    with_text = _doc(session)
+    seed_document(session, "Foto", [], detected_language="de", doc_type="image")
+    flags = {d["id"]: d["translatable"] for d in auth_client.get("/api/documents").json()}
+    assert flags[str(with_text.id)] is True
+    assert sorted(flags.values()) == [False, True]
+
+
+def test_retranslate_rejects_failed_document(auth_client, session):
+    failed = _doc(session, status=DocStatus.failed)
+    assert _code(auth_client.post(f"/api/documents/{failed.id}/retranslate")) == "document_busy"
+
+
+def test_translate_job_without_content_chunks_clears_pending(session, llm_stub):
+    from app.worker import pipeline
+
+    doc = seed_document(
+        session, "Foto", [], detected_language="de", doc_type="image", translation_status="pending",
+        translation_enabled=True,
+    )
+    pipeline.translate_document(session, {"document_id": str(doc.id)})
+    session.refresh(doc)
+    assert doc.translation_status is None
+    assert llm_stub["translate"] == []

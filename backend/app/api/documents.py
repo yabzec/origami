@@ -85,12 +85,33 @@ def active_jobs_for(session: Session, doc_ids: list[uuid.UUID]) -> dict[str, dic
     return active
 
 
-def serialize(session: Session, doc: Document, active_jobs: dict[str, dict] | None = None) -> dict:
+def docs_with_content(session: Session, doc_ids: list[uuid.UUID]) -> set[uuid.UUID]:
+    """Ids of the given documents that have content chunks, fetched in one query."""
+    if not doc_ids:
+        return set()
+    return set(
+        session.exec(
+            select(Chunk.document_id)
+            .where(Chunk.document_id.in_(doc_ids), Chunk.source == ChunkSource.content)
+            .distinct()
+        ).all()
+    )
+
+
+def serialize(
+    session: Session,
+    doc: Document,
+    active_jobs: dict[str, dict] | None = None,
+    with_content: set[uuid.UUID] | None = None,
+) -> dict:
     if active_jobs is None:
         active_jobs = active_jobs_for(session, [doc.id])
+    language_differs = bool(doc.detected_language) and doc.detected_language != get_primary_language()
+    if language_differs and with_content is None:
+        with_content = docs_with_content(session, [doc.id])
     return {
         **doc.model_dump(),
-        "translatable": bool(doc.detected_language) and doc.detected_language != get_primary_language(),
+        "translatable": language_differs and doc.id in with_content,
         "tags": [t.model_dump() for t in doc_tags(session, doc)],
         "active_job": active_jobs.get(str(doc.id)),
     }
@@ -147,8 +168,10 @@ def list_documents(
         )
     query = query.order_by(*SORT_ORDER[sort])
     docs = list(session.exec(query))
-    active_jobs = active_jobs_for(session, [d.id for d in docs])
-    return [serialize(session, d, active_jobs) for d in docs]
+    ids = [d.id for d in docs]
+    active_jobs = active_jobs_for(session, ids)
+    with_content = docs_with_content(session, ids)
+    return [serialize(session, d, active_jobs, with_content) for d in docs]
 
 
 BULK_MAX = 500
@@ -351,12 +374,14 @@ def reprocess_document(
 def retranslate_document(document_id: uuid.UUID, session: Session = Depends(get_session)) -> dict:
     doc = get_doc_or_404(session, document_id)
     session.refresh(doc, with_for_update=True)  # same lock as reprocess and translate_document
-    if doc.status in (DocStatus.pending, DocStatus.processing):
-        raise api_error(409, "document_busy", "Document is still being processed")
+    if doc.status != DocStatus.ready:
+        raise api_error(409, "document_busy", "Document is not ready (still processing or failed)")
     if doc.translation_status == TranslationStatus.pending:
         raise api_error(409, "translation_busy", "A translation is already in progress")
     if not doc.detected_language or doc.detected_language == get_primary_language():
         raise api_error(409, "nothing_to_translate", "The document is already in the primary language")
+    if not docs_with_content(session, [doc.id]):
+        raise api_error(409, "nothing_to_translate", "The document has no extracted text to translate")
     _cancel_queued_jobs(session, doc)
     for chunk in session.exec(
         select(Chunk).where(Chunk.document_id == doc.id, Chunk.source == ChunkSource.translation)
