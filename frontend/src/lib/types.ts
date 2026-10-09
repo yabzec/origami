@@ -74,6 +74,12 @@ export interface ScanDevice {
   name: string;
 }
 
+export interface ScanDevicesResponse {
+  devices: ScanDevice[];
+  default: string | null;
+  agent_connected: boolean;
+}
+
 export interface ScanPageInfo {
   id: number;
   page_number: number;
