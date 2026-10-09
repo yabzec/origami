@@ -30,7 +30,7 @@ def document_file(
 ) -> FileResponse:
     doc = get_doc_or_404(session, document_id)
     if preview and not download and doc.preview_path:
-        preview_file = storage.abs_path(doc.preview_path)
+        preview_file = storage.derived_abs(doc.preview_path)
         if preview_file.is_file():
             return FileResponse(
                 preview_file,

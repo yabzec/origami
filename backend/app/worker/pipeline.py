@@ -23,7 +23,8 @@ from app.services.llm import embed as llm_embed
 from app.services.llm import TranslationDeferred
 from app.services.llm import translate as llm_translate
 from app.services.ocr import images_to_pdf, images_to_searchable_pdf, ocr_image, pdf_to_searchable_pdf
-from app.services.storage import Storage
+from app.services.storage import Storage, companion_name, get_storage, preview_name
+from app.services.tree_sync import write_document_file
 from app.worker.runner import is_final_attempt, register
 
 log = logging.getLogger("origami.pipeline")
@@ -35,7 +36,7 @@ EMBED_BATCH_SIZE = 100  # provider batch limit; translation doubles chunk count
 
 def get_pipeline_storage() -> Storage:
     """Worker-side storage factory (no FastAPI DI in the worker process)."""
-    return Storage(get_settings().storage_path)
+    return get_storage()
 
 
 @register("process_document")
@@ -111,16 +112,14 @@ def _extract_content(
         if not doc.ocr_enabled:
             return []  # photo path: no OCR, no companion pdf; summary via vision
         pdf_bytes, text = ocr_image(path, doc.ocr_languages)
-        storage.store_file(doc.id, ".pdf", pdf_bytes)  # companion searchable PDF
+        storage.write_derived(companion_name(doc.id), pdf_bytes)  # companion searchable PDF
         return [(1, text)]
 
     if doc.doc_type == DocType.pdf:
         pages = extract_pdf_text(path)
         if doc.ocr_enabled and pdf_needs_ocr(pages):
             pdf_bytes, pages = pdf_to_searchable_pdf(path, doc.ocr_languages)
-            rel, size = storage.store_file(doc.id, ".pdf", pdf_bytes)
-            doc.file_path = rel
-            doc.file_size = size
+            write_document_file(session, storage, doc, ".pdf", pdf_bytes)
             doc.ocr_applied = True
         else:
             doc.ocr_applied = False  # original file kept
@@ -135,7 +134,7 @@ def _extract_office(
     session: Session, doc: Document, storage: Storage, path: Path
 ) -> list[tuple[int | None, str]]:
     """Office files are viewed and indexed through a LibreOffice PDF; the original stays the download."""
-    preview = storage.abs_path(doc.preview_path) if doc.preview_path else None
+    preview = storage.derived_abs(doc.preview_path) if doc.preview_path else None
     if preview is None or not preview.is_file():
         try:
             pdf_bytes = office_to_pdf(path)
@@ -146,8 +145,8 @@ def _extract_office(
             doc.preview_path = None
             session.commit()
             return [(None, extract_docx(path))]
-        doc.preview_path = storage.store_preview(doc.id, pdf_bytes)
-        preview = storage.abs_path(doc.preview_path)
+        doc.preview_path = storage.write_derived(preview_name(doc.id), pdf_bytes)
+        preview = storage.derived_abs(doc.preview_path)
     pages = extract_pdf_text(preview)
     doc.page_count = len(pages)
     session.commit()
@@ -164,9 +163,7 @@ def _reocr_pdf(session: Session, doc: Document, storage: Storage) -> list[tuple[
     pages = extract_pdf_text(path)
     if doc.ocr_enabled and (doc.ocr_applied is not False or pdf_needs_ocr(pages)):
         pdf_bytes, pages = pdf_to_searchable_pdf(path, doc.ocr_languages)
-        rel, size = storage.store_file(doc.id, ".pdf", pdf_bytes)
-        doc.file_path = rel
-        doc.file_size = size
+        write_document_file(session, storage, doc, ".pdf", pdf_bytes)
         doc.ocr_applied = True
     doc.page_count = len(pages)
     session.commit()
@@ -194,9 +191,7 @@ def _extract_scan(
         else:
             pdf_bytes = images_to_pdf(image_paths)
             pages = []
-        rel, size = storage.store_file(doc.id, ".pdf", pdf_bytes)
-        doc.file_path = rel
-        doc.file_size = size
+        write_document_file(session, storage, doc, ".pdf", pdf_bytes)
         doc.ocr_applied = doc.ocr_enabled
     doc.page_count = len(pages)
     scan_session = session.get(ScanSession, session_id)

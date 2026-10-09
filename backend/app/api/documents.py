@@ -191,14 +191,14 @@ def _found_and_missing(session: Session, ids: list[uuid.UUID]) -> tuple[list[Doc
     return docs, [str(i) for i in ids if i not in found]
 
 
-def _delete_documents(session: Session, docs: list[Document]) -> list[str | None]:
-    """Cancel queued jobs and delete rows (no commit); returns the file paths to remove after commit."""
-    rel_paths: list[str | None] = []
+def _delete_documents(session: Session, docs: list[Document]) -> list[tuple]:
+    """Cancel queued jobs and delete rows (no commit); returns the files to remove after commit."""
+    files: list[tuple] = []
     for doc in docs:
-        rel_paths += [doc.file_path, doc.preview_path]
+        files.append((doc.file_path, doc.preview_path, doc.id))
         _cancel_queued_jobs(session, doc)
         session.delete(doc)  # chunks, document_tags and translation segments cascade via FK
-    return rel_paths
+    return files
 
 
 @router.post("/bulk/move")
@@ -221,10 +221,10 @@ def bulk_delete(
     storage: Storage = Depends(get_storage),
 ) -> dict:
     docs, missing = _found_and_missing(session, body.ids)
-    rel_paths = _delete_documents(session, docs)
+    files = _delete_documents(session, docs)
     session.commit()
-    for rel in rel_paths:
-        storage.delete_document_file(rel)
+    for file_rel, preview, doc_id in files:
+        storage.delete_document_files(file_rel, preview, doc_id)
     return {"deleted": len(docs), "missing": missing}
 
 
@@ -302,10 +302,10 @@ def delete_document(
     storage: Storage = Depends(get_storage),
 ) -> None:
     doc = get_doc_or_404(session, document_id)
-    rel_paths = _delete_documents(session, [doc])
+    files = _delete_documents(session, [doc])
     session.commit()
-    for rel in rel_paths:
-        storage.delete_document_file(rel)
+    for file_rel, preview, doc_id in files:
+        storage.delete_document_files(file_rel, preview, doc_id)
 
 
 class ReprocessRequest(BaseModel):

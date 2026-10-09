@@ -43,7 +43,7 @@ def test_bulk_move_missing_folder_changes_nothing(auth_client, session):
 
 def test_bulk_delete_removes_rows_files_and_queued_jobs(auth_client, session, storage):
     a, b = make(session), make(session)
-    rel, _ = storage.store_file(a.id, ".pdf", b"%PDF")
+    rel, _ = storage.write_file(f"{a.id}.pdf", b"%PDF")
     a.file_path = rel
     session.add(Job(type="process_document", payload={"document_id": str(a.id)}))
     session.commit()

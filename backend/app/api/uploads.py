@@ -6,11 +6,13 @@ from sqlmodel import Session
 
 from app.api.deps import api_error, get_current_user
 from app.api.documents import serialize
+from app.api.storage_errors import storage_errors
 from app.api.ocr import check_ocr_languages, default_ocr_languages
 from app.db import get_session
 from app.models import DocType, Document, DocumentTag, Folder, Tag
 from app.services.jobs import enqueue
 from app.services.storage import Storage, get_storage
+from app.services.tree_sync import write_document_file
 
 router = APIRouter(
     prefix="/api/documents", tags=["uploads"], dependencies=[Depends(get_current_user)]
@@ -124,10 +126,8 @@ def upload_document(
         original_filename=file.filename,
         document_date=document_date,
     )
-    rel, size = storage.store_fileobj(doc.id, ext, file.file)
-    doc.file_path = rel
-    doc.file_size = size
-    session.commit()
+    with storage_errors():
+        write_document_file(session, storage, doc, ext, file.file)
 
     enqueue(session, "process_document", {"document_id": str(doc.id)})
     session.refresh(doc)

@@ -45,7 +45,7 @@ def chunks_by_source(session, doc):
 
 def test_text_document_full_pipeline(session, pipeline_storage, llm_stub):
     doc = make_doc(session, doc_type=DocType.text, title="Nota")
-    rel, size = pipeline_storage.store_file(doc.id, ".md", "Contenuto importante.\n\nAltro testo.".encode())
+    rel, size = pipeline_storage.write_file(f"{doc.id}.md", "Contenuto importante.\n\nAltro testo.".encode())
     doc.file_path = rel
     session.commit()
 
@@ -64,7 +64,7 @@ def test_text_document_full_pipeline(session, pipeline_storage, llm_stub):
 def test_image_document_ocr_and_vision(session, pipeline_storage, llm_stub, tmp_path):
     img = make_text_image(tmp_path / "src.png", "SCONTRINO 12")
     doc = make_doc(session, doc_type=DocType.image, title="Scontrino")
-    rel, _ = pipeline_storage.store_file(doc.id, ".png", img.read_bytes())
+    rel, _ = pipeline_storage.write_file(f"{doc.id}.png", img.read_bytes())
     doc.file_path = rel
     session.commit()
 
@@ -73,7 +73,7 @@ def test_image_document_ocr_and_vision(session, pipeline_storage, llm_stub, tmp_
     # vision describe was called with the image path
     assert llm_stub["describe"][0]["image_path"] is not None
     # companion searchable PDF exists alongside the original
-    assert pipeline_storage.abs_path(f"files/{doc.id}.pdf").exists()
+    assert pipeline_storage.derived_abs(f"{doc.id}.ocr.pdf").exists()
     content = " ".join(c.content for c in chunks_by_source(session, doc)[ChunkSource.content])
     assert "SCONTRINO" in content.upper()
 
@@ -87,7 +87,7 @@ def test_pdf_without_text_layer_gets_ocr(session, pipeline_storage, llm_stub, tm
     Image.open(img_path).save(pdf_path, "PDF")
 
     doc = make_doc(session, doc_type=DocType.pdf, title="Preventivo")
-    rel, _ = pipeline_storage.store_file(doc.id, ".pdf", pdf_path.read_bytes())
+    rel, _ = pipeline_storage.write_file(f"{doc.id}.pdf", pdf_path.read_bytes())
     doc.file_path = rel
     session.commit()
 
@@ -100,7 +100,7 @@ def test_pdf_without_text_layer_gets_ocr(session, pipeline_storage, llm_stub, tm
 
 def test_video_document_metadata_only(session, pipeline_storage, llm_stub):
     doc = make_doc(session, doc_type=DocType.video, title="Video vacanze", description="Mare 2026")
-    rel, _ = pipeline_storage.store_file(doc.id, ".mp4", b"fake video")
+    rel, _ = pipeline_storage.write_file(f"{doc.id}.mp4", b"fake video")
     doc.file_path = rel
     session.commit()
 
@@ -115,7 +115,7 @@ def test_video_document_metadata_only(session, pipeline_storage, llm_stub):
 
 def test_pipeline_resumes_after_embedding_failure(session, pipeline_storage, llm_stub, monkeypatch):
     doc = make_doc(session, doc_type=DocType.text, title="Nota")
-    rel, _ = pipeline_storage.store_file(doc.id, ".txt", b"Testo di prova.")
+    rel, _ = pipeline_storage.write_file(f"{doc.id}.txt", b"Testo di prova.")
     doc.file_path = rel
     session.commit()
 
@@ -147,7 +147,7 @@ def test_no_ocr_image_skips_ocr_and_has_no_content(session, pipeline_storage, ll
 
     img = make_text_image(tmp_path / "src.png", "SCONTRINO 12")
     doc = make_doc(session, doc_type=DocType.image, title="Foto", ocr_enabled=False)
-    rel, _ = pipeline_storage.store_file(doc.id, ".png", img.read_bytes())
+    rel, _ = pipeline_storage.write_file(f"{doc.id}.png", img.read_bytes())
     doc.file_path = rel
     session.commit()
 
@@ -155,7 +155,7 @@ def test_no_ocr_image_skips_ocr_and_has_no_content(session, pipeline_storage, ll
     assert doc.status == DocStatus.ready
     by_source = chunks_by_source(session, doc)
     assert ChunkSource.content not in by_source        # no OCR text
-    assert not pipeline_storage.abs_path(f"files/{doc.id}.pdf").exists()  # no companion pdf
+    assert not pipeline_storage.derived_abs(f"{doc.id}.ocr.pdf").exists()  # no companion pdf
     assert llm_stub["describe"][0]["image_path"] is not None  # vision summary (photo path)
 
 
@@ -170,7 +170,7 @@ def test_no_ocr_pdf_uses_native_text_only(session, pipeline_storage, llm_stub, t
     raw_pdf = tmp_path / "raw.pdf"
     PILImage.open(img).convert("RGB").save(raw_pdf, "PDF")
     doc = make_doc(session, doc_type=DocType.pdf, title="Prev", ocr_enabled=False)
-    rel, _ = pipeline_storage.store_file(doc.id, ".pdf", raw_pdf.read_bytes())
+    rel, _ = pipeline_storage.write_file(f"{doc.id}.pdf", raw_pdf.read_bytes())
     doc.file_path = rel
     session.commit()
 
@@ -212,7 +212,7 @@ def test_image_summary_uses_text_when_ocr_text_present(session, pipeline_storage
         size=(2400, 400),
     )
     doc = make_doc(session, doc_type=DocType.image, title="Fattura")
-    rel, _ = pipeline_storage.store_file(doc.id, ".png", img.read_bytes())
+    rel, _ = pipeline_storage.write_file(f"{doc.id}.png", img.read_bytes())
     doc.file_path = rel
     session.commit()
 
@@ -226,7 +226,7 @@ def test_image_summary_uses_text_when_ocr_text_present(session, pipeline_storage
 def test_image_summary_falls_back_to_vision_when_little_text(session, pipeline_storage, llm_stub, tmp_path):
     # image doc with a tiny content chunk (< 40 chars), simulating a near-textless photo
     doc = make_doc(session, doc_type=DocType.image, title="Foto")
-    rel, _ = pipeline_storage.store_file(doc.id, ".png", b"\x89PNG fake")
+    rel, _ = pipeline_storage.write_file(f"{doc.id}.png", b"\x89PNG fake")
     doc.file_path = rel
     session.add(
         Chunk(document_id=doc.id, chunk_index=0, page_number=1, source=ChunkSource.content, content="ciao")
@@ -241,7 +241,7 @@ def test_image_summary_falls_back_to_vision_when_little_text(session, pipeline_s
 
 def _text_doc(session, pipeline_storage, body="Erster Absatz.\n\nZweiter Absatz."):
     doc = make_doc(session, doc_type=DocType.text, title="Brief")
-    rel, _ = pipeline_storage.store_file(doc.id, ".md", body.encode())
+    rel, _ = pipeline_storage.write_file(f"{doc.id}.md", body.encode())
     doc.file_path = rel
     session.commit()
     return doc
@@ -370,7 +370,7 @@ def _office_doc(session, pipeline_storage, tmp_path, ext):
     else:
         src = make_odt(tmp_path / "src.odt", "VERBALE ASSEMBLEA")
     doc = make_doc(session, doc_type=DocType.text, title="Contratto", original_filename=f"contratto{ext}")
-    rel, _ = pipeline_storage.store_file(doc.id, ext, src.read_bytes())
+    rel, _ = pipeline_storage.write_file(f"{doc.id}{ext}", src.read_bytes())
     doc.file_path = rel
     session.commit()
     return doc
@@ -382,8 +382,8 @@ def test_docx_gets_pdf_preview_and_page_numbers(session, pipeline_storage, llm_s
     doc = run(session, doc)
     assert doc.status == DocStatus.ready
     assert doc.file_path == original  # download keeps the .docx
-    assert doc.preview_path == f"files/{doc.id}.preview.pdf"
-    assert pipeline_storage.abs_path(doc.preview_path).read_bytes().startswith(b"%PDF")
+    assert doc.preview_path == f"{doc.id}.preview.pdf"
+    assert pipeline_storage.derived_abs(doc.preview_path).read_bytes().startswith(b"%PDF")
     assert doc.page_count == 2
     content = chunks_by_source(session, doc)[ChunkSource.content]
     assert {c.page_number for c in content} == {1, 2}
@@ -431,7 +431,7 @@ def test_reprocess_reuses_existing_preview(session, pipeline_storage, llm_stub, 
 
 def _failing_text_doc(session, pipeline_storage, monkeypatch):
     doc = make_doc(session, doc_type=DocType.text, title="Nota")
-    rel, _ = pipeline_storage.store_file(doc.id, ".txt", b"Testo di prova.")
+    rel, _ = pipeline_storage.write_file(f"{doc.id}.txt", b"Testo di prova.")
     doc.file_path = rel
     session.commit()
     boom = RuntimeError("embedding API down")
@@ -651,3 +651,16 @@ def test_translation_insert_holds_document_row_lock(
     doc = translate(session, doc)
     assert seen["locked"] is True
     assert doc.translation_status == "done"
+
+
+def test_image_ocr_companion_goes_to_derived(session, pipeline_storage, llm_stub, tmp_path):
+    from app.services.storage import companion_name
+
+    img = make_text_image(tmp_path / "scan.png")
+    doc = make_doc(session, doc_type=DocType.image, title="Foto")
+    pipeline_storage.write_file("Foto.png", img.read_bytes())
+    doc.file_path = "Foto.png"
+    session.commit()
+    run(session, doc)
+    assert pipeline_storage.derived_abs(companion_name(doc.id)).exists()
+    assert sorted(p.name for p in pipeline_storage.root.iterdir()) == ["Foto.png"]

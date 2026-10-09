@@ -89,7 +89,7 @@ def test_patch_missing_tag_id_404(auth_client, session):
 
 def test_delete_removes_file(auth_client, session, storage):
     doc = make_document(session)
-    rel, _ = storage.store_file(doc.id, ".pdf", b"%PDF")
+    rel, _ = storage.write_file(f"{doc.id}.pdf", b"%PDF")
     doc.file_path = rel
     session.commit()
 
@@ -184,11 +184,11 @@ def test_document_text_translation_variant(auth_client, session):
 
 def test_delete_removes_preview(auth_client, session, storage):
     doc = make_document(session, doc_type=DocType.text)
-    rel, _ = storage.store_file(doc.id, ".docx", b"PK")
+    rel, _ = storage.write_file(f"{doc.id}.docx", b"PK")
     doc.file_path = rel
-    doc.preview_path = storage.store_preview(doc.id, b"%PDF")
+    doc.preview_path = storage.write_derived(f"{doc.id}.preview.pdf", b"%PDF")
     session.commit()
-    original, preview = storage.abs_path(rel), storage.abs_path(doc.preview_path)
+    original, preview = storage.abs_path(rel), storage.derived_abs(doc.preview_path)
 
     assert auth_client.delete(f"/api/documents/{doc.id}").status_code == 204
     assert not original.exists()

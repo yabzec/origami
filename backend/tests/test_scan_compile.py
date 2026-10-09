@@ -61,7 +61,7 @@ def test_worker_compiles_scan_end_to_end(
     session.refresh(doc)
     assert doc.status == DocStatus.ready
     assert doc.page_count == 2
-    assert doc.file_path == f"files/{doc.id}.pdf"
+    assert doc.file_path == "Documento.pdf"
     assert storage.abs_path(doc.file_path).exists()
     assert doc.summary == "Descrizione generata."  # scans with OCR text are summarized
     session.expire_all()

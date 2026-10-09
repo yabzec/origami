@@ -105,3 +105,28 @@ def test_upload_with_document_date(auth_client, session, storage):
 def test_upload_office_formats_are_text(auth_client, session, storage):
     for name in ("lettera.odt", "vecchio.doc", "nota.rtf", "contratto.docx"):
         assert upload(auth_client, name).json()["doc_type"] == DocType.text
+
+
+def test_upload_places_file_in_folder_tree(auth_client, session, storage):
+    from app.models import Folder
+
+    home = Folder(name="Home")
+    session.add(home)
+    session.commit()
+    bills = Folder(name="Bills", parent_id=home.id)
+    session.add(bills)
+    session.commit()
+
+    first = auth_client.post(
+        "/api/documents/upload",
+        files={"file": ("ACME.pdf", b"%PDF-1", "application/pdf")},
+        data={"folder_id": str(bills.id), "title": "Invoice"},
+    ).json()
+    second = auth_client.post(
+        "/api/documents/upload",
+        files={"file": ("other.PDF", b"%PDF-2", "application/pdf")},
+        data={"folder_id": str(bills.id), "title": "Invoice"},
+    ).json()
+    assert first["file_path"] == "Home/Bills/Invoice.pdf"
+    assert second["file_path"] == "Home/Bills/Invoice (2).pdf"
+    assert storage.abs_path("Home/Bills/Invoice (2).pdf").read_bytes() == b"%PDF-2"

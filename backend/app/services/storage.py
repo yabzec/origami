@@ -36,41 +36,6 @@ class Storage:
         self.derived_root = Path(derived_root) if derived_root else self.root.parent / "derived"
         self.tmp_root = Path(tmp_root) if tmp_root else self.root.parent / "tmp"
 
-    # --- legacy flat layout (removed in a later task) ---
-    @property
-    def files_dir(self) -> Path:
-        d = self.root / "files"
-        d.mkdir(parents=True, exist_ok=True)
-        return d
-
-    @property
-    def tmp_scans_dir(self) -> Path:
-        d = self.root / "tmp" / "scan_sessions"
-        d.mkdir(parents=True, exist_ok=True)
-        return d
-
-    def store_file(self, document_id: uuid.UUID, ext: str, data: bytes) -> tuple[str, int]:
-        name = f"{document_id}{ext}"
-        path = self.files_dir / name
-        path.write_bytes(data)
-        return f"files/{name}", len(data)
-
-    def store_fileobj(self, document_id: uuid.UUID, ext: str, fileobj) -> tuple[str, int]:
-        name = f"{document_id}{ext}"
-        path = self.files_dir / name
-        with path.open("wb") as out:
-            shutil.copyfileobj(fileobj, out)
-        return f"files/{name}", path.stat().st_size
-
-    def store_preview(self, document_id: uuid.UUID, data: bytes) -> str:
-        name = f"{document_id}.preview.pdf"
-        (self.files_dir / name).write_bytes(data)
-        return f"files/{name}"
-
-    def delete_document_file(self, rel: str | None) -> None:
-        if rel:
-            self.abs_path(rel).unlink(missing_ok=True)
-
     # --- paths ---
     def abs_path(self, rel: str) -> Path:
         return self.root / rel
@@ -176,6 +141,12 @@ class Storage:
         return removed
 
     # --- scan sessions ---
+    @property
+    def tmp_scans_dir(self) -> Path:
+        d = self.root / "tmp" / "scan_sessions"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
     def scan_session_dir(self, session_id: int) -> Path:
         d = self.tmp_scans_dir / str(session_id)
         d.mkdir(parents=True, exist_ok=True)
