@@ -93,6 +93,8 @@ def migrate_storage_cmd(dry_run: bool, check: bool, fix: bool) -> None:
         print(f"{'would move' if dry_run else 'moved'}: {old} -> {new}")
     for rel in report.missing:
         print(f"missing source (database updated anyway): {rel}")
+    for name in report.quarantined:
+        print(f"quarantined to {storage.derived_abs('orphans/' + name)}: {name}")
     for name in report.leftovers:
         print(f"left in files/: {name}")
     if dry_run:

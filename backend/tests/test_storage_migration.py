@@ -1,3 +1,4 @@
+import json
 import uuid
 
 import pytest
@@ -84,6 +85,8 @@ def test_missing_source_is_reported(session, store):
     store.abs_path(doc.file_path).unlink()
     report = migrate_storage(session, store)
     assert report.missing == [f"files/{doc.id}.pdf"]
+    session.refresh(doc)
+    assert doc.file_path == "A.pdf"
 
 
 def test_same_titles_get_suffixes(session, store):
@@ -121,3 +124,44 @@ def test_api_refuses_to_start_on_old_layout(store):
                 pass
     finally:
         storage_module.get_storage = original
+
+
+def test_crash_between_move_and_commit_resumes(session, store):
+    doc = old_doc(session, store, "A", ".pdf", data=b"data")
+    old = doc.file_path
+    store.derived_root.mkdir(parents=True, exist_ok=True)
+    (store.derived_root / "storage-migration.journal").write_text(
+        json.dumps({"doc_id": str(doc.id), "old": old, "new": "A.pdf"}) + "\n"
+    )
+    store.abs_path(old).rename(store.abs_path("A.pdf"))
+    report = migrate_storage(session, store)
+    session.expire_all()
+    assert session.get(Document, doc.id).file_path == "A.pdf"
+    assert store.abs_path("A.pdf").read_bytes() == b"data"
+    assert not store.abs_path("A (2).pdf").exists()
+    assert report.missing == []
+    assert not (store.derived_root / "storage-migration.journal").exists()
+
+
+def test_stranded_companion_is_moved(session, store):
+    doc = Document(title="Photo", doc_type=DocType.image, file_path="Photo.png")
+    session.add(doc)
+    session.commit()
+    store.write_file("Photo.png", b"img")
+    store.abs_path("files").mkdir(parents=True)
+    store.abs_path(f"files/{doc.id}.pdf").write_bytes(b"companion")
+    assert store.has_old_layout()
+    migrate_storage(session, store)
+    assert store.derived_abs(f"{doc.id}.ocr.pdf").read_bytes() == b"companion"
+    assert not store.has_old_layout()
+
+
+def test_uuid_orphan_is_quarantined(session, store):
+    name = f"{uuid.uuid4()}.pdf"
+    store.abs_path("files").mkdir(parents=True)
+    store.abs_path(f"files/{name}").write_bytes(b"orphan")
+    report = migrate_storage(session, store)
+    assert store.derived_abs(f"orphans/{name}").read_bytes() == b"orphan"
+    assert report.quarantined == [name]
+    assert not store.has_old_layout()
+    assert not (store.root / "files").exists()
