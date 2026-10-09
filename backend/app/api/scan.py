@@ -97,7 +97,8 @@ def scan_preview(
 def create_session(
     body: SessionCreate, db: Session = Depends(get_session)
 ) -> ScanSession:
-    check_ocr_languages(body.ocr_languages)
+    if body.ocr_enabled:
+        check_ocr_languages(body.ocr_languages)
     scan_session = ScanSession(
         ocr_languages=body.ocr_languages or get_settings().default_ocr_languages,
         ocr_enabled=body.ocr_enabled,
@@ -215,7 +216,9 @@ def compile_session(
     session_id: int, body: CompileRequest, db: Session = Depends(get_session)
 ) -> dict:
     scan_session = get_session_or_404(db, session_id)
-    check_ocr_languages(body.ocr_languages)
+    ocr_enabled = scan_session.ocr_enabled if body.ocr_enabled is None else body.ocr_enabled
+    if ocr_enabled:
+        check_ocr_languages(body.ocr_languages)
     if scan_session.status != ScanSessionStatus.active:
         raise api_error(409, "session_not_active", "Scan session is not active")
     if not session_pages(db, session_id):
@@ -228,7 +231,7 @@ def compile_session(
         document_date=body.document_date,
         doc_type=DocType.scan,
         ocr_languages=body.ocr_languages or scan_session.ocr_languages,
-        ocr_enabled=scan_session.ocr_enabled if body.ocr_enabled is None else body.ocr_enabled,
+        ocr_enabled=ocr_enabled,
         summary_enabled=body.summary_enabled,
         translation_enabled=body.translation_enabled,
         folder_id=body.folder_id,

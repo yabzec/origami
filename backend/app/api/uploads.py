@@ -105,7 +105,8 @@ def upload_document(
     session: Session = Depends(get_session),
     storage: Storage = Depends(get_storage),
 ) -> dict:
-    check_ocr_languages(ocr_languages)
+    if ocr_enabled:
+        check_ocr_languages(ocr_languages)
     ext = Path(file.filename or "").suffix.lower()
     doc_type = EXTENSION_MAP.get(ext)
     if doc_type is None:

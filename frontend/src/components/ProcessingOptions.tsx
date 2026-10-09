@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { OcrLanguageSelect } from "@/components/OcrLanguageSelect";
 import { useOcrLanguages } from "@/hooks/useOcrLanguages";
-import type { ProcessingValues } from "@/lib/processing";
+import { normalizeProcessing, type ProcessingValues } from "@/lib/processing";
 
 export function ProcessingOptions({
   idPrefix,
@@ -16,8 +16,10 @@ export function ProcessingOptions({
   const noLanguages = data !== undefined && data.languages.length === 0;
 
   useEffect(() => {
-    // fill the server default once it arrives, unless the user (or the document) already chose
-    if (data && value.ocrLanguages === "" && data.default) onChange({ ...value, ocrLanguages: data.default });
+    // fill the server default once it arrives and drop languages that are no longer installed
+    if (!data) return;
+    const next = normalizeProcessing(value, data);
+    if (next !== value) onChange(next);
   }, [data, value, onChange]);
 
   const set = (patch: Partial<ProcessingValues>) => onChange({ ...value, ...patch });

@@ -1,4 +1,5 @@
-import type { Document } from "./types";
+import { keepInstalled } from "./ocrLanguages";
+import type { Document, OcrLanguagesResponse } from "./types";
 
 export interface ProcessingValues {
   ocrEnabled: boolean;
@@ -27,4 +28,11 @@ export function processingPayload(v: ProcessingValues) {
     summary_enabled: v.summaryEnabled,
     translation_enabled: v.translationEnabled,
   };
+}
+
+/** Fit the values to the installed OCR languages; the same object when nothing changes. */
+export function normalizeProcessing(v: ProcessingValues, ocr: OcrLanguagesResponse): ProcessingValues {
+  const codes = ocr.languages.map((l) => l.code);
+  const ocrLanguages = keepInstalled(v.ocrLanguages, codes, ocr.default);
+  return ocrLanguages === v.ocrLanguages ? v : { ...v, ocrLanguages };
 }

@@ -323,7 +323,8 @@ def reprocess_document(
     storage: Storage = Depends(get_storage),
 ) -> dict:
     doc = get_doc_or_404(session, document_id)
-    check_ocr_languages(body.ocr_languages)
+    if body.ocr_enabled:
+        check_ocr_languages(body.ocr_languages)
     if doc.status in (DocStatus.pending, DocStatus.processing):
         raise api_error(409, "document_busy", "Document is still being processed")
     if doc.doc_type == DocType.video:

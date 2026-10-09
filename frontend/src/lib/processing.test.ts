@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultProcessing, processingFromDocument, processingPayload } from "./processing";
+import { defaultProcessing, normalizeProcessing, processingFromDocument, processingPayload } from "./processing";
 import type { Document } from "./types";
 
 describe("processing", () => {
@@ -33,6 +33,25 @@ describe("processing", () => {
       ocrLanguages: "deu",
       summaryEnabled: true,
       translationEnabled: false,
+    });
+  });
+
+  describe("normalizeProcessing", () => {
+    const ocr = { languages: [{ code: "eng", name: "English" }, { code: "ita", name: "Italian" }], default: "ita+eng" };
+
+    it("fills the server default when nothing is chosen", () => {
+      expect(normalizeProcessing(defaultProcessing(), ocr).ocrLanguages).toBe("ita+eng");
+    });
+
+    it("drops languages that are no longer installed", () => {
+      const value = { ...defaultProcessing(), ocrLanguages: "deu+eng" };
+      expect(normalizeProcessing(value, ocr)).toEqual({ ...value, ocrLanguages: "eng" });
+      expect(normalizeProcessing({ ...value, ocrLanguages: "deu" }, ocr).ocrLanguages).toBe("ita+eng");
+    });
+
+    it("returns the same object when nothing changes (no onChange loop)", () => {
+      const value = { ...defaultProcessing(), ocrLanguages: "eng" };
+      expect(normalizeProcessing(value, ocr)).toBe(value);
     });
   });
 });

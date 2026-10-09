@@ -13,6 +13,12 @@ export function toggleLanguage(value: string, code: string): string {
   return current.filter((c) => c !== code).join("+");
 }
 
+/** Drop codes that are not installed; `fallback` when none are left. */
+export function keepInstalled(value: string, installed: string[], fallback: string): string {
+  const kept = splitLanguages(value).filter((c) => installed.includes(c));
+  return kept.length ? kept.join("+") : fallback;
+}
+
 export function languagesLabel(value: string, languages: OcrLanguage[]): string {
   const names = new Map(languages.map((l) => [l.code, l.name]));
   const codes = splitLanguages(value);

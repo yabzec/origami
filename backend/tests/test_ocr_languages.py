@@ -101,3 +101,29 @@ def test_reprocess_rejects_uninstalled_stored_language(auth_client, session, ins
     doc = seed_document(session, "Doc", [{"content": "x", "page_number": 1}], doc_type="pdf")
     resp = auth_client.post(f"/api/documents/{doc.id}/reprocess", json={"ocr_languages": "ita"})
     _assert_unknown(resp, "ita")
+
+
+def test_languages_are_not_checked_when_ocr_is_disabled(auth_client, session, storage, fake_scanner, installed):
+    from tests.helpers import seed_document
+
+    installed(["eng"])
+    doc = seed_document(session, "Doc", [{"content": "x", "page_number": 1}], doc_type="pdf")
+    resp = auth_client.post(
+        f"/api/documents/{doc.id}/reprocess", json={"ocr_enabled": False, "ocr_languages": "xyz"}
+    )
+    assert resp.status_code == 200
+    resp = auth_client.post(
+        "/api/documents/upload",
+        files={"file": ("a.pdf", b"%PDF", "application/pdf")},
+        data={"ocr_languages": "xyz", "ocr_enabled": "false"},
+    )
+    assert resp.status_code == 201
+    created = auth_client.post("/api/scan/sessions", json={"ocr_languages": "xyz", "ocr_enabled": False})
+    assert created.status_code == 201
+    sid = auth_client.post("/api/scan/sessions", json={"ocr_languages": "eng"}).json()["id"]
+    auth_client.post(f"/api/scan/sessions/{sid}/pages", json={})
+    resp = auth_client.post(
+        f"/api/scan/sessions/{sid}/compile",
+        json={"title": "T", "ocr_languages": "xyz", "ocr_enabled": False},
+    )
+    assert resp.status_code == 201
