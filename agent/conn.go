@@ -21,6 +21,7 @@ const (
 	PingInterval       = 30 * time.Second
 	RediscoverInterval = 60 * time.Second
 	browseTimeout      = 3 * time.Second
+	maxMissedBrowses   = 3 // a scanner is dropped after this many browses in a row without it
 	retryDelay         = 3 * time.Second
 	dialTimeout        = 15 * time.Second
 	statusBadToken     = websocket.StatusCode(4401)
@@ -34,6 +35,7 @@ type Agent struct {
 	server       string
 	token        string
 	scanners     map[string]Scanner
+	missed       map[string]int // consecutive browses without the scanner
 	lastActivity time.Time
 	browse       Browser
 	exec         *Executor
@@ -42,7 +44,7 @@ type Agent struct {
 }
 
 func NewAgent(server, token string, browse Browser) *Agent {
-	a := &Agent{server: server, token: token, scanners: map[string]Scanner{},
+	a := &Agent{server: server, token: token, scanners: map[string]Scanner{}, missed: map[string]int{},
 		lastActivity: time.Now(), browse: browse, relaunch: make(chan struct{}, 1)}
 	a.exec = &Executor{Client: newHTTPClient(), Lookup: a.lookup}
 	return a
@@ -164,7 +166,8 @@ func (a *Agent) session(ctx context.Context, dialWait time.Duration) (welcomed, 
 	if err := writeJSON(ctx, c, helloMsg()); err != nil {
 		return false, false, err
 	}
-	go a.discoverLoop(ctx, c)
+	discoverNow := make(chan struct{}, 1)
+	go a.discoverLoop(ctx, c, discoverNow)
 	go a.pingLoop(ctx, c)
 	go a.idleLoop(ctx, cancel)
 
@@ -189,6 +192,11 @@ func (a *Agent) session(ctx context.Context, dialWait time.Duration) (welcomed, 
 				welcomed = true
 			}
 			a.mu.Unlock()
+		case "discover":
+			select {
+			case discoverNow <- struct{}{}:
+			default: // a browse is already queued
+			}
 		case "escl":
 			if len(msg.ID) != IDLen {
 				log.Printf("ignoring escl request with bad id length %d", len(msg.ID))
@@ -215,20 +223,10 @@ func (a *Agent) handle(ctx context.Context, c *websocket.Conn, msg Incoming) {
 	_ = writeJSON(ctx, c, endMsg(msg.ID))
 }
 
-func (a *Agent) discoverLoop(ctx context.Context, c *websocket.Conn) {
+func (a *Agent) discoverLoop(ctx context.Context, c *websocket.Conn, now <-chan struct{}) {
 	var last string
 	for {
-		found := a.browse(ctx, browseTimeout)
-		devices := make([]Device, 0, len(found))
-		next := map[string]Scanner{}
-		for _, sc := range found {
-			next[sc.UUID] = sc
-			devices = append(devices, Device{UUID: sc.UUID, Name: sc.Name})
-		}
-		sort.Slice(devices, func(i, j int) bool { return devices[i].UUID < devices[j].UUID })
-		a.mu.Lock()
-		a.scanners = next
-		a.mu.Unlock()
+		devices := a.applyBrowse(a.browse(ctx, browseTimeout))
 		key, _ := json.Marshal(devices)
 		if string(key) != last {
 			if writeJSON(ctx, c, devicesMsg(devices)) != nil {
@@ -239,9 +237,39 @@ func (a *Agent) discoverLoop(ctx context.Context, c *websocket.Conn) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-now:
 		case <-time.After(RediscoverInterval):
 		}
 	}
+}
+
+// applyBrowse merges one browse result into the known scanners. mDNS answers
+// get lost now and then, so a scanner stays until maxMissedBrowses in a row miss it.
+func (a *Agent) applyBrowse(found []Scanner) []Device {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	seen := map[string]bool{}
+	for _, sc := range found {
+		a.scanners[sc.UUID] = sc
+		delete(a.missed, sc.UUID)
+		seen[sc.UUID] = true
+	}
+	for uuid := range a.scanners {
+		if seen[uuid] {
+			continue
+		}
+		a.missed[uuid]++
+		if a.missed[uuid] >= maxMissedBrowses {
+			delete(a.scanners, uuid)
+			delete(a.missed, uuid)
+		}
+	}
+	devices := make([]Device, 0, len(a.scanners))
+	for _, sc := range a.scanners {
+		devices = append(devices, Device{UUID: sc.UUID, Name: sc.Name})
+	}
+	sort.Slice(devices, func(i, j int) bool { return devices[i].UUID < devices[j].UUID })
+	return devices
 }
 
 func (a *Agent) pingLoop(ctx context.Context, c *websocket.Conn) {

@@ -171,3 +171,84 @@ func TestAgentIgnoresBadIDAndEmptyWelcome(t *testing.T) {
 		t.Fatal("no reconnect")
 	}
 }
+
+func TestApplyBrowseKeepsBrieflyMissingScanner(t *testing.T) {
+	a := NewAgent("http://localhost", "t", nil)
+	sc := Scanner{UUID: "u1", Name: "HP", BaseURL: "http://192.168.1.20:80/eSCL"}
+	if got := a.applyBrowse([]Scanner{sc}); len(got) != 1 {
+		t.Fatalf("got %+v", got)
+	}
+	for i := 1; i < maxMissedBrowses; i++ {
+		if got := a.applyBrowse(nil); len(got) != 1 || got[0].UUID != "u1" {
+			t.Fatalf("miss %d: got %+v", i, got)
+		}
+		if _, ok := a.lookup("u1"); !ok {
+			t.Fatalf("miss %d: scanner dropped from lookup", i)
+		}
+	}
+	a.applyBrowse([]Scanner{sc}) // seen again: the miss count restarts
+	for i := 1; i < maxMissedBrowses; i++ {
+		a.applyBrowse(nil)
+	}
+	if _, ok := a.lookup("u1"); !ok {
+		t.Fatal("miss count did not restart")
+	}
+	if got := a.applyBrowse(nil); len(got) != 0 {
+		t.Fatalf("still listed after %d misses: %+v", maxMissedBrowses, got)
+	}
+	if _, ok := a.lookup("u1"); ok {
+		t.Fatal("still in lookup")
+	}
+}
+
+func TestDiscoverMessageBrowsesAtOnce(t *testing.T) {
+	var browses atomic.Int32
+	sc1 := Scanner{UUID: "u1", Name: "HP", BaseURL: "http://192.168.1.20:80/eSCL"}
+	sc2 := Scanner{UUID: "u2", Name: "Canon", BaseURL: "http://192.168.1.21:80/eSCL"}
+	browse := func(ctx context.Context, d time.Duration) []Scanner {
+		if browses.Add(1) == 1 {
+			return []Scanner{sc1}
+		}
+		return []Scanner{sc1, sc2}
+	}
+	devices := make(chan int, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer c.CloseNow()
+		ctx := r.Context()
+		_ = writeJSON(ctx, c, map[string]any{"type": "welcome", "resume_token": "resume-1"})
+		for {
+			_, data, err := c.Read(ctx)
+			if err != nil {
+				return
+			}
+			var m struct {
+				Type    string   `json:"type"`
+				Devices []Device `json:"devices"`
+			}
+			_ = json.Unmarshal(data, &m)
+			if m.Type == "devices" {
+				devices <- len(m.Devices)
+				_ = writeJSON(ctx, c, map[string]any{"type": "discover"})
+			}
+		}
+	}))
+	defer srv.Close()
+	a := NewAgent(srv.URL, "launch-1", browse)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	go func() { _ = a.Run(ctx) }()
+	for _, want := range []int{1, 2} {
+		select {
+		case n := <-devices:
+			if n != want {
+				t.Fatalf("devices=%d want %d", n, want)
+			}
+		case <-ctx.Done():
+			t.Fatalf("no devices message with %d scanners (browses=%d)", want, browses.Load())
+		}
+	}
+}
