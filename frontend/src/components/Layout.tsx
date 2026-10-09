@@ -2,7 +2,7 @@ import { NavLink, Outlet, useNavigate, useSearchParams } from "react-router";
 import { useAuth } from "@/auth";
 import { FolderTree } from "@/components/FolderTree";
 import { TagManager } from "@/components/TagManager";
-import { browseSearch, parseSort } from "@/lib/sorting";
+import { browseQuery, DEFAULT_BROWSE, parseBrowseParams } from "@/lib/browseParams";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -16,11 +16,10 @@ export function Layout() {
   const { logout, user } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const selectedFolder = searchParams.get("folder") ? Number(searchParams.get("folder")) : null;
-
-  const selectFolder = (id: number | null) => {
-    navigate(`/${browseSearch(id, parseSort(searchParams.get("sort")))}`);
-  };
+  const current = parseBrowseParams(searchParams);
+  const selectFolder = (id: number | null) =>
+    navigate(`/${browseQuery({ ...DEFAULT_BROWSE, folderId: id, sort: current.sort })}`);
+  const selectAll = () => navigate(`/${browseQuery({ ...DEFAULT_BROWSE, all: true, sort: current.sort })}`);
 
   return (
     <div className="flex min-h-screen">
@@ -41,7 +40,12 @@ export function Layout() {
           ))}
         </nav>
         <div className="flex-1 overflow-y-auto">
-          <FolderTree selectedId={selectedFolder} onSelect={selectFolder} />
+          <FolderTree
+            selectedId={current.all ? null : current.folderId}
+            allSelected={current.all}
+            onSelect={selectFolder}
+            onSelectAll={selectAll}
+          />
           <TagManager />
         </div>
         <button onClick={logout} className="mt-4 px-2 text-left text-sm text-zinc-500 hover:text-zinc-800">

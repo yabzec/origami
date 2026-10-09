@@ -2,20 +2,49 @@ import { useRef, useState, type DragEvent } from "react";
 import { useSearchParams } from "react-router";
 import { DocumentCard } from "@/components/DocumentCard";
 import { UploadDialog } from "@/components/UploadDialog";
+import { Breadcrumb, FolderTiles } from "@/components/FolderTiles";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useDeleteDocument, useDocuments } from "@/hooks/useDocuments";
+import { useFolders } from "@/hooks/useFolders";
 import { useTags } from "@/hooks/useTags";
-import { browseSearch, parseSort, SORT_OPTIONS } from "@/lib/sorting";
+import { ApiError } from "@/lib/api";
+import {
+  browseQuery,
+  invalidDateRange,
+  parseBrowseParams,
+  type BrowseParams,
+} from "@/lib/browseParams";
+import { childrenOf } from "@/lib/folderTree";
+import { parseSort, SORT_OPTIONS } from "@/lib/sorting";
 import { DOC_TYPES } from "@/lib/types";
 
 export function BrowsePage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const folderId = searchParams.get("folder") ? Number(searchParams.get("folder")) : null;
-  const sort = parseSort(searchParams.get("sort"));
-  const [tagId, setTagId] = useState<number | null>(null);
-  const [docType, setDocType] = useState<string | null>(null);
-  const { data: docs, isLoading } = useDocuments({ folderId, tagId, docType, sort });
+  const params = parseBrowseParams(searchParams);
+  const update = (patch: Partial<BrowseParams>) =>
+    setSearchParams(
+      new URLSearchParams(browseQuery({ ...params, ...patch }).slice(1)),
+    );
+  const badRange = invalidDateRange(params);
+  const { data: folders } = useFolders();
+  const {
+    data: docs,
+    isLoading,
+    isError,
+    error,
+  } = useDocuments(
+    {
+      folder: params.all ? null : (params.folderId ?? "root"),
+      tagId: params.tagId,
+      docType: params.docType,
+      dateFrom: params.dateFrom,
+      dateTo: params.dateTo,
+      sort: params.sort,
+    },
+    !badRange,
+  );
   const { data: tags } = useTags();
   const deleteDoc = useDeleteDocument();
 
@@ -45,13 +74,15 @@ export function BrowsePage() {
           Drop to upload
         </div>
       )}
-      <div className="mb-4 flex items-center gap-3">
-        <h2 className="flex-1 text-lg font-semibold">Documents</h2>
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <h2 className="flex-1 text-lg font-semibold">
+          {params.all ? "All documents" : "Documents"}
+        </h2>
         <Select
           className="w-52"
           aria-label="Order by"
-          value={sort}
-          onChange={(e) => setSearchParams(new URLSearchParams(browseSearch(folderId, parseSort(e.target.value))))}
+          value={params.sort}
+          onChange={(e) => update({ sort: parseSort(e.target.value) })}
         >
           {SORT_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
@@ -61,8 +92,10 @@ export function BrowsePage() {
         </Select>
         <Select
           className="w-40"
-          value={tagId ?? ""}
-          onChange={(e) => setTagId(e.target.value ? Number(e.target.value) : null)}
+          value={params.tagId ?? ""}
+          onChange={(e) =>
+            update({ tagId: e.target.value ? Number(e.target.value) : null })
+          }
         >
           <option value="">All tags</option>
           {(tags ?? []).map((t) => (
@@ -71,7 +104,11 @@ export function BrowsePage() {
             </option>
           ))}
         </Select>
-        <Select className="w-32" value={docType ?? ""} onChange={(e) => setDocType(e.target.value || null)}>
+        <Select
+          className="w-32"
+          value={params.docType ?? ""}
+          onChange={(e) => update({ docType: e.target.value || null })}
+        >
           <option value="">All types</option>
           {DOC_TYPES.map((t) => (
             <option key={t} value={t}>
@@ -79,6 +116,28 @@ export function BrowsePage() {
             </option>
           ))}
         </Select>
+        <Input
+          type="date"
+          aria-label="From date"
+          className="w-40"
+          value={params.dateFrom ?? ""}
+          onChange={(e) => update({ dateFrom: e.target.value || null })}
+        />
+        <Input
+          type="date"
+          aria-label="To date"
+          className="w-40"
+          value={params.dateTo ?? ""}
+          onChange={(e) => update({ dateTo: e.target.value || null })}
+        />
+        {(params.dateFrom || params.dateTo) && (
+          <Button
+            variant="ghost"
+            onClick={() => update({ dateFrom: null, dateTo: null })}
+          >
+            Clear dates
+          </Button>
+        )}
         <Button onClick={() => fileInput.current?.click()}>Upload</Button>
         <input
           ref={fileInput}
@@ -91,18 +150,55 @@ export function BrowsePage() {
           }}
         />
       </div>
+      {badRange && (
+        <p className="mb-3 text-sm text-red-600">
+          “From” date is after “To” date.
+        </p>
+      )}
+      {isError && (
+        <p className="mb-3 text-sm text-red-600">
+          {error instanceof ApiError
+            ? error.message
+            : "Could not load documents"}
+        </p>
+      )}
+      {!params.all && (
+        <>
+          <Breadcrumb
+            folders={folders ?? []}
+            folderId={params.folderId}
+            onNavigate={(id) => update({ folderId: id })}
+          />
+          <FolderTiles
+            folders={folders ?? []}
+            parentId={params.folderId}
+            onOpen={(id) => update({ folderId: id })}
+          />
+        </>
+      )}
       {isLoading && <p className="text-zinc-400">Loading…</p>}
-      {docs && docs.length === 0 && <p className="text-zinc-400">No documents here yet — upload or scan one.</p>}
+      {docs &&
+        docs.length === 0 &&
+        (params.all ||
+          childrenOf(folders ?? [], params.folderId).length === 0) && (
+          <p className="text-zinc-400">
+            No documents here yet — upload or scan one.
+          </p>
+        )}
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
         {(docs ?? []).map((doc) => (
-          <DocumentCard key={doc.id} doc={doc} onDelete={(id) => deleteDoc.mutate(id)} />
+          <DocumentCard
+            key={doc.id}
+            doc={doc}
+            onDelete={(id) => deleteDoc.mutate(id)}
+          />
         ))}
       </div>
       <UploadDialog
         file={pendingFile}
         open={pendingFile !== null}
         onClose={() => setPendingFile(null)}
-        initialFolderId={folderId}
+        initialFolderId={params.all ? null : params.folderId}
       />
     </div>
   );

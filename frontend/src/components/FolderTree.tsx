@@ -82,10 +82,14 @@ function Node({
 
 export function FolderTree({
   selectedId,
+  allSelected,
   onSelect,
+  onSelectAll,
 }: {
   selectedId: number | null;
+  allSelected: boolean;
   onSelect: (id: number | null) => void;
+  onSelectAll: () => void;
 }) {
   const { data: folders } = useFolders();
   const create = useCreateFolder();
@@ -109,11 +113,20 @@ export function FolderTree({
       <button
         className={cn(
           "w-full rounded px-2 py-1 text-left text-sm hover:bg-zinc-100",
-          selectedId === null && "bg-zinc-200 font-medium",
+          allSelected && "bg-zinc-200 font-medium",
+        )}
+        onClick={onSelectAll}
+      >
+        All documents
+      </button>
+      <button
+        className={cn(
+          "w-full rounded px-2 py-1 text-left text-sm hover:bg-zinc-100",
+          !allSelected && selectedId === null && "bg-zinc-200 font-medium",
         )}
         onClick={() => onSelect(null)}
       >
-        All documents
+        Root
       </button>
       {tree.map((node) => (
         <Node key={node.id} node={node} depth={0} selectedId={selectedId} onSelect={onSelect} />

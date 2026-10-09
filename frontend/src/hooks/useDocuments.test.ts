@@ -18,17 +18,20 @@ describe("documentsPollInterval", () => {
 });
 
 describe("documentsQueryString", () => {
+  const none = { folder: null, tagId: null, docType: null } as const;
   it("includes only active filters", () => {
-    expect(documentsQueryString({ folderId: null, tagId: null, docType: null })).toBe("");
-    expect(documentsQueryString({ folderId: 3, tagId: 2, docType: "pdf" })).toBe(
+    expect(documentsQueryString(none)).toBe("");
+    expect(documentsQueryString({ ...none, folder: 3, tagId: 2, docType: "pdf" })).toBe(
       "?folder_id=3&tag_id=2&doc_type=pdf",
     );
   });
-
-  it("passes a non-default sort", () => {
-    expect(documentsQueryString({ folderId: null, tagId: null, docType: null, sort: "title_asc" })).toBe(
-      "?sort=title_asc",
+  it("sends root and dates", () => {
+    expect(documentsQueryString({ ...none, folder: "root", dateFrom: "2026-01-01", dateTo: "2026-01-31" })).toBe(
+      "?folder_id=root&date_from=2026-01-01&date_to=2026-01-31",
     );
-    expect(documentsQueryString({ folderId: 3, tagId: null, docType: null, sort: "date_desc" })).toBe("?folder_id=3");
+  });
+  it("passes a non-default sort", () => {
+    expect(documentsQueryString({ ...none, sort: "title_asc" })).toBe("?sort=title_asc");
+    expect(documentsQueryString({ ...none, folder: 3, sort: "date_desc" })).toBe("?folder_id=3");
   });
 });
