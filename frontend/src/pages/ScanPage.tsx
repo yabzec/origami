@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,9 @@ import { ScanPreview } from "@/components/scan/ScanPreview";
 import { emptyScanForm, ScanSidebar, type ScanFormFields } from "@/components/scan/ScanSidebar";
 import { ScanToolbar } from "@/components/scan/ScanToolbar";
 import { useLeaveGuard } from "@/hooks/useLeaveGuard";
+import { useLocalScanSearch } from "@/hooks/useLocalScanSearch";
 import { api, ApiError, getToken } from "@/lib/api";
+import { getClientId, isLocalDevice } from "@/lib/localScan";
 import { processingPayload, scanProcessing, type ProcessingValues } from "@/lib/processing";
 import { applyReorder } from "@/lib/scanReorder";
 import {
@@ -17,7 +19,7 @@ import {
   scanWizardReducer,
   shouldBlockLeave,
 } from "@/lib/scanWizard";
-import type { Document, ScanDevice, ScanPageInfo, ScanStatus } from "@/lib/types";
+import type { Document, ScanDevicesResponse, ScanPageInfo, ScanStatus } from "@/lib/types";
 
 const LEAVE_MESSAGE = "You have unsaved scanned pages. Leave and discard them?";
 
@@ -29,19 +31,33 @@ function errorInfo(err: unknown): { code: string; message: string } {
 
 export function ScanPage() {
   const [state, dispatch] = useReducer(scanWizardReducer, initialScanState);
+  const clientId = useMemo(() => getClientId(), []);
+  const [device, setDevice] = useState<string | null>(null);
+  const [searching, setSearching] = useState(false);
+  const { data: deviceData } = useQuery({
+    queryKey: ["scan-devices", clientId],
+    queryFn: () =>
+      api.get<ScanDevicesResponse>(`/api/scan/devices?client_id=${encodeURIComponent(clientId)}`),
+    refetchInterval: searching ? 1000 : false,
+  });
+  const chosenDevice = device ?? deviceData?.default ?? null;
   const { data: status } = useQuery({
-    queryKey: ["scan-status"],
-    queryFn: () => api.get<ScanStatus>("/api/scan/status"),
+    queryKey: ["scan-status", clientId, chosenDevice],
+    queryFn: () =>
+      api.get<ScanStatus>(
+        `/api/scan/status?client_id=${encodeURIComponent(clientId)}` +
+          (chosenDevice ? `&device=${encodeURIComponent(chosenDevice)}` : ""),
+      ),
     refetchInterval: 10_000,
   });
-  const { data: deviceData } = useQuery({
-    queryKey: ["scan-devices"],
-    queryFn: () => api.get<{ devices: ScanDevice[]; default: string | null }>("/api/scan/devices"),
+  const localCount = (deviceData?.devices ?? []).filter((d) => isLocalDevice(d.id)).length;
+  const { search, start, confirmInstalled, prefetch } = useLocalScanSearch(clientId, {
+    agentConnected: deviceData?.agent_connected ?? false,
+    localCount,
   });
+  useEffect(() => setSearching(search.phase === "searching"), [search.phase]);
 
   const [reordering, setReordering] = useState(false);
-  const [device, setDevice] = useState<string | null>(null);
-  const chosenDevice = device ?? deviceData?.default ?? null;
   const [processing, setProcessing] = useState<ProcessingValues>(scanProcessing);
   const [fields, setFields] = useState<ScanFormFields>(emptyScanForm);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -207,6 +223,10 @@ export function ScanPage() {
             devices={deviceData?.devices ?? []}
             device={chosenDevice}
             onDeviceChange={setDevice}
+            search={search}
+            onSearch={start}
+            onOpen={prefetch}
+            onInstalled={confirmInstalled}
           />
         </div>
       </div>

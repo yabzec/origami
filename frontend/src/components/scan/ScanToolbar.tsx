@@ -1,5 +1,6 @@
-import { Select } from "@/components/ui/select";
-import { scanDeviceHint } from "@/lib/scanDevices";
+import { AgentInstallPanel } from "@/components/scan/AgentInstallPanel";
+import { DeviceListbox } from "@/components/scan/DeviceListbox";
+import type { SearchState } from "@/lib/localScan";
 import type { ScanDevice, ScanStatus } from "@/lib/types";
 
 function StatusPill({ status }: { status: ScanStatus | undefined }) {
@@ -18,32 +19,32 @@ export function ScanToolbar({
   devices,
   device,
   onDeviceChange,
+  search,
+  onSearch,
+  onOpen,
+  onInstalled,
 }: {
   status: ScanStatus | undefined;
   devices: ScanDevice[];
   device: string | null;
   onDeviceChange: (device: string | null) => void;
+  search: SearchState;
+  onSearch: () => void;
+  onOpen: () => void;
+  onInstalled: () => void;
 }) {
-  const hint = scanDeviceHint(devices);
   return (
     <div className="flex flex-wrap items-center justify-end gap-3 text-sm">
       <StatusPill status={status} />
-      {hint === "none" && <span className="text-red-600">No scanner detected — check power and USB.</span>}
-      {hint === "single" && <span className="text-zinc-600">{devices[0].name}</span>}
-      {hint === "multiple" && (
-        <Select
-          aria-label="Scanner"
-          className="w-56"
-          value={device ?? ""}
-          onChange={(e) => onDeviceChange(e.target.value || null)}
-        >
-          {devices.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name}
-            </option>
-          ))}
-        </Select>
-      )}
+      <DeviceListbox
+        devices={devices}
+        value={device}
+        onChange={onDeviceChange}
+        search={search}
+        onSearch={onSearch}
+        onOpen={onOpen}
+        installPanel={<AgentInstallPanel onInstalled={onInstalled} />}
+      />
     </div>
   );
 }
