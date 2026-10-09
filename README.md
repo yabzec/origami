@@ -107,19 +107,21 @@ Set `PUBLIC_URL` in `.env` to the address clients use to reach Origami (e.g. `ht
 
 On the scan page open the scanner menu, choose **Search local scanners** and download the agent for your system. Run it once:
 
-- **Windows:** if SmartScreen says “Windows protected your PC”, choose **More info → Run anyway**. Allow it on private networks when the firewall asks.
+- **Windows:** if SmartScreen says "Windows protected your PC", choose **More info → Run anyway**. Allow it on private networks when the firewall asks.
 - **macOS:** unzip, move **Origami Agent** to Applications, right-click → **Open** once.
 - **Linux:** `chmod +x origami-agent-linux-*` and run it once. It needs `xdg-mime` (package `xdg-utils`).
 
-Keep the file where it is: the browser starts it from that path. Then click **Installed, search now**. The browser asks once whether to open Origami Agent; tick “always allow”.
+Keep the file where it is: the browser starts it from that path. Then click **Installed, search now**. The browser asks once whether to open Origami Agent; tick "always allow".
 
-The agent pairs with the first Origami server that starts it and refuses others. To pair it with another server, run it with `--reset`. A new launch that replaces a running agent's session shows a "switched to a new Origami session" notification. The agent never follows HTTP redirects from scanners.
+The agent remembers the first Origami server that starts it, and refuses others. To pair it with another server, run it with `--reset`. It also keeps a private key in `origami-agent/handoff.key` in your user settings folder: when the agent is already running, a second start must show this key, so another user on the same computer cannot take it over.
+
+If a new start replaces the agent's current Origami session, it shows the notice "switched to a new Origami session". The agent never follows HTTP redirects from scanners.
 
 ### Troubleshooting
 
 - **No scanners found:** the scanner must support eSCL/AirScan (look for AirPrint or Mopria Scan in its specs). Guest Wi-Fi with client isolation, or a firewall blocking multicast DNS (UDP 5353), hides the scanner.
 - **Agent not responding:** the browser prompt may have been dismissed, or the agent was moved after the first run. Run it again once, then search again.
-- **"port 47811 is in use by another program or user":** another program or user holds the agent's local port, so the agent exits. Close that program and start the agent again. The second-launch hand-off is authenticated with a per-user key file, `handoff.key`, kept in the user's config directory next to the server pin.
+- **"port 47811 is in use by another program or user":** another program or another user on this computer is using port 47811. Close it, or sign the other user out, then start the agent again.
 
 ## Run as a systemd service
 
