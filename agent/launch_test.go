@@ -2,9 +2,12 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/coder/websocket"
 )
 
 func TestParseLaunchURL(t *testing.T) {
@@ -51,5 +54,18 @@ func TestCheckPinnedUnreadable(t *testing.T) {
 	}
 	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
 		t.Fatal("pin path must not be overwritten")
+	}
+}
+
+func TestExitNotice(t *testing.T) {
+	rejected := fmt.Errorf("server rejected agent: %w", websocket.CloseError{Code: statusBadToken, Reason: "bad token"})
+	if got := exitNotice(rejected); got != "Origami Agent: the link expired — search for local scanners again in Origami." {
+		t.Fatalf("got %q", got)
+	}
+	superseded := fmt.Errorf("server rejected agent: %w", websocket.CloseError{Code: statusSuperseded})
+	for _, err := range []error{nil, superseded, errIdle, errors.New("server unreachable")} {
+		if got := exitNotice(err); got != "" {
+			t.Fatalf("%v: got %q", err, got)
+		}
 	}
 }

@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/coder/websocket"
 )
 
 const HandoffAddr = "127.0.0.1:47811"
@@ -112,8 +114,19 @@ func launch(raw string) {
 	})
 	if err := a.Run(context.Background()); err != nil {
 		log.Printf("agent stopped: %v", err)
+		if msg := exitNotice(err); msg != "" {
+			notify(msg)
+		}
 	}
 	os.Exit(0)
+}
+
+// exitNotice is what the user is told when Run ends; "" for a quiet exit.
+func exitNotice(err error) string {
+	if websocket.CloseStatus(err) == statusBadToken {
+		return "Origami Agent: the link expired — search for local scanners again in Origami."
+	}
+	return ""
 }
 
 func reset() error {
