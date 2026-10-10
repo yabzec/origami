@@ -273,3 +273,7 @@ disk. `migrate-storage --check` lists any drift.
 The server reads `.env` only at start. After editing it, or after pulling new
 code, run `sudo systemctl restart origami` (and `npm run build` in `frontend/`
 when the UI changed).
+
+## License
+
+[PolyForm Noncommercial 1.0.0](LICENSE.md): free to use, modify and share for any noncommercial purpose. Commercial use, including selling the code, is not allowed.
