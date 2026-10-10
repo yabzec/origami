@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { buildFolderTree, childrenOf, folderLabel, folderPath } from "./folderTree";
+import {
+  ancestorIds,
+  buildFolderTree,
+  childrenOf,
+  descendantIds,
+  folderLabel,
+  folderPath,
+  subtreeDocumentCount,
+  subtreeTotals,
+} from "./folderTree";
 import type { Folder } from "./types";
 
 const folder = (id: number, name: string, parent_id: number | null = null): Folder => ({
@@ -69,4 +78,24 @@ describe("folderLabel", () => {
     expect(folderLabel(nested, 2)).toBe("Bollette / 2026");
     expect(folderLabel([], 2)).toBe("…");
   });
+});
+
+const TREE = [
+  { id: 1, name: "Bollette", parent_id: null, created_at: "", document_count: 2 },
+  { id: 2, name: "2026", parent_id: 1, created_at: "", document_count: 3 },
+  { id: 3, name: "Gennaio", parent_id: 2, created_at: "", document_count: 4 },
+  { id: 4, name: "Auto", parent_id: null, created_at: "", document_count: 1 },
+];
+
+it("collects descendants and sums subtree documents", () => {
+  expect(descendantIds(TREE, [2])).toEqual(new Set([2, 3]));
+  expect(subtreeDocumentCount(TREE, 1)).toBe(9);
+  expect(subtreeDocumentCount(TREE, 3)).toBe(4);
+  expect(subtreeTotals(TREE, [1, 2, 4])).toEqual({ folders: 4, documents: 10 });
+  expect(subtreeTotals(TREE, [])).toEqual({ folders: 0, documents: 0 });
+});
+
+it("lists a folder and its ancestors", () => {
+  expect(ancestorIds(TREE, 3)).toEqual(new Set([1, 2, 3]));
+  expect(ancestorIds(TREE, null)).toEqual(new Set());
 });

@@ -23,3 +23,17 @@ export function rangeSelect(
 export function shouldClearOnEscape(doc: Document = document): boolean {
   return doc.querySelector('[role="dialog"]') === null;
 }
+
+/** Selection keys: folders and documents share one selection. */
+export const folderKey = (id: number): string => `f:${id}`;
+export const docKey = (id: string): string => `d:${id}`;
+
+export function splitKeys(keys: Iterable<string>): { folderIds: number[]; documentIds: string[] } {
+  const folderIds: number[] = [];
+  const documentIds: string[] = [];
+  for (const key of keys) {
+    if (key.startsWith("f:")) folderIds.push(Number(key.slice(2)));
+    else if (key.startsWith("d:")) documentIds.push(key.slice(2));
+  }
+  return { folderIds, documentIds };
+}

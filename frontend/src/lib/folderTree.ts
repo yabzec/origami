@@ -50,3 +50,35 @@ export function folderLabel(folders: Folder[], id: number | null): string {
   const path = folderPath(folders, id);
   return path.length > 0 ? path.map((f) => f.name).join(" / ") : "…";
 }
+
+/** `ids` plus every folder below them. */
+export function descendantIds(folders: Folder[], ids: Iterable<number>): Set<number> {
+  const result = new Set(ids);
+  let grew = result.size > 0;
+  while (grew) {
+    grew = false;
+    for (const f of folders) {
+      if (f.parent_id !== null && result.has(f.parent_id) && !result.has(f.id)) {
+        result.add(f.id);
+        grew = true;
+      }
+    }
+  }
+  return result;
+}
+
+/** Folders and documents in the subtrees of `ids` (the folders themselves included). */
+export function subtreeTotals(folders: Folder[], ids: Iterable<number>): { folders: number; documents: number } {
+  const all = descendantIds(folders, ids);
+  const documents = folders.reduce((n, f) => (all.has(f.id) ? n + f.document_count : n), 0);
+  return { folders: all.size, documents };
+}
+
+export function subtreeDocumentCount(folders: Folder[], id: number): number {
+  return subtreeTotals(folders, [id]).documents;
+}
+
+/** The folder and all its ancestors (empty for the root). */
+export function ancestorIds(folders: Folder[], id: number | null): Set<number> {
+  return new Set(folderPath(folders, id).map((f) => f.id));
+}
