@@ -1,5 +1,6 @@
 """Bulk actions on a mixed selection of folders and documents, each in one transaction."""
 
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends
@@ -15,6 +16,8 @@ from app.models import Document, Folder
 from app.services.storage import Storage, get_storage
 from app.services.tree_paths import folder_rel_dir, safe_name
 from app.services.tree_sync import disk_name_taken, disk_transaction, lock_documents, lock_tree
+
+log = logging.getLogger("origami.bulk")
 
 router = APIRouter(prefix="/api/bulk", tags=["bulk"], dependencies=[Depends(get_current_user)])
 
@@ -117,7 +120,7 @@ def bulk_delete_items(
     lock_tree(session)
     session.expire_all()  # read the tree as of the lock
     found, missing_folders = existing_folders(session, body.folder_ids)
-    deepest_first = list(reversed(subtree_ids(session, found)))
+    deepest_first = list(reversed(subtree_ids(session, outermost(session, found))))
     dirs = [folder_rel_dir(session, f) for f in deepest_first]
     inside = (
         session.exec(select(Document.id).where(Document.folder_id.in_(deepest_first))).all()
@@ -133,9 +136,15 @@ def bulk_delete_items(
         session.flush()  # children before parents (self-referencing foreign key)
     session.commit()
     for file_rel, preview, doc_id in files:
-        storage.delete_document_files(file_rel, preview, doc_id)
+        try:
+            storage.delete_document_files(file_rel, preview, doc_id)
+        except Exception:  # the DB delete has committed: keep cleaning up the rest
+            log.warning("Could not delete files of document %s", doc_id, exc_info=True)
     for rel in dirs:
-        storage.remove_dir(rel)  # rmdir only: a directory with untracked files stays
+        try:
+            storage.remove_dir(rel)  # rmdir only: a directory with untracked files stays
+        except Exception:
+            log.warning("Could not remove directory %s", rel, exc_info=True)
     return {
         "deleted_folders": len(deepest_first),
         "deleted_documents": len(docs),

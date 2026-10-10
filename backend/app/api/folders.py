@@ -95,7 +95,10 @@ def list_folders(session: Session = Depends(get_session)) -> list[dict]:
 
 
 def reparent_folder(session: Session, moves: MoveLog, folder: Folder, fields: dict) -> None:
-    """Rename and/or move a folder: its directory moves and document paths under it follow."""
+    """Rename and/or move a folder: its directory moves and document paths under it follow.
+
+    The caller must hold `lock_tree` (as `move_documents` does).
+    """
     old_dir = folder_rel_dir(session, folder.id)
     for key, value in fields.items():
         setattr(folder, key, value)

@@ -199,3 +199,51 @@ def test_delete_reports_missing(auth_client, session, storage):
     assert resp.json() == {
         "deleted_folders": 0, "deleted_documents": 0, "missing_folders": [999], "missing_documents": [str(ghost)],
     }
+
+
+def test_delete_nested_selection(auth_client, session, storage):
+    a = new_folder(auth_client, "A")
+    b = new_folder(auth_client, "B", a)
+    c = new_folder(auth_client, "C", b)
+    new_doc(session, storage, "Deep", c)
+    resp = delete(auth_client, folders=[b, a])
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["deleted_folders"] == 3
+    session.expire_all()
+    assert session.exec(select(Folder.id)).all() == []
+    assert not storage.abs_path("A").exists()
+
+
+def test_delete_cleanup_continues_after_disk_error(auth_client, session, storage, monkeypatch):
+    first = new_doc(session, storage, "First")
+    second = new_doc(session, storage, "Second")
+    real = storage.delete_document_files
+    calls = []
+
+    def flaky(file_rel, preview, document_id):
+        calls.append(document_id)
+        if len(calls) == 1:
+            raise OSError("disk gone")
+        real(file_rel, preview, document_id)
+
+    monkeypatch.setattr(storage, "delete_document_files", flaky)
+    resp = delete(auth_client, docs=[first.id, second.id])
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["deleted_documents"] == 2
+    assert len(calls) == 2
+    survivors = [p for p in ("First.pdf", "Second.pdf") if storage.abs_path(p).exists()]
+    assert len(survivors) == 1  # only the first processed document's file is left behind
+
+
+def test_move_two_folders_undoes_first_when_second_conflicts(auth_client, session, storage):
+    x = new_folder(auth_client, "X")
+    y = new_folder(auth_client, "Y")
+    target = new_folder(auth_client, "Target")
+    storage.make_dir("Target/Y")  # on disk only
+    resp = move(auth_client, target, folders=[x, y])
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "storage_conflict"
+    session.expire_all()
+    assert session.get(Folder, x).parent_id is None
+    assert storage.abs_path("X").is_dir()
+    assert not storage.abs_path("Target/X").exists()
