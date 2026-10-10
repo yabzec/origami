@@ -49,19 +49,30 @@ cd backend
 cp ../.env.example ../.env   # edit STORAGE_PATH, GEMINI_API_KEY, JWT_SECRET
 # optional: PRIMARY_LANGUAGE (ISO 639-1, default "it") - language for AI summaries
 # optional: DEFAULT_TRANSLATION_LANGUAGE (ISO 639-1, default PRIMARY_LANGUAGE) - default translation target for scan and upload
+# note: DEFAULT_OCR_LANGUAGES uses Tesseract codes (ita, eng), the two language settings above use 2-letter codes (it, en)
 uv sync
 docker compose up -d db
 uv run alembic upgrade head
 uv run python -m app.cli create-user <username>
 ```
 
-Upgrading from a version with the flat `files/<uuid>` layout. The API and the worker refuse to start until you move the files once:
+### Upgrading from the flat `files/<uuid>` layout
+
+Older versions stored every document as `STORAGE_PATH/files/<uuid>.<ext>`. The API and the worker refuse to start until you move the files once. Do it in this order:
 
 ```bash
+sudo systemctl stop origami                          # the old code must not run during the move
+# back up the database (pgdata volume) and STORAGE_PATH
+cd backend
+uv run alembic upgrade head                          # migrate-storage needs the new columns
 uv run python -m app.cli migrate-storage --dry-run   # print the moves
 uv run python -m app.cli migrate-storage
 uv run python -m app.cli migrate-storage --check     # report database/disk drift; --fix removes partial writes
+cd ../frontend && npm run build                      # the new UI needs the new API
+sudo systemctl start origami
 ```
+
+The migration refuses to run while a top-level folder named `files` exists: rename it first.
 
 `migrate-storage` keeps a journal at `<DERIVED_PATH>/storage-migration.journal`, so an interrupted run resumes safely. Run it again.
 
@@ -247,5 +258,16 @@ When a background job fails for the 5th time, Origami emails every user that has
 ## Storage
 
 Documents live in the host folder pointed to by `STORAGE_PATH` in `.env`
-(created automatically). It is a plain directory — back it up together with
+(created automatically). It mirrors the folders in the app:
+`STORAGE_PATH/<folder>/<subfolder>/<title>.<ext>`. Back it up together with
 the `pgdata` docker volume.
+
+Two sibling folders hold app data, not documents: `derived/` (office previews
+and OCR companion PDFs) and `tmp/` (scan pages in progress). Set
+`DERIVED_PATH` and `TMP_PATH` to put them elsewhere. Do not add, rename or
+delete files in `STORAGE_PATH` by hand: the app does not see changes made on
+disk. `migrate-storage --check` lists any drift.
+
+The server reads `.env` only at start. After editing it, or after pulling new
+code, run `sudo systemctl restart origami` (and `npm run build` in `frontend/`
+when the UI changed).
