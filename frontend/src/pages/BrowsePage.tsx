@@ -4,6 +4,7 @@ import { BulkActionBar } from "@/components/BulkActionBar";
 import { DocFilters, FilterField } from "@/components/DocFilters";
 import { DocumentCard } from "@/components/DocumentCard";
 import { BatchUploadDialog } from "@/components/BatchUploadDialog";
+import { NewFolderDialog } from "@/components/NewFolderDialog";
 import { UploadDialog } from "@/components/UploadDialog";
 import { Breadcrumb, FolderTiles } from "@/components/FolderTiles";
 import { Button } from "@/components/ui/button";
@@ -77,6 +78,7 @@ export function BrowsePage() {
   const folderInput = useRef<HTMLInputElement>(null);
   const [picked, setPicked] = useState<PickedFile[] | null>(null);
   const [uploadMenu, setUploadMenu] = useState(false);
+  const [newFolder, setNewFolder] = useState(false);
 
   useEffect(() => {
     folderInput.current?.setAttribute("webkitdirectory", ""); // not in React's input typings
@@ -132,6 +134,12 @@ export function BrowsePage() {
         <h2 className="flex-1 text-lg font-semibold">
           {params.all ? "All documents" : "Documents"}
         </h2>
+        <Button variant="outline" onClick={() => setNewFolder(true)}>
+          <span aria-hidden="true" className="mr-1.5">
+            📁
+          </span>
+          New folder
+        </Button>
         <div className="relative" data-upload-menu>
           <Button onClick={() => setUploadMenu((v) => !v)} aria-haspopup="menu" aria-expanded={uploadMenu}>
             Upload
@@ -262,6 +270,11 @@ export function BrowsePage() {
           />
         ))}
       </div>
+      <NewFolderDialog
+        open={newFolder}
+        parentId={params.all ? null : params.folderId}
+        onClose={() => setNewFolder(false)}
+      />
       <UploadDialog
         file={pendingFile}
         open={pendingFile !== null}
