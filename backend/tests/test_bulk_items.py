@@ -126,14 +126,6 @@ def test_stray_directory_at_destination_rolls_back(auth_client, session, storage
     assert storage.abs_path("Loose.pdf").exists()
 
 
-def test_move_folder_named_files_to_root_is_reserved(auth_client, session, storage):
-    parent = new_folder(auth_client, "Parent")
-    files = new_folder(auth_client, "files", parent)
-    resp = move(auth_client, None, folders=[files])
-    assert resp.status_code == 409
-    assert resp.json()["error"]["code"] == "reserved_folder_name"
-
-
 def test_move_reports_missing_and_checks_destination(auth_client, session, storage):
     a = new_folder(auth_client, "A")
     ghost = uuid.uuid4()

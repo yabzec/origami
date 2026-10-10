@@ -18,7 +18,7 @@ import time
 
 import pytest
 
-from app.services.storage import OldStorageLayout, companion_name, preview_name, require_new_layout
+from app.services.storage import companion_name, preview_name
 
 
 def make_storage(tmp_path):
@@ -148,18 +148,6 @@ def test_remove_part_files_only_old(tmp_path):
     fresh.write_bytes(b"")
     assert storage.remove_part_files(3600) == [old]
     assert fresh.exists()
-
-
-def test_old_layout_detection(tmp_path):
-    storage = make_storage(tmp_path)
-    assert storage.has_old_layout() is False
-    require_new_layout(storage)
-    storage.write_file("files/notes.txt", b"user folder named files")
-    assert storage.has_old_layout() is False
-    storage.write_file(f"files/{uuid.uuid4()}.pdf", b"%PDF")
-    assert storage.has_old_layout() is True
-    with pytest.raises(OldStorageLayout, match="migrate-storage"):
-        require_new_layout(storage)
 
 
 def test_write_uses_a_unique_part_name(tmp_path, monkeypatch):

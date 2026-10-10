@@ -9,7 +9,7 @@ from sqlmodel import Session, select
 
 from app.api.deps import api_error, get_current_user
 from app.api.documents import BULK_MAX, delete_documents, move_documents
-from app.api.folders import check_reserved_name, get_folder_or_404, is_descendant, reparent_folder
+from app.api.folders import get_folder_or_404, is_descendant, reparent_folder
 from app.api.storage_errors import storage_errors
 from app.db import get_session
 from app.models import Document, Folder
@@ -90,7 +90,6 @@ def bulk_move_items(
         moving = [f for f in moving if f.parent_id != destination]  # already there: nothing to do
         incoming: set[str] = set()
         for folder in moving:
-            check_reserved_name(destination, folder.name)
             key = safe_name(folder.name)
             if key in incoming or disk_name_taken(session, destination, folder.name, exclude_id=folder.id):
                 raise api_error(

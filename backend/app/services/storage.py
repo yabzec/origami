@@ -1,7 +1,6 @@
 import errno
 import logging
 import os
-import re
 import shutil
 import time
 import uuid
@@ -13,7 +12,6 @@ from app.config import get_settings
 log = logging.getLogger("origami.storage")
 
 PART_SUFFIX = ".part"
-OLD_LAYOUT_NAME = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.")
 
 
 def preview_name(document_id: uuid.UUID) -> str:
@@ -157,25 +155,6 @@ class Storage:
 
     def remove_scan_session_dir(self, session_id: int) -> None:
         shutil.rmtree(self.tmp_scans_dir / str(session_id), ignore_errors=True)
-
-    # --- layout ---
-    def has_old_layout(self) -> bool:
-        """True while uuid-named files of the old flat layout remain in `files/`."""
-        files = self.root / "files"
-        return files.is_dir() and any(
-            p.is_file() and OLD_LAYOUT_NAME.match(p.name) for p in files.iterdir()
-        )
-
-
-class OldStorageLayout(RuntimeError):
-    """uuid-named files of the old flat layout are still in STORAGE_PATH/files."""
-
-
-def require_new_layout(storage: Storage) -> None:
-    if storage.has_old_layout():
-        raise OldStorageLayout(
-            f"Old storage layout found in {storage.root}; run: python -m app.cli migrate-storage"
-        )
 
 
 def get_storage() -> Storage:

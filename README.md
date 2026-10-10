@@ -58,28 +58,6 @@ uv run alembic upgrade head
 uv run python -m app.cli create-user <username>
 ```
 
-### Upgrading from the flat `files/<uuid>` layout
-
-Older versions stored every document as `STORAGE_PATH/files/<uuid>.<ext>`. The API and the worker refuse to start until you move the files once. Do it in this order:
-
-```bash
-sudo systemctl stop origami                          # the old code must not run during the move
-# back up the database (pgdata volume) and STORAGE_PATH
-cd backend
-uv run alembic upgrade head                          # migrate-storage needs the new columns
-uv run python -m app.cli migrate-storage --dry-run   # print the moves
-uv run python -m app.cli migrate-storage
-uv run python -m app.cli migrate-storage --check     # report database/disk drift; --fix removes partial writes
-cd ../frontend && npm run build                      # the new UI needs the new API
-sudo systemctl start origami
-```
-
-The migration refuses to run while a top-level folder named `files` exists: rename it first.
-
-`migrate-storage` keeps a journal at `<DERIVED_PATH>/storage-migration.journal`, so an interrupted run resumes safely. Run it again.
-
-uuid-named files in the old `files/` folder that belong to no document are moved, never deleted, to `<DERIVED_PATH>/orphans/`.
-
 Run the API:
 
 ```bash
@@ -268,7 +246,8 @@ Two sibling folders hold app data, not documents: `derived/` (office previews
 and OCR companion PDFs) and `tmp/` (scan pages in progress). Set
 `DERIVED_PATH` and `TMP_PATH` to put them elsewhere. Do not add, rename or
 delete files in `STORAGE_PATH` by hand: the app does not see changes made on
-disk. `migrate-storage --check` lists any drift.
+disk. `uv run python -m app.cli check-storage` lists any drift (`--fix` removes
+leftover partial writes).
 
 The server reads `.env` only at start. After editing it, or after pulling new
 code, run `sudo systemctl restart origami` (and `npm run build` in `frontend/`

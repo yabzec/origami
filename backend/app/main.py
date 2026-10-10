@@ -1,4 +1,3 @@
-from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -8,15 +7,8 @@ from app.api import agent, auth, bulk, chat, documents, files, folders, ocr, sca
 from app.api.error_handlers import register_error_handlers
 from app.api.spa import register_spa
 from app.config import get_settings
-from app.services import storage as storage_module
 
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
-    storage_module.require_new_layout(storage_module.get_storage())
-    yield
-
-
-app = FastAPI(title="Origami", lifespan=lifespan)
+app = FastAPI(title="Origami")
 
 _origins = [o.strip() for o in get_settings().cors_origins.split(",") if o.strip()]
 app.add_middleware(

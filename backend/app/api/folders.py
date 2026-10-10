@@ -10,7 +10,7 @@ from app.api.storage_errors import storage_errors
 from app.models import Document, Folder
 from app.services.storage import Storage, get_storage
 from app.services.tree_paths import folder_rel_dir
-from app.services.tree_sync import MoveLog, disk_name_taken, disk_transaction, lock_tree, reserved_folder_name
+from app.services.tree_sync import MoveLog, disk_name_taken, disk_transaction, lock_tree
 
 router = APIRouter(
     prefix="/api/folders", tags=["folders"], dependencies=[Depends(get_current_user)]
@@ -40,13 +40,6 @@ def get_folder_or_404(session: Session, folder_id: int) -> Folder:
     return folder
 
 
-def check_reserved_name(parent_id: int | None, name: str) -> None:
-    if reserved_folder_name(parent_id, name):
-        raise api_error(
-            409, "reserved_folder_name", f"A top-level folder cannot be named {name!r}: the name is reserved"
-        )
-
-
 def is_descendant(session: Session, candidate_id: int, ancestor_id: int) -> bool:
     """True if candidate_id is ancestor_id or lies in its subtree."""
     current: int | None = candidate_id
@@ -63,7 +56,6 @@ def create_folder(
     session: Session = Depends(get_session),
     storage: Storage = Depends(get_storage),
 ) -> Folder:
-    check_reserved_name(body.parent_id, body.name)
     folder = Folder(name=body.name, parent_id=body.parent_id)
     with storage_errors(), disk_transaction(session, storage):
         lock_tree(session)
@@ -137,7 +129,6 @@ def update_folder(
                 raise api_error(409, "folder_cycle", "Cannot move a folder under itself")
         new_parent = fields.get("parent_id", folder.parent_id)
         new_name = fields.get("name", folder.name)
-        check_reserved_name(new_parent, new_name)
         if disk_name_taken(session, new_parent, new_name, exclude_id=folder_id):
             raise api_error(409, "duplicate_folder", "Sibling folder with same name exists")
         reparent_folder(session, moves, folder, fields)
@@ -169,7 +160,6 @@ def delete_folder(
 
 
 def _child_folder_id(session: Session, storage: Storage, parent_id: int | None, name: str) -> int:
-    check_reserved_name(parent_id, name)
     lock_tree(session)  # held until the commit below (or the end of the request)
     session.expire_all()  # read the tree as of the lock
     same_parent = Folder.parent_id.is_(None) if parent_id is None else Folder.parent_id == parent_id
