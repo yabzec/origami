@@ -149,3 +149,53 @@ def test_bulk_items_validation_and_auth(client, auth_client):
     assert auth_client.post("/api/bulk/delete", json={"folder_ids": [], "document_ids": []}).status_code == 422
     too_many = list(range(1, 502))
     assert auth_client.post("/api/bulk/delete", json={"folder_ids": too_many}).status_code == 422
+
+
+def delete(client, folders=(), docs=()):
+    return client.post(
+        "/api/bulk/delete", json={"folder_ids": list(folders), "document_ids": [str(d) for d in docs]}
+    )
+
+
+def test_delete_is_recursive(auth_client, session, storage):
+    a = new_folder(auth_client, "A")
+    b = new_folder(auth_client, "B", a)
+    keep = new_folder(auth_client, "Keep")
+    in_a = new_doc(session, storage, "InA", a)
+    in_b = new_doc(session, storage, "InB", b)
+    pending = new_doc(session, storage, "Pending", b, with_file=False)  # still processing: no file yet
+    loose = new_doc(session, storage, "Loose")
+    kept = new_doc(session, storage, "Kept", keep)
+    session.add(Job(type="process_document", payload={"document_id": str(in_b.id)}))
+    session.commit()
+
+    resp = delete(auth_client, folders=[a], docs=[loose.id, in_a.id])
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"deleted_folders": 2, "deleted_documents": 4, "missing_folders": [], "missing_documents": []}
+    session.expire_all()
+    assert session.exec(select(Folder.id)).all() == [keep]
+    assert [d.id for d in session.exec(select(Document))] == [kept.id]
+    assert session.exec(select(Job)).one().status == JobStatus.cancelled
+    assert not storage.abs_path("A").exists()
+    assert not storage.abs_path("Loose.pdf").exists()
+    assert storage.abs_path("Keep/Kept.pdf").exists()
+    assert pending.id not in {d.id for d in session.exec(select(Document))}
+
+
+def test_delete_keeps_directory_with_untracked_file(auth_client, session, storage):
+    a = new_folder(auth_client, "A")
+    storage.write_file("A/notes.txt", b"mine")  # not a document
+    resp = delete(auth_client, folders=[a])
+    assert resp.status_code == 200, resp.text
+    session.expire_all()
+    assert session.get(Folder, a) is None
+    assert storage.abs_path("A/notes.txt").read_bytes() == b"mine"
+
+
+def test_delete_reports_missing(auth_client, session, storage):
+    ghost = uuid.uuid4()
+    resp = delete(auth_client, folders=[999], docs=[ghost])
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {
+        "deleted_folders": 0, "deleted_documents": 0, "missing_folders": [999], "missing_documents": [str(ghost)],
+    }

@@ -7,13 +7,13 @@ from pydantic import BaseModel, Field, model_validator
 from sqlmodel import Session, select
 
 from app.api.deps import api_error, get_current_user
-from app.api.documents import BULK_MAX, move_documents
+from app.api.documents import BULK_MAX, delete_documents, move_documents
 from app.api.folders import check_reserved_name, get_folder_or_404, is_descendant, reparent_folder
 from app.api.storage_errors import storage_errors
 from app.db import get_session
-from app.models import Folder
+from app.models import Document, Folder
 from app.services.storage import Storage, get_storage
-from app.services.tree_paths import safe_name
+from app.services.tree_paths import folder_rel_dir, safe_name
 from app.services.tree_sync import disk_name_taken, disk_transaction, lock_documents, lock_tree
 
 router = APIRouter(prefix="/api/bulk", tags=["bulk"], dependencies=[Depends(get_current_user)])
@@ -103,6 +103,42 @@ def bulk_move_items(
     return {
         "moved_folders": len(found),
         "moved_documents": len(docs),
+        "missing_folders": missing_folders,
+        "missing_documents": [str(i) for i in body.document_ids if i not in found_docs],
+    }
+
+
+@router.post("/delete")
+def bulk_delete_items(
+    body: BulkItems,
+    session: Session = Depends(get_session),
+    storage: Storage = Depends(get_storage),
+) -> dict:
+    lock_tree(session)
+    session.expire_all()  # read the tree as of the lock
+    found, missing_folders = existing_folders(session, body.folder_ids)
+    deepest_first = list(reversed(subtree_ids(session, found)))
+    dirs = [folder_rel_dir(session, f) for f in deepest_first]
+    inside = (
+        session.exec(select(Document.id).where(Document.folder_id.in_(deepest_first))).all()
+        if deepest_first
+        else []
+    )
+    docs = lock_documents(session, list(dict.fromkeys([*body.document_ids, *inside])))
+    found_docs = {d.id for d in docs}
+    files = delete_documents(session, docs)
+    session.flush()  # document rows go before the folders they reference
+    for folder_id in deepest_first:
+        session.delete(session.get(Folder, folder_id))
+        session.flush()  # children before parents (self-referencing foreign key)
+    session.commit()
+    for file_rel, preview, doc_id in files:
+        storage.delete_document_files(file_rel, preview, doc_id)
+    for rel in dirs:
+        storage.remove_dir(rel)  # rmdir only: a directory with untracked files stays
+    return {
+        "deleted_folders": len(deepest_first),
+        "deleted_documents": len(docs),
         "missing_folders": missing_folders,
         "missing_documents": [str(i) for i in body.document_ids if i not in found_docs],
     }
