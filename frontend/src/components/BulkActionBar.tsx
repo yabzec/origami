@@ -2,16 +2,25 @@ import { useState } from "react";
 import { FolderPicker } from "@/components/FolderPicker";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
+import { itemsLabel } from "@/lib/counts";
 
 export function BulkActionBar({
-  count,
+  folderCount,
+  documentCount,
+  deleteFolderTotal,
+  deleteDocumentTotal,
+  disabledFolderIds,
   onSelectAll,
   onMove,
   onDelete,
   onClear,
   busy = false,
 }: {
-  count: number;
+  folderCount: number;
+  documentCount: number;
+  deleteFolderTotal: number;
+  deleteDocumentTotal: number;
+  disabledFolderIds: ReadonlySet<number>;
   onSelectAll: () => void;
   onMove: (folderId: number | null) => void;
   onDelete: () => void;
@@ -20,12 +29,11 @@ export function BulkActionBar({
 }) {
   const [dialog, setDialog] = useState<"move" | "delete" | null>(null);
   const [target, setTarget] = useState<number | null>(null);
-  const noun = count === 1 ? "document" : "documents";
 
   return (
     <>
       <div className="sticky top-0 z-20 mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-zinc-200 bg-white p-2 shadow">
-        <span className="px-2 text-sm font-medium">{count} selected</span>
+        <span className="px-2 text-sm font-medium">{itemsLabel(folderCount, documentCount)} selected</span>
         <Button variant="ghost" onClick={onSelectAll}>
           Select all
         </Button>
@@ -39,9 +47,13 @@ export function BulkActionBar({
           Clear
         </Button>
       </div>
-      <Dialog open={dialog === "move"} onClose={() => setDialog(null)} title={`Move ${count} ${noun}`}>
+      <Dialog
+        open={dialog === "move"}
+        onClose={() => setDialog(null)}
+        title={`Move ${itemsLabel(folderCount, documentCount, " and ")}`}
+      >
         <div className="space-y-3">
-          <FolderPicker value={target} onChange={setTarget} />
+          <FolderPicker value={target} onChange={setTarget} disabledIds={disabledFolderIds} />
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setDialog(null)}>
               Cancel
@@ -57,8 +69,16 @@ export function BulkActionBar({
           </div>
         </div>
       </Dialog>
-      <Dialog open={dialog === "delete"} onClose={() => setDialog(null)} title={`Delete ${count} ${noun}?`}>
-        <p className="mb-4 text-sm text-zinc-600">The files and their extracted text are removed permanently.</p>
+      <Dialog
+        open={dialog === "delete"}
+        onClose={() => setDialog(null)}
+        title={`Delete ${itemsLabel(deleteFolderTotal, deleteDocumentTotal, " and ")}?`}
+      >
+        <p className="mb-4 text-sm text-zinc-600">
+          {folderCount > 0
+            ? "The folders, their subfolders and all their documents are removed permanently, with the files and their extracted text."
+            : "The files and their extracted text are removed permanently."}
+        </p>
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={() => setDialog(null)}>
             Cancel
@@ -70,7 +90,7 @@ export function BulkActionBar({
               setDialog(null);
             }}
           >
-            Delete {count}
+            Delete permanently
           </Button>
         </div>
       </Dialog>

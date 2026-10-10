@@ -13,7 +13,18 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 function renderBar(overrides = {}) {
-  const props = { count: 3, onSelectAll: vi.fn(), onMove: vi.fn(), onDelete: vi.fn(), onClear: vi.fn(), ...overrides };
+  const props = {
+    folderCount: 0,
+    documentCount: 3,
+    deleteFolderTotal: 0,
+    deleteDocumentTotal: 3,
+    disabledFolderIds: new Set<number>(),
+    onSelectAll: vi.fn(),
+    onMove: vi.fn(),
+    onDelete: vi.fn(),
+    onClear: vi.fn(),
+    ...overrides,
+  };
   render(
     <QueryClientProvider client={new QueryClient()}>
       <BulkActionBar {...props} />
@@ -24,16 +35,25 @@ function renderBar(overrides = {}) {
 
 it("confirms before deleting", async () => {
   const props = renderBar();
-  expect(screen.getByText("3 selected")).toBeInTheDocument();
+  expect(screen.getByText("3 documents selected")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Delete" }));
   expect(screen.getByRole("dialog", { name: "Delete 3 documents?" })).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "Delete 3" }));
+  await userEvent.click(screen.getByRole("button", { name: "Delete permanently" }));
   expect(props.onDelete).toHaveBeenCalled();
+});
+
+it("labels a mixed selection and shows recursive delete totals", async () => {
+  renderBar({ folderCount: 2, documentCount: 1, deleteFolderTotal: 3, deleteDocumentTotal: 7 });
+  expect(screen.getByText("2 folders, 1 document selected")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+  expect(screen.getByRole("dialog", { name: "Delete 3 folders and 7 documents?" })).toBeInTheDocument();
+  expect(screen.getByText(/subfolders and all their documents/i)).toBeInTheDocument();
 });
 
 it("moves to the root by default", async () => {
   const props = renderBar();
   await userEvent.click(screen.getByRole("button", { name: "Move…" }));
+  expect(screen.getByRole("dialog", { name: "Move 3 documents" })).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Move here" }));
   expect(props.onMove).toHaveBeenCalledWith(null);
 });

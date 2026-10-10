@@ -23,9 +23,9 @@ import {
 } from "@/lib/browseParams";
 import type { PickedFile } from "@/lib/batchUpload";
 import { pickedFromDataTransfer, pickedFromInput } from "@/lib/dropEntries";
-import { childrenOf } from "@/lib/folderTree";
+import { childrenOf, descendantIds, subtreeTotals } from "@/lib/folderTree";
 import { parseSort, SORT_OPTIONS } from "@/lib/sorting";
-import { shouldClearOnEscape } from "@/lib/selection";
+import { docKey, folderKey, shouldClearOnEscape, splitKeys } from "@/lib/selection";
 
 export function BrowsePage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -55,12 +55,15 @@ export function BrowsePage() {
   const { data: tags } = useTags();
   const deleteDoc = useDeleteDocument();
 
-  const order = (docs ?? []).map((d) => d.id);
+  const tileFolders = params.all ? [] : childrenOf(folders ?? [], params.folderId);
+  const order = [...tileFolders.map((f) => folderKey(f.id)), ...(docs ?? []).map((d) => docKey(d.id))];
   const selection = useSelection(order, browseViewKey(params));
   const bulkMove = useBulkMoveItems();
   const bulkDelete = useBulkDeleteItems();
   const [bulkError, setBulkError] = useState<string | null>(null);
-  const selectedIds = [...selection.selected];
+  const { folderIds, documentIds } = splitKeys(selection.selected);
+  const selectedItems = { folder_ids: folderIds, document_ids: documentIds };
+  const selectedTotals = subtreeTotals(folders ?? [], folderIds);
   const reportBulk = (err: unknown) => setBulkError(err instanceof ApiError ? err.message : "Bulk action failed");
 
   const { clear } = selection;
@@ -220,23 +223,24 @@ export function BrowsePage() {
       )}
       {selection.selected.size > 0 && (
         <BulkActionBar
-          count={selection.selected.size}
+          folderCount={folderIds.length}
+          documentCount={documentIds.length}
+          deleteFolderTotal={selectedTotals.folders}
+          deleteDocumentTotal={documentIds.length + selectedTotals.documents}
+          disabledFolderIds={descendantIds(folders ?? [], folderIds)}
           busy={bulkMove.isPending || bulkDelete.isPending}
           onSelectAll={selection.selectAll}
           onClear={selection.clear}
           onMove={(folderId) => {
             setBulkError(null);
             bulkMove.mutate(
-              { folder_ids: [], document_ids: selectedIds, folder_id: folderId },
+              { ...selectedItems, folder_id: folderId },
               { onSuccess: selection.clear, onError: reportBulk },
             );
           }}
           onDelete={() => {
             setBulkError(null);
-            bulkDelete.mutate(
-              { folder_ids: [], document_ids: selectedIds },
-              { onSuccess: selection.clear, onError: reportBulk },
-            );
+            bulkDelete.mutate(selectedItems, { onSuccess: selection.clear, onError: reportBulk });
           }}
         />
       )}
@@ -252,6 +256,8 @@ export function BrowsePage() {
             folders={folders ?? []}
             parentId={params.folderId}
             onOpen={(id) => update({ folderId: id })}
+            selected={selection.selected}
+            onToggleSelect={selection.toggle}
           />
         </>
       )}
@@ -270,9 +276,9 @@ export function BrowsePage() {
             key={doc.id}
             doc={doc}
             onDelete={(id) => deleteDoc.mutate(id)}
-            selected={selection.selected.has(doc.id)}
+            selected={selection.selected.has(docKey(doc.id))}
             selecting={selection.selected.size > 0}
-            onToggleSelect={selection.toggle}
+            onToggleSelect={(id, shift) => selection.toggle(docKey(id), shift)}
           />
         ))}
       </div>
