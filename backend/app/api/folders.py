@@ -10,7 +10,7 @@ from app.api.storage_errors import storage_errors
 from app.models import Document, Folder
 from app.services.storage import Storage, get_storage
 from app.services.tree_paths import folder_rel_dir
-from app.services.tree_sync import disk_name_taken, disk_transaction, lock_tree, reserved_folder_name
+from app.services.tree_sync import MoveLog, disk_name_taken, disk_transaction, lock_tree, reserved_folder_name
 
 router = APIRouter(
     prefix="/api/folders", tags=["folders"], dependencies=[Depends(get_current_user)]
@@ -94,6 +94,28 @@ def list_folders(session: Session = Depends(get_session)) -> list[dict]:
     return [{**f.model_dump(), "document_count": counts.get(f.id, 0)} for f in session.exec(select(Folder))]
 
 
+def reparent_folder(session: Session, moves: MoveLog, folder: Folder, fields: dict) -> None:
+    """Rename and/or move a folder: its directory moves and document paths under it follow."""
+    old_dir = folder_rel_dir(session, folder.id)
+    for key, value in fields.items():
+        setattr(folder, key, value)
+    try:
+        session.flush()
+    except IntegrityError:
+        raise api_error(409, "duplicate_folder", "Sibling folder with same name exists")
+    new_dir = folder_rel_dir(session, folder.id)
+    if new_dir != old_dir:
+        under_old = func.starts_with(Document.file_path, old_dir + "/")
+        session.exec(select(Document.id).where(under_old).with_for_update()).all()
+        moves.move_dir(old_dir, new_dir)
+        session.execute(
+            update(Document)
+            .where(under_old)
+            .values(file_path=func.concat(new_dir, func.substr(Document.file_path, len(old_dir) + 1)))
+            .execution_options(synchronize_session=False)
+        )
+
+
 @router.patch("/{folder_id}")
 def update_folder(
     folder_id: int,
@@ -115,24 +137,7 @@ def update_folder(
         check_reserved_name(new_parent, new_name)
         if disk_name_taken(session, new_parent, new_name, exclude_id=folder_id):
             raise api_error(409, "duplicate_folder", "Sibling folder with same name exists")
-        old_dir = folder_rel_dir(session, folder_id)
-        for key, value in fields.items():
-            setattr(folder, key, value)
-        try:
-            session.flush()
-        except IntegrityError:
-            raise api_error(409, "duplicate_folder", "Sibling folder with same name exists")
-        new_dir = folder_rel_dir(session, folder_id)
-        if new_dir != old_dir:
-            under_old = func.starts_with(Document.file_path, old_dir + "/")
-            session.exec(select(Document.id).where(under_old).with_for_update()).all()
-            moves.move_dir(old_dir, new_dir)
-            session.execute(
-                update(Document)
-                .where(under_old)
-                .values(file_path=func.concat(new_dir, func.substr(Document.file_path, len(old_dir) + 1)))
-                .execution_options(synchronize_session=False)
-            )
+        reparent_folder(session, moves, folder, fields)
     session.refresh(folder)
     return folder
 

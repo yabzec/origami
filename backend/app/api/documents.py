@@ -26,7 +26,7 @@ from app.models import (
     TranslationStatus,
 )
 from app.services.storage import Storage, get_storage
-from app.services.tree_sync import disk_transaction, lock_documents, lock_tree, relocate_document
+from app.services.tree_sync import MoveLog, disk_transaction, lock_documents, lock_tree, relocate_document
 from app.worker.pipeline import delete_translation_segments
 
 router = APIRouter(
@@ -188,7 +188,7 @@ class BulkMove(BulkIds):
     folder_id: int | None
 
 
-def _delete_documents(session: Session, docs: list[Document]) -> list[tuple]:
+def delete_documents(session: Session, docs: list[Document]) -> list[tuple]:
     """Cancel queued jobs and delete rows (no commit); returns the files to remove after commit."""
     files: list[tuple] = []
     for doc in docs:
@@ -196,6 +196,17 @@ def _delete_documents(session: Session, docs: list[Document]) -> list[tuple]:
         _cancel_queued_jobs(session, doc)
         session.delete(doc)  # chunks, document_tags and translation segments cascade via FK
     return files
+
+
+def move_documents(
+    session: Session, storage: Storage, moves: MoveLog, docs: list[Document], folder_id: int | None
+) -> None:
+    """Put the documents in `folder_id` and move their files (call with the tree and rows locked)."""
+    now = datetime.now(timezone.utc)
+    for doc in sorted(docs, key=lambda d: (d.created_at, str(d.id))):
+        doc.folder_id = folder_id
+        doc.updated_at = now
+        relocate_document(session, storage, moves, doc)
 
 
 @router.post("/bulk/move")
@@ -206,15 +217,11 @@ def bulk_move(
 ) -> dict:
     if body.folder_id is not None and session.get(Folder, body.folder_id) is None:
         raise api_error(404, "not_found", "Folder not found")
-    now = datetime.now(timezone.utc)
     with storage_errors(), disk_transaction(session, storage) as moves:
         lock_tree(session)  # before the row locks: same order as write_document_file
         docs = lock_documents(session, body.ids)
         found = {d.id for d in docs}
-        for doc in sorted(docs, key=lambda d: (d.created_at, str(d.id))):
-            doc.folder_id = body.folder_id
-            doc.updated_at = now
-            relocate_document(session, storage, moves, doc)
+        move_documents(session, storage, moves, docs, body.folder_id)
     return {"moved": len(docs), "missing": [str(i) for i in body.ids if i not in found]}
 
 
@@ -227,7 +234,7 @@ def bulk_delete(
     docs = lock_documents(session, body.ids)  # file paths as of the lock, not a stale read
     found = {d.id for d in docs}
     missing = [str(i) for i in body.ids if i not in found]
-    files = _delete_documents(session, docs)
+    files = delete_documents(session, docs)
     session.commit()
     for file_rel, preview, doc_id in files:
         storage.delete_document_files(file_rel, preview, doc_id)
@@ -315,7 +322,7 @@ def delete_document(
 ) -> None:
     get_doc_or_404(session, document_id)
     docs = lock_documents(session, [document_id])  # file path as of the lock, not a stale read
-    files = _delete_documents(session, docs)
+    files = delete_documents(session, docs)
     session.commit()
     for file_rel, preview, doc_id in files:
         storage.delete_document_files(file_rel, preview, doc_id)
