@@ -9,10 +9,12 @@ export function FolderPicker({
   value,
   onChange,
   id,
+  disabledIds,
 }: {
   value: number | null;
   onChange: (id: number | null) => void;
   id?: string;
+  disabledIds?: ReadonlySet<number>;
 }) {
   const { data } = useFolders();
   const folders = data ?? [];
@@ -94,26 +96,34 @@ export function FolderPicker({
                 </button>
               </li>
             )}
-            {entries.map((f) => (
-              <li key={f.id}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onChange(f.id);
-                    if (childrenOf(folders, f.id).length > 0) setLevel(f.id);
-                    else setOpen(false); // nothing below: the choice is final
-                  }}
-                  className={cn(itemClass, value === f.id && "bg-zinc-100 font-medium")}
-                >
-                  <span className="truncate">{f.name}</span>
-                  {childrenOf(folders, f.id).length > 0 && (
-                    <span aria-hidden="true" className="text-zinc-400">
-                      ›
-                    </span>
-                  )}
-                </button>
-              </li>
-            ))}
+            {entries.map((f) => {
+              const disabled = disabledIds?.has(f.id) ?? false;
+              return (
+                <li key={f.id}>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => {
+                      onChange(f.id);
+                      if (childrenOf(folders, f.id).length > 0) setLevel(f.id);
+                      else setOpen(false); // nothing below: the choice is final
+                    }}
+                    className={cn(
+                      itemClass,
+                      value === f.id && "bg-zinc-100 font-medium",
+                      disabled && "cursor-not-allowed text-zinc-300 hover:bg-transparent",
+                    )}
+                  >
+                    <span className="truncate">{f.name}</span>
+                    {childrenOf(folders, f.id).length > 0 && (
+                      <span aria-hidden="true" className="text-zinc-400">
+                        ›
+                      </span>
+                    )}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
           {entries.length === 0 && <p className="px-2 py-1 text-sm text-zinc-400">No subfolders</p>}
           <div className="mt-1 flex justify-end border-t border-zinc-100 pt-1">

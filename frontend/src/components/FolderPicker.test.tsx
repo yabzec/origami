@@ -82,3 +82,17 @@ it("selects the root from the top level", async () => {
   await userEvent.click(screen.getByRole("button", { name: "(root)" }));
   expect(trigger).toHaveTextContent("(root)");
 });
+
+it("disabled folders cannot be picked", async () => {
+  const onChange = vi.fn();
+  render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <label htmlFor="pick2">Target</label>
+      <FolderPicker id="pick2" value={null} onChange={onChange} disabledIds={new Set([1, 2])} />
+    </QueryClientProvider>,
+  );
+  await userEvent.click(screen.getByLabelText("Target"));
+  const bollette = await screen.findByRole("button", { name: "Bollette" });
+  expect(bollette).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Assicurazioni" })).toBeEnabled();
+});
