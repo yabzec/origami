@@ -9,7 +9,7 @@ import { UploadDialog } from "@/components/UploadDialog";
 import { Breadcrumb, FolderTiles } from "@/components/FolderTiles";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
-import { useBulkDelete, useBulkMove, useDeleteDocument, useDocuments } from "@/hooks/useDocuments";
+import { useBulkDeleteItems, useBulkMoveItems, useDeleteDocument, useDocuments } from "@/hooks/useDocuments";
 import { useFolders } from "@/hooks/useFolders";
 import { useSelection } from "@/hooks/useSelection";
 import { useTags } from "@/hooks/useTags";
@@ -57,8 +57,8 @@ export function BrowsePage() {
 
   const order = (docs ?? []).map((d) => d.id);
   const selection = useSelection(order, browseViewKey(params));
-  const bulkMove = useBulkMove();
-  const bulkDelete = useBulkDelete();
+  const bulkMove = useBulkMoveItems();
+  const bulkDelete = useBulkDeleteItems();
   const [bulkError, setBulkError] = useState<string | null>(null);
   const selectedIds = [...selection.selected];
   const reportBulk = (err: unknown) => setBulkError(err instanceof ApiError ? err.message : "Bulk action failed");
@@ -226,11 +226,17 @@ export function BrowsePage() {
           onClear={selection.clear}
           onMove={(folderId) => {
             setBulkError(null);
-            bulkMove.mutate({ ids: selectedIds, folder_id: folderId }, { onSuccess: selection.clear, onError: reportBulk });
+            bulkMove.mutate(
+              { folder_ids: [], document_ids: selectedIds, folder_id: folderId },
+              { onSuccess: selection.clear, onError: reportBulk },
+            );
           }}
           onDelete={() => {
             setBulkError(null);
-            bulkDelete.mutate(selectedIds, { onSuccess: selection.clear, onError: reportBulk });
+            bulkDelete.mutate(
+              { folder_ids: [], document_ids: selectedIds },
+              { onSuccess: selection.clear, onError: reportBulk },
+            );
           }}
         />
       )}

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { DEFAULT_SORT, type DocumentSort } from "@/lib/sorting";
-import type { BulkResult, Document } from "@/lib/types";
+import type { BulkItemsResult, Document } from "@/lib/types";
 
 export interface DocumentFilters {
   folder: number | "root" | null; // null = every folder
@@ -61,19 +61,24 @@ export function useDeleteDocument() {
   });
 }
 
-export function useBulkMove() {
+export interface BulkItems {
+  folder_ids: number[];
+  document_ids: string[];
+}
+
+export function useBulkMoveItems() {
   const invalidate = useInvalidateListing();
   return useMutation({
-    mutationFn: (body: { ids: string[]; folder_id: number | null }) =>
-      api.post<BulkResult>("/api/documents/bulk/move", body),
+    mutationFn: (body: BulkItems & { folder_id: number | null }) =>
+      api.post<BulkItemsResult>("/api/bulk/move", body),
     onSuccess: invalidate,
   });
 }
 
-export function useBulkDelete() {
+export function useBulkDeleteItems() {
   const invalidate = useInvalidateListing();
   return useMutation({
-    mutationFn: (ids: string[]) => api.post<BulkResult>("/api/documents/bulk/delete", { ids }),
+    mutationFn: (body: BulkItems) => api.post<BulkItemsResult>("/api/bulk/delete", body),
     onSuccess: invalidate,
   });
 }

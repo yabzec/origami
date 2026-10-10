@@ -138,8 +138,11 @@ export interface OcrLanguagesResponse {
   translation_default: string;
 }
 
-export interface BulkResult {
-  moved?: number;
-  deleted?: number;
-  missing: string[];
+export interface BulkItemsResult {
+  moved_folders?: number;
+  moved_documents?: number;
+  deleted_folders?: number;
+  deleted_documents?: number;
+  missing_folders: number[];
+  missing_documents: string[];
 }
