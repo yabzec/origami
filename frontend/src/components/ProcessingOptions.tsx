@@ -24,6 +24,7 @@ export function ProcessingOptions({
     if (next !== value) onChange(next);
   }, [data, value, onChange]);
 
+  const targets = data?.translation_languages ?? []; // absent from older servers
   const set = (patch: Partial<ProcessingValues>) => onChange({ ...value, ...patch });
 
   return (
@@ -57,7 +58,7 @@ export function ProcessingOptions({
         />
         Translation
       </label>
-      {value.translationEnabled && (data?.translation_languages.length ?? 0) > 0 && (
+      {value.translationEnabled && targets.length > 0 && (
         <div className="pl-6">
           <Label htmlFor={`${idPrefix}-tr-lang`}>Translate to</Label>
           <Select
@@ -65,7 +66,7 @@ export function ProcessingOptions({
             value={value.translationLanguage}
             onChange={(e) => set({ translationLanguage: e.target.value })}
           >
-            {data?.translation_languages.map((l) => (
+            {targets.map((l) => (
               <option key={l.code} value={l.code}>
                 {l.name}
               </option>
