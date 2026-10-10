@@ -26,11 +26,3 @@ export function useRenameFolder() {
     onSuccess: invalidate,
   });
 }
-
-export function useDeleteFolder() {
-  const invalidate = useInvalidateFolders();
-  return useMutation({
-    mutationFn: (id: number) => api.del(`/api/folders/${id}`),
-    onSuccess: invalidate,
-  });
-}
