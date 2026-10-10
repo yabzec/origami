@@ -37,7 +37,10 @@ export function BulkActionBar({
         <Button variant="ghost" onClick={onSelectAll}>
           Select all
         </Button>
-        <Button variant="outline" disabled={busy} onClick={() => setDialog("move")}>
+        <Button variant="outline" disabled={busy} onClick={() => {
+            setTarget(null);
+            setDialog("move");
+          }}>
           Move…
         </Button>
         <Button variant="destructive" disabled={busy} onClick={() => setDialog("delete")}>

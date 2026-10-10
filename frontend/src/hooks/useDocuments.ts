@@ -71,7 +71,7 @@ export function useBulkMoveItems() {
   return useMutation({
     mutationFn: (body: BulkItems & { folder_id: number | null }) =>
       api.post<BulkItemsResult>("/api/bulk/move", body),
-    onSuccess: invalidate,
+    onSettled: invalidate,
   });
 }
 
@@ -79,6 +79,6 @@ export function useBulkDeleteItems() {
   const invalidate = useInvalidateListing();
   return useMutation({
     mutationFn: (body: BulkItems) => api.post<BulkItemsResult>("/api/bulk/delete", body),
-    onSuccess: invalidate,
+    onSettled: invalidate,
   });
 }
