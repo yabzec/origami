@@ -4,14 +4,24 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE=(docker compose -f "$REPO_DIR/docker-compose.yml")
 
-echo "origami: ensuring db container is up"
-"${COMPOSE[@]}" up -d db
+echo "origami: ensuring db and ollama containers are up"
+"${COMPOSE[@]}" up -d db ollama
 
 echo "origami: waiting for postgres to become ready"
 deadline=$((SECONDS + 60))
 until "${COMPOSE[@]}" exec -T db pg_isready -U origami -d origami >/dev/null 2>&1; do
   if ((SECONDS >= deadline)); then
     echo "origami: postgres not ready after 60s, giving up" >&2
+    exit 1
+  fi
+  sleep 1
+done
+
+echo "origami: waiting for ollama to become ready"
+deadline=$((SECONDS + 60))
+until "${COMPOSE[@]}" exec -T ollama ollama list >/dev/null 2>&1; do
+  if ((SECONDS >= deadline)); then
+    echo "origami: ollama not ready after 60s, giving up" >&2
     exit 1
   fi
   sleep 1
@@ -24,6 +34,10 @@ API_PORT="${ORIGAMI_PORT:-8124}"
 
 echo "origami: applying migrations"
 .venv/bin/python -m alembic upgrade head
+
+echo "origami: checking embeddings"
+# Exit 78 when EMBEDDING_MODEL no longer matches the stored vectors (see README, "Embeddings").
+.venv/bin/python -m app.cli check-embeddings
 
 echo "origami: starting api ($API_HOST:$API_PORT) and worker"
 .venv/bin/uvicorn app.main:app --host "$API_HOST" --port "$API_PORT" &

@@ -20,6 +20,8 @@ Environment=ORIGAMI_HOST=127.0.0.1
 Environment=ORIGAMI_PORT=8124
 Restart=on-failure
 RestartSec=5
+# check-embeddings exits 78 on a model mismatch: fail instead of restarting every 5 s.
+RestartPreventExitStatus=78
 
 [Install]
 WantedBy=multi-user.target
