@@ -606,7 +606,7 @@ METADATA_REFRESH_DELAY = timedelta(seconds=60)
 
 @register("refresh_metadata")
 def refresh_metadata(session: Session, payload: dict) -> None:
-    """Rebuild and embed the metadata chunk after the user edited title, description or notes."""
+    """Rebuild and embed the metadata chunk after the user edited title, description, notes or properties."""
     from app.services.jobs import enqueue
 
     doc = session.get(Document, payload["document_id"])

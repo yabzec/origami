@@ -289,7 +289,7 @@ export function DocumentPage() {
           <Label htmlFor="d-tags">Tags</Label>
           <TagInput id="d-tags" value={tagIds} onChange={setTagIds} />
         </div>
-        <PropertiesPanel doc={doc} />
+        <PropertiesPanel key={doc.id} doc={doc} />
         <Button className="w-full" onClick={() => save.mutate()} disabled={save.isPending}>
           {save.isPending ? "Saving…" : "Save"}
         </Button>

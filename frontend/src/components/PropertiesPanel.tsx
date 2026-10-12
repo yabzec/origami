@@ -82,10 +82,10 @@ export function PropertiesPanel({ doc }: { doc: Pick<Document, "id" | "propertie
             {rows.map((row, i) => (
               <tr key={i}>
                 <td className="p-1">
-                  <Input aria-label="Key" className="h-7 text-xs" value={row.key} onChange={(e) => update(i, { key: e.target.value })} />
+                  <Input aria-label="Key" maxLength={100} className="h-7 text-xs" value={row.key} onChange={(e) => update(i, { key: e.target.value })} />
                 </td>
                 <td className="p-1">
-                  <Input aria-label="Value" className="h-7 text-xs" value={row.value} onChange={(e) => update(i, { value: e.target.value })} />
+                  <Input aria-label="Value" maxLength={2000} className="h-7 text-xs" value={row.value} onChange={(e) => update(i, { value: e.target.value })} />
                 </td>
                 <td className="p-1 text-center">
                   <button
@@ -116,7 +116,7 @@ export function PropertiesPanel({ doc }: { doc: Pick<Document, "id" | "propertie
           Cancel
         </Button>
         <Button size="sm" onClick={submit} disabled={save.isPending}>
-          {save.isPending ? "Saving…" : "Save"}
+          {save.isPending ? "Saving…" : "Save properties"}
         </Button>
       </div>
     </div>

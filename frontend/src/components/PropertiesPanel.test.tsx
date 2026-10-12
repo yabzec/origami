@@ -53,7 +53,7 @@ describe("PropertiesPanel", () => {
     const values = screen.getAllByRole("textbox", { name: "Value" });
     await userEvent.type(keys[1], " Colore ");
     await userEvent.type(values[1], "blu");
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save properties" }));
     expect(api.patch).toHaveBeenCalledWith("/api/documents/d1", {
       properties: [{ key: "Patient", value: "Mario Rossi" }, { key: "Colore", value: "blu" }],
     });
@@ -67,7 +67,7 @@ describe("PropertiesPanel", () => {
     await userEvent.click(screen.getByRole("button", { name: "Edit" }));
     await userEvent.click(screen.getByRole("button", { name: "Add row" }));
     await userEvent.type(screen.getAllByRole("textbox", { name: "Key" })[2], "patient");
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save properties" }));
     expect(screen.getByText("Duplicate key: patient")).toBeInTheDocument();
     expect(api.patch).not.toHaveBeenCalled();
   });
@@ -76,7 +76,7 @@ describe("PropertiesPanel", () => {
     vi.mocked(api.patch).mockRejectedValueOnce(new ApiError(422, "validation_error", "Request validation failed"));
     renderPanel();
     await userEvent.click(screen.getByRole("button", { name: "Edit" }));
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save properties" }));
     expect(await screen.findByText("Request validation failed")).toBeInTheDocument();
   });
 
@@ -91,5 +91,23 @@ describe("PropertiesPanel", () => {
     expect(screen.getByText("DX")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(screen.getAllByRole("textbox", { name: "Key" })).toHaveLength(2);
+  });
+
+  it("resets edit mode when the document changes (key={doc.id} as in DocumentPage)", async () => {
+    const qc = new QueryClient();
+    const docA = { id: "a", properties: [{ key: "A-key", value: "A-val" }] };
+    const docB = { id: "b", properties: [{ key: "B-key", value: "B-val" }] };
+    const ui = (doc: typeof docA) => (
+      <QueryClientProvider client={qc}>
+        <PropertiesPanel key={doc.id} doc={doc} />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(ui(docA));
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByRole("button", { name: "Save properties" })).toBeInTheDocument();
+    rerender(ui(docB));
+    expect(screen.queryByRole("button", { name: "Save properties" })).not.toBeInTheDocument();
+    expect(screen.getByText("B-key")).toBeInTheDocument();
+    expect(screen.queryByText("A-key")).not.toBeInTheDocument();
   });
 });
