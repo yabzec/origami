@@ -17,6 +17,7 @@ from app.models import (
     DocStatus,
     DocType,
     Document,
+    DocumentAttachment,
     DocumentTag,
     Folder,
     Job,
@@ -202,13 +203,16 @@ class BulkMove(BulkIds):
     folder_id: int | None
 
 
-def delete_documents(session: Session, docs: list[Document]) -> list[tuple]:
+def delete_documents(session: Session, docs: list[Document]) -> list[tuple[str | None, str | None, uuid.UUID, list[str]]]:
     """Cancel queued jobs and delete rows (no commit); returns the files to remove after commit."""
-    files: list[tuple] = []
+    files: list[tuple[str | None, str | None, uuid.UUID, list[str]]] = []
     for doc in docs:
-        files.append((doc.file_path, doc.preview_path, doc.id))
+        attachments = list(
+            session.exec(select(DocumentAttachment.file_path).where(DocumentAttachment.document_id == doc.id))
+        )
+        files.append((doc.file_path, doc.preview_path, doc.id, attachments))
         _cancel_queued_jobs(session, doc)
-        session.delete(doc)  # chunks, document_tags and translation segments cascade via FK
+        session.delete(doc)  # chunks, attachments, document_tags and translation segments cascade via FK
     return files
 
 
@@ -250,8 +254,8 @@ def bulk_delete(
     missing = [str(i) for i in body.ids if i not in found]
     files = delete_documents(session, docs)
     session.commit()
-    for file_rel, preview, doc_id in files:
-        storage.delete_document_files(file_rel, preview, doc_id)
+    for file_rel, preview, doc_id, attachments in files:
+        storage.delete_document_files(file_rel, preview, doc_id, attachments)
     return {"deleted": len(docs), "missing": missing}
 
 
@@ -340,8 +344,8 @@ def delete_document(
     docs = lock_documents(session, [document_id])  # file path as of the lock, not a stale read
     files = delete_documents(session, docs)
     session.commit()
-    for file_rel, preview, doc_id in files:
-        storage.delete_document_files(file_rel, preview, doc_id)
+    for file_rel, preview, doc_id, attachments in files:
+        storage.delete_document_files(file_rel, preview, doc_id, attachments)
 
 
 class ReprocessRequest(BaseModel):

@@ -4,7 +4,8 @@ import os
 import shutil
 import time
 import uuid
-from pathlib import Path
+from collections.abc import Sequence
+from pathlib import Path, PurePosixPath
 from typing import BinaryIO
 
 from app.config import get_settings
@@ -119,9 +120,17 @@ class Storage:
             self.derived_abs(name).unlink(missing_ok=True)
 
     def delete_document_files(
-        self, file_rel: str | None, preview: str | None, document_id: uuid.UUID
+        self,
+        file_rel: str | None,
+        preview: str | None,
+        document_id: uuid.UUID,
+        attachments: Sequence[str] = (),
     ) -> None:
         self.delete_file(file_rel)
+        for rel in attachments:
+            self.delete_file(rel)
+        if attachments and file_rel:
+            self.remove_dir(str(PurePosixPath(file_rel).parent))  # the bundle directory
         self.delete_derived(preview)
         self.delete_derived(companion_name(document_id))
 

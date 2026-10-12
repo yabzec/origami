@@ -134,9 +134,9 @@ def bulk_delete_items(
         session.delete(session.get(Folder, folder_id))
         session.flush()  # children before parents (self-referencing foreign key)
     session.commit()
-    for file_rel, preview, doc_id in files:
+    for file_rel, preview, doc_id, attachments in files:
         try:
-            storage.delete_document_files(file_rel, preview, doc_id)
+            storage.delete_document_files(file_rel, preview, doc_id, attachments)
         except Exception:  # the DB delete has committed: keep cleaning up the rest
             log.warning("Could not delete files of document %s", doc_id, exc_info=True)
     for rel in dirs:

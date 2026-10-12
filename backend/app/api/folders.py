@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 from app.api.deps import api_error, get_current_user
 from app.db import get_session
 from app.api.storage_errors import storage_errors
-from app.models import Document, Folder
+from app.models import Document, DocumentAttachment, Folder
 from app.services.storage import Storage, get_storage
 from app.services.tree_paths import folder_rel_dir
 from app.services.tree_sync import MoveLog, disk_name_taken, disk_transaction, lock_tree
@@ -107,6 +107,15 @@ def reparent_folder(session: Session, moves: MoveLog, folder: Folder, fields: di
             update(Document)
             .where(under_old)
             .values(file_path=func.concat(new_dir, func.substr(Document.file_path, len(old_dir) + 1)))
+            .execution_options(synchronize_session=False)
+        )
+        att_under_old = func.starts_with(DocumentAttachment.file_path, old_dir + "/")
+        session.execute(
+            update(DocumentAttachment)
+            .where(att_under_old)
+            .values(
+                file_path=func.concat(new_dir, func.substr(DocumentAttachment.file_path, len(old_dir) + 1))
+            )
             .execution_options(synchronize_session=False)
         )
 
