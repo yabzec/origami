@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Link } from "react-router";
 import { Markdown } from "@/components/chat/Markdown";
 import type { ChatMessage } from "@/lib/chatReducer";
+import { documentLink } from "@/lib/documentView";
 import { isNearBottom } from "@/lib/scroll";
 
 function TypingIndicator() {
@@ -38,7 +39,7 @@ function AssistantMessage({ message, typing }: { message: ChatMessage; typing: b
             {message.sources.map((source) => (
               <li key={source.n}>
                 [{source.n}]{" "}
-                <Link to={`/documents/${source.document_id}`} className="underline hover:text-zinc-800">
+                <Link to={documentLink(source.document_id, source.attachment_id)} className="underline hover:text-zinc-800">
                   {source.title}
                 </Link>
                 {source.page_number != null && <span> (p. {source.page_number})</span>}
