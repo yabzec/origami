@@ -8,7 +8,10 @@ from sqlalchemy.orm.exc import StaleDataError
 from sqlmodel import Session, select
 
 from app.config import get_settings
-from app.models import Chunk, ChunkSource, DocStatus, DocType, Document, Job, TranslationSegment, TranslationStatus
+from app.models import (
+    AttachmentRole, Chunk, ChunkSource, DiscImport, DocStatus, DocType, Document, DocumentAttachment, Job,
+    JobStatus, TranslationSegment, TranslationStatus,
+)
 from app.services.chunking import chunk_pages, page_texts_from_chunks, segment_pages
 from app.services.convert import OFFICE_EXTENSIONS, ConversionError, office_to_pdf
 from app.services.extract import (
@@ -23,9 +26,12 @@ from app.services.llm import embed as llm_embed
 from app.services.llm import TranslationDeferred
 from app.services.llm import translate as llm_translate
 from app.services.ocr import images_to_pdf, images_to_searchable_pdf, ocr_image, pdf_to_searchable_pdf
-from app.services.study_metadata import metadata_text
+from app.services.dicom_parse import REPORT_FILENAME
+from app.services.dicom_render import render
+from app.services.study_metadata import cover_rows, metadata_text
+from app.services.study_pdf import PageImage, build_study_pdf
 from app.services.storage import Storage, companion_name, get_storage, preview_name
-from app.services.tree_sync import write_document_file
+from app.services.tree_sync import AttachmentSource, write_bundle, write_document_file
 from app.worker.runner import is_final_attempt, register
 
 log = logging.getLogger("origami.pipeline")
@@ -91,6 +97,9 @@ def _extract_content(
     if doc.doc_type == DocType.video or _has_chunks(session, doc, ChunkSource.content):
         return []
 
+    if doc.extra_metadata is not None or "disc_import_id" in payload:
+        return _extract_study(session, doc, storage, payload)
+
     if (
         payload.get("force_ocr")
         and doc.doc_type in (DocType.pdf, DocType.scan)
@@ -129,6 +138,100 @@ def _extract_content(
         return pages
 
     raise ValueError(f"Unknown doc_type {doc.doc_type!r}")
+
+
+def _extract_study(
+    session: Session, doc: Document, storage: Storage, payload: dict
+) -> list[tuple[int | None, str]]:
+    """Imported X-ray study: build the image PDF (and bundle) once; index only the report text."""
+    if doc.file_path is None:
+        _build_study_files(session, doc, storage, payload)
+    elif not storage.abs_path(doc.file_path).exists():
+        # write_bundle is not re-entrant: rebuilding over existing attachment rows would duplicate them
+        raise RuntimeError("The stored image PDF is missing; import the disc again")
+    _release_disc_import(session, storage, payload)
+    _insert_attachment_chunks(session, doc, storage)
+    return []  # content chunks are written above, tagged with their attachment
+
+
+def _build_study_files(session: Session, doc: Document, storage: Storage, payload: dict) -> None:
+    root = storage.disc_import_path(payload.get("disc_import_id", "-"))
+    if "disc_import_id" not in payload or not root.is_dir():
+        raise RuntimeError("The staged disc files are no longer available; import the disc again")
+    rendered = [
+        (image, spec["label"])
+        for spec in payload["images"]
+        for image in render(root / spec["path"], spec["kind"])
+    ]
+    day = doc.document_date.isoformat()
+    pages = [
+        PageImage(image, " · ".join([label, day, f"image {n}/{len(rendered)}"]))
+        for n, (image, label) in enumerate(rendered, start=1)
+    ]
+    pdf = build_study_pdf(doc.title, cover_rows(doc.extra_metadata or {}, doc.document_date), doc.notes, pages)
+    reports = [
+        AttachmentSource(
+            role=AttachmentRole.report,
+            filename=REPORT_FILENAME,
+            source=root / report["path"],
+            page_count=len(extract_pdf_text(root / report["path"])),
+        )
+        for report in payload["reports"]
+    ]
+    if reports:
+        write_bundle(session, storage, doc, ".pdf", pdf, reports)
+    else:
+        write_document_file(session, storage, doc, ".pdf", pdf)
+    doc.page_count = 1 + len(rendered)
+    doc.ocr_applied = False
+    session.commit()
+
+
+def _release_disc_import(session: Session, storage: Storage, payload: dict) -> None:
+    """Remove the staging dir once no other job of the same import still needs it."""
+    import_id = payload.get("disc_import_id")
+    if not import_id:
+        return
+    other = session.exec(
+        select(Job.id).where(
+            Job.type == "process_document",
+            Job.status.in_([JobStatus.queued, JobStatus.running]),
+            Job.payload["disc_import_id"].astext == import_id,
+            Job.payload["document_id"].astext != payload["document_id"],
+        )
+    ).first()
+    if other is None:
+        storage.remove_disc_import_dir(import_id)
+
+
+def _insert_attachment_chunks(session: Session, doc: Document, storage: Storage) -> None:
+    """Content chunks from the attachment PDFs; OCR only when enabled and the PDF has no text layer."""
+    next_index = _next_chunk_index(session, doc)
+    attachments = session.exec(
+        select(DocumentAttachment)
+        .where(DocumentAttachment.document_id == doc.id)
+        .order_by(DocumentAttachment.id)
+    ).all()
+    for attachment in attachments:
+        path = storage.abs_path(attachment.file_path)
+        pages = extract_pdf_text(path)
+        if pdf_needs_ocr(pages):
+            if not doc.ocr_enabled:
+                continue  # the import preview warned that this report has no text
+            _, pages = pdf_to_searchable_pdf(path, doc.ocr_languages)  # text only: the original stays
+        for chunk in chunk_pages(pages):
+            session.add(
+                Chunk(
+                    document_id=doc.id,
+                    attachment_id=attachment.id,
+                    chunk_index=next_index,
+                    page_number=chunk["page_number"],
+                    source=ChunkSource.content,
+                    content=chunk["content"],
+                )
+            )
+            next_index += 1
+    session.commit()
 
 
 def _extract_office(
@@ -248,6 +351,9 @@ def _ensure_summary(session: Session, doc: Document, storage: Storage) -> None:
     if doc.doc_type == DocType.video or doc.summary is not None or not doc.summary_enabled:
         return
     text = "\n\n".join(c.content for c in _content_chunks(session, doc)).strip()
+    if doc.extra_metadata is not None:
+        # X-ray study: summarize the report and the study data, never the images through vision
+        text = "\n\n".join(filter(None, [text, metadata_text(doc.extra_metadata)]))
     if doc.doc_type == DocType.image and len(text) < IMAGE_SUMMARY_TEXT_THRESHOLD:
         # No usable extracted text (a photo, or no-OCR) — send the file to vision.
         summary = llm_describe(image_path=storage.abs_path(doc.file_path))
@@ -590,6 +696,18 @@ def sweep_scan_sessions(session: Session, payload: dict) -> None:
         session.delete(scan_session)
         session.commit()
         storage.remove_scan_session_dir(sid)
+
+    imports_in_flight = {
+        job.payload.get("disc_import_id") for job in in_flight_jobs if job.payload.get("disc_import_id")
+    }
+    for imp in session.exec(select(DiscImport)).all():
+        created = imp.created_at if imp.created_at.tzinfo else imp.created_at.replace(tzinfo=timezone.utc)
+        if created >= cutoff or str(imp.id) in imports_in_flight:
+            continue
+        import_id = imp.id
+        session.delete(imp)
+        session.commit()
+        storage.remove_disc_import_dir(import_id)
 
     for part in storage.remove_part_files(PART_FILE_MAX_AGE.total_seconds()):
         log.info("Removed leftover partial write %s", part)
