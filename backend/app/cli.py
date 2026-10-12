@@ -93,12 +93,19 @@ def check_embeddings_cmd() -> None:
     import logging
 
     from app.config import resolve_embedding
-    from app.services.embedding_check import EX_CONFIG, EmbeddingCheckError, check
+    from app.services import llm
+    from app.services.embedding_check import (
+        EX_CONFIG, EX_UNAVAILABLE, EmbeddingCheckError, EmbeddingUnavailableError, check,
+    )
 
     logging.basicConfig(level=logging.INFO)  # Ollama pull progress
     try:
         with Session(engine) as session:
-            result = check(session, resolve_embedding(), pull=True)
+            result = check(session, resolve_embedding(), pull=True,
+                           embed=lambda texts, role: llm.embed(texts, role=role))
+    except EmbeddingUnavailableError as exc:
+        print(exc, file=sys.stderr)
+        raise SystemExit(EX_UNAVAILABLE)
     except EmbeddingCheckError as exc:
         print(exc, file=sys.stderr)
         raise SystemExit(EX_CONFIG)

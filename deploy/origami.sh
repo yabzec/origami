@@ -36,7 +36,8 @@ echo "origami: applying migrations"
 .venv/bin/python -m alembic upgrade head
 
 echo "origami: checking embeddings"
-# Exit 78 when EMBEDDING_MODEL no longer matches the stored vectors (see README, "Embeddings").
+# Exit 78 when EMBEDDING_MODEL no longer matches the stored vectors (see README, "Embeddings");
+# exit 69 when Ollama or the provider does not answer (systemd retries).
 .venv/bin/python -m app.cli check-embeddings
 
 echo "origami: starting api ($API_HOST:$API_PORT) and worker"

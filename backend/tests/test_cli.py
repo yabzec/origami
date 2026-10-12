@@ -126,6 +126,9 @@ def test_check_storage_ok(monkeypatch, capsys, tmp_path, cli_engine):
 
 
 def test_check_embeddings_records(session, cli_engine, monkeypatch, capsys):
+    from app.services import llm
+
+    monkeypatch.setattr(llm, "embed", lambda texts, role="document": [[0.5] * 1536 for _ in texts])
     from app.models import EmbeddingMeta
 
     run_cli(monkeypatch, "check-embeddings")
@@ -134,6 +137,9 @@ def test_check_embeddings_records(session, cli_engine, monkeypatch, capsys):
 
 
 def test_check_embeddings_mismatch_exits_78(session, cli_engine, monkeypatch, capsys):
+    from app.services import llm
+
+    monkeypatch.setattr(llm, "embed", lambda texts, role="document": [[0.5] * 1536 for _ in texts])
     from app.models import EmbeddingMeta
     from tests.helpers import basis_vector, seed_document
 
@@ -187,3 +193,24 @@ def test_reembed_cli_needs_confirmation(session, cli_engine, monkeypatch, restor
     with pytest.raises(SystemExit, match="Aborted"):
         run_cli(monkeypatch, "reembed")
     assert column_dim(session) == 1536
+
+
+def test_check_embeddings_ollama_down_exits_69(session, cli_engine, monkeypatch, capsys):
+    from app.config import get_settings
+    from app.services import embedding_check
+
+    def unreachable(url, body=None, timeout=10):
+        import urllib.error
+
+        raise urllib.error.URLError("Connection refused")
+
+    monkeypatch.setattr(embedding_check, "ollama_request", unreachable)
+    monkeypatch.setenv("EMBEDDING_MODEL", "")
+    get_settings.cache_clear()
+    try:
+        with pytest.raises(SystemExit) as exit_info:
+            run_cli(monkeypatch, "check-embeddings")
+    finally:
+        get_settings.cache_clear()
+    assert exit_info.value.code == 69
+    assert "docker compose up -d ollama" in capsys.readouterr().err

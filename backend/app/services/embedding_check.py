@@ -3,6 +3,7 @@
 import json
 import logging
 import urllib.request
+from typing import Callable
 
 from sqlalchemy import text
 from sqlmodel import Session
@@ -14,6 +15,9 @@ from app.models.user import utcnow
 log = logging.getLogger("origami.embeddings")
 
 EX_CONFIG = 78  # sysexits.h; origami.service has RestartPreventExitStatus=78
+EX_UNAVAILABLE = 69  # transient: systemd restarts the service and the check runs again
+CHECK_LOCK_ID = 0x0E3BED  # pg advisory lock: API and worker startup checks run one at a time
+SMOKE_TEXT = "Origami embedding check"
 HNSW_MAX_DIM = 2000  # pgvector HNSW limit for the vector type
 INDEX_NAME = "ix_chunks_embedding"
 OLLAMA_TIMEOUT_SECONDS = 10
@@ -26,6 +30,10 @@ REEMBED_HINT = (
 
 class EmbeddingCheckError(Exception):
     """Origami must not start; the message tells the user what to do."""
+
+
+class EmbeddingUnavailableError(EmbeddingCheckError):
+    """The embedding service did not answer; retrying later may work."""
 
 
 def ollama_request(url: str, body: dict | None = None, timeout: float = OLLAMA_TIMEOUT_SECONDS):
@@ -41,7 +49,7 @@ def ensure_ollama_model(cfg: EmbeddingConfig, pull: bool) -> None:
         with ollama_request(f"{base}/api/tags") as resp:
             names = {m.get("name") for m in json.load(resp).get("models", [])}
     except OSError as exc:  # URLError, connection refused, timeout
-        raise EmbeddingCheckError(
+        raise EmbeddingUnavailableError(
             f"Ollama is not reachable at {base} ({exc}). Start it: docker compose up -d ollama"
         ) from exc
     if cfg.ollama_name in names:
@@ -64,7 +72,21 @@ def ensure_ollama_model(cfg: EmbeddingConfig, pull: bool) -> None:
                     last_status = event.get("status")
                     log.info("pull %s: %s", cfg.ollama_name, last_status)
     except OSError as exc:
-        raise EmbeddingCheckError(f"Pulling {cfg.ollama_name} from {base} failed: {exc}") from exc
+        raise EmbeddingUnavailableError(f"Pulling {cfg.ollama_name} from {base} failed: {exc}") from exc
+
+
+def probe_dimension(cfg: EmbeddingConfig, embed: Callable[..., list[list[float]]]) -> None:
+    """Embed one string and check the model gives cfg.dim values."""
+    try:
+        vectors = embed([SMOKE_TEXT], role="document")
+    except ValueError as exc:  # fit_dimension: the model gives fewer values than EMBEDDING_DIM
+        raise EmbeddingCheckError(str(exc)) from exc
+    except Exception as exc:
+        raise EmbeddingUnavailableError(f"Embedding model {cfg.model} did not answer: {exc}") from exc
+    if len(vectors) != 1 or len(vectors[0]) != cfg.dim:
+        raise EmbeddingCheckError(
+            f"Smoke test failed: expected one vector of {cfg.dim} values, got {[len(v) for v in vectors]}"
+        )
 
 
 def column_dim(session: Session) -> int:
@@ -103,12 +125,21 @@ def _mismatch(model: str, dim: int, scheme: str, cfg: EmbeddingConfig) -> Embedd
     )
 
 
-def check(session: Session, cfg: EmbeddingConfig, pull: bool) -> str:
-    """Compare the stored vectors with `cfg`: "ok", "recorded" (first run) or "resized" (empty archive)."""
+def check(
+    session: Session, cfg: EmbeddingConfig, pull: bool, embed: Callable[..., list[list[float]]] | None = None
+) -> str:
+    """Compare the stored vectors with `cfg`: "ok", "recorded" (first run) or "resized" (empty archive).
+
+    With `embed`, one probe call first proves the model gives cfg.dim values.
+    """
     if cfg.dim > HNSW_MAX_DIM:
         raise EmbeddingCheckError(f"EMBEDDING_DIM {cfg.dim} is over the pgvector HNSW limit of {HNSW_MAX_DIM}")
     if cfg.is_ollama:
         ensure_ollama_model(cfg, pull)
+    if embed is not None:
+        probe_dimension(cfg, embed)
+    # Held until commit/rollback: a concurrent check sees this one's fingerprint and column.
+    session.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": CHECK_LOCK_ID})
     stored = session.get(EmbeddingMeta, 1)
     current = (stored.model, stored.dim, stored.scheme) if stored else None
     wanted = (cfg.model, cfg.dim, cfg.scheme)
@@ -133,6 +164,7 @@ def check(session: Session, cfg: EmbeddingConfig, pull: bool) -> str:
         return "recorded"
     if current != wanted or dim_now != cfg.dim:
         raise _mismatch(*current, cfg)
+    session.commit()  # releases the lock
     return "ok"
 
 

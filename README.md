@@ -159,7 +159,8 @@ in `/etc/systemd/system/origami.service` to reach it from the LAN, then run
 At start the service runs `python -m app.cli check-embeddings`. When the stored
 vectors don't match `EMBEDDING_MODEL`, it exits with code 78 and the unit stays
 failed (`RestartPreventExitStatus=78`) instead of restarting; `journalctl -u origami`
-shows what to do. An existing install must re-install the unit (the `sed … | sudo tee`
+shows what to do. When Ollama or the embedding provider does not answer, it exits
+with code 69 and systemd retries after 5 s. An existing install must re-install the unit (the `sed … | sudo tee`
 command above, then `sudo systemctl daemon-reload`) to get this setting.
 
 Operate:

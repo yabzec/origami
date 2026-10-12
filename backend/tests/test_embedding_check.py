@@ -170,3 +170,79 @@ def test_startup_guard_raises_on_mismatch(session, engine):
     seed_document(session, "A", [{"content": "a", "embedding": basis_vector(0)}])
     with pytest.raises(EmbeddingCheckError, match="Embedding model changed"):
         startup_guard(engine)
+
+
+def test_ollama_unreachable_is_transient(session, ollama):
+    from app.services.embedding_check import EmbeddingUnavailableError
+
+    ollama.reachable = False
+    with pytest.raises(EmbeddingUnavailableError):
+        check(session, LOCAL, pull=True)
+
+
+def _embed_returning(dim):
+    def embed(texts, role="document"):
+        return [[0.5] * dim for _ in texts]
+
+    return embed
+
+
+def test_probe_dimension_mismatch_refuses_before_writing(session):
+    with pytest.raises(EmbeddingCheckError, match="1536"):
+        check(session, GEMINI, pull=True, embed=_embed_returning(768))
+    assert session.get(EmbeddingMeta, 1) is None
+    assert column_dim(session) == 1536
+
+
+def test_probe_value_error_is_config_error(session):
+    def embed(texts, role="document"):
+        raise ValueError("The embedding model returned 768 values but EMBEDDING_DIM is 1536")
+
+    with pytest.raises(EmbeddingCheckError, match="EMBEDDING_DIM is 1536") as err:
+        check(session, GEMINI, pull=True, embed=embed)
+    from app.services.embedding_check import EmbeddingUnavailableError
+
+    assert not isinstance(err.value, EmbeddingUnavailableError)
+
+
+def test_probe_provider_error_is_transient(session):
+    from app.services.embedding_check import EmbeddingUnavailableError
+
+    def embed(texts, role="document"):
+        raise RuntimeError("503 Service Unavailable")
+
+    with pytest.raises(EmbeddingUnavailableError, match="503"):
+        check(session, GEMINI, pull=True, embed=embed)
+
+
+def test_probe_matching_dimension_passes(session):
+    assert check(session, GEMINI, pull=True, embed=_embed_returning(1536)) == "recorded"
+
+
+def test_check_waits_for_concurrent_check(session, engine):
+    """API and worker start together: the second check must wait for the first one's transaction."""
+    import threading
+
+    from app.services.embedding_check import CHECK_LOCK_ID
+
+    holder = engine.connect()
+    holder.begin()
+    holder.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": CHECK_LOCK_ID})
+    done = threading.Event()
+
+    def run():
+        from sqlmodel import Session
+
+        with Session(engine) as other:
+            check(other, GEMINI, pull=False)
+        done.set()
+
+    worker = threading.Thread(target=run)
+    worker.start()
+    try:
+        assert not done.wait(1.0)  # blocked on the lock
+    finally:
+        holder.rollback()
+        holder.close()
+    assert done.wait(10)
+    worker.join()

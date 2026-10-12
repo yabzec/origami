@@ -145,7 +145,7 @@ Any failure rolls back the whole transaction: old vectors and fingerprint stay. 
 
 | Situation | Behavior |
 |---|---|
-| Ollama down at startup | exit 78, "start it: docker compose up -d ollama" |
+| Ollama down at startup | exit 69 (transient, systemd retries), "start it: docker compose up -d ollama" |
 | Ollama down during a job | embed raises, normal job retry (30 s … 30 min) |
 | Ollama down during search | semantic part fails as with a remote provider today |
 | Model mismatch | exit 78 with instructions |

@@ -8,11 +8,11 @@ from sqlmodel import Session
 from app.config import EmbeddingConfig
 from app.models import Chunk
 from app.services.embedding_check import (
-    HNSW_MAX_DIM, EmbeddingCheckError, create_index, ensure_ollama_model, set_column_dim, write_fingerprint,
+    HNSW_MAX_DIM, EmbeddingCheckError, create_index, ensure_ollama_model, probe_dimension, set_column_dim,
+    write_fingerprint,
 )
 
 REEMBED_BATCH_SIZE = 100
-SMOKE_TEXT = "Origami embedding check"
 
 
 def reembed_all(
@@ -27,11 +27,7 @@ def reembed_all(
         raise EmbeddingCheckError(f"EMBEDDING_DIM {cfg.dim} is over the pgvector HNSW limit of {HNSW_MAX_DIM}")
     if cfg.is_ollama:
         ensure_ollama_model(cfg, pull=True)
-    probe = embed([SMOKE_TEXT], role="document")
-    if len(probe) != 1 or len(probe[0]) != cfg.dim:
-        raise EmbeddingCheckError(
-            f"Smoke test failed: expected one vector of {cfg.dim} values, got {[len(v) for v in probe]}"
-        )
+    probe_dimension(cfg, embed)
     try:
         rows = session.execute(text("SELECT id, content FROM chunks ORDER BY id")).all()
         set_column_dim(session, cfg.dim)
