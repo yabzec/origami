@@ -61,6 +61,16 @@ def test_text_document_full_pipeline(session, pipeline_storage, llm_stub):
     assert len(llm_stub["embed"]) == 1  # one batched call
 
 
+def test_pipeline_embeds_document_role(session, pipeline_storage, llm_stub):
+    doc = make_doc(session, doc_type=DocType.text, title="Nota")
+    rel, size = pipeline_storage.write_file(f"{doc.id}.md", "Contenuto importante.\n\nAltro testo.".encode())
+    doc.file_path = rel
+    session.commit()
+
+    run(session, doc)
+    assert llm_stub["embed_roles"] and set(llm_stub["embed_roles"]) == {"document"}
+
+
 def test_image_document_ocr_and_vision(session, pipeline_storage, llm_stub, tmp_path):
     img = make_text_image(tmp_path / "src.png", "SCONTRINO 12")
     doc = make_doc(session, doc_type=DocType.image, title="Scontrino")
@@ -120,7 +130,7 @@ def test_pipeline_resumes_after_embedding_failure(session, pipeline_storage, llm
     session.commit()
 
     boom = RuntimeError("embedding API down")
-    monkeypatch.setattr(pipeline, "llm_embed", lambda texts: (_ for _ in ()).throw(boom))
+    monkeypatch.setattr(pipeline, "llm_embed", lambda texts, role="document": (_ for _ in ()).throw(boom))
     with pytest.raises(RuntimeError):
         pipeline.process_document(session, {"document_id": str(doc.id)})
     session.refresh(doc)
@@ -129,7 +139,7 @@ def test_pipeline_resumes_after_embedding_failure(session, pipeline_storage, llm
     describe_calls_after_first_run = len(llm_stub["describe"])
 
     # retry with embedding working again: must NOT redo extraction/summary
-    monkeypatch.setattr(pipeline, "llm_embed", lambda texts: [[0.2] * 1536 for _ in texts])
+    monkeypatch.setattr(pipeline, "llm_embed", lambda texts, role="document": [[0.2] * 1536 for _ in texts])
     doc = run(session, doc)
     assert doc.status == DocStatus.ready
     assert len(llm_stub["describe"]) == describe_calls_after_first_run  # summary not regenerated
@@ -437,7 +447,7 @@ def _failing_text_doc(session, pipeline_storage, monkeypatch):
     doc.file_path = rel
     session.commit()
     boom = RuntimeError("embedding API down")
-    monkeypatch.setattr(pipeline, "llm_embed", lambda texts: (_ for _ in ()).throw(boom))
+    monkeypatch.setattr(pipeline, "llm_embed", lambda texts, role="document": (_ for _ in ()).throw(boom))
     return doc
 
 
@@ -568,7 +578,7 @@ def test_translate_document_retry_embeds_without_retranslating(
     doc = _german_doc(session, pipeline_storage, llm_stub)
     working_embed = pipeline.llm_embed  # the llm_stub fake
     boom = RuntimeError("embedding API down")
-    monkeypatch.setattr(pipeline, "llm_embed", lambda texts: (_ for _ in ()).throw(boom))
+    monkeypatch.setattr(pipeline, "llm_embed", lambda texts, role="document": (_ for _ in ()).throw(boom))
     with pytest.raises(RuntimeError):
         pipeline.translate_document(session, {"document_id": str(doc.id), "_final_attempt": False})
     calls = len(llm_stub["translate"])
@@ -616,9 +626,9 @@ def test_translation_discarded_when_reprocessed_during_embedding(
     doc = _german_doc(session, pipeline_storage, llm_stub)
     real_embed = pipeline.llm_embed
 
-    def embed_during_reprocess(texts):
+    def embed_during_reprocess(texts, role="document"):
         _reprocess_reset(engine, doc.id)
-        return real_embed(texts)
+        return real_embed(texts, role)
 
     monkeypatch.setattr(pipeline, "llm_embed", embed_during_reprocess)
     # final attempt: a superseded run must still neither raise nor mark failed

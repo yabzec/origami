@@ -49,7 +49,7 @@ def retrieve(
     settings = get_settings()
     query = query[:QUERY_MAX_CHARS]
     doc_ids = list(document_ids)
-    query_vector = llm_embed([query])[0]
+    query_vector = llm_embed([query], role="query")[0]
     semantic_hits = semantic_search(session, query_vector, limit=CANDIDATE_POOL, doc_ids=doc_ids)
     keyword_hits = keyword_search(session, query, limit=CANDIDATE_POOL, doc_ids=doc_ids)
     ordered = rrf_fuse(

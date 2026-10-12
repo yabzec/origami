@@ -153,12 +153,13 @@ def agent_hub(client):
 def llm_stub(monkeypatch):
     """Stub the LLM mock boundary (calls["language"] is what language detection returns for non-empty text): app.services.llm (the other one is smtplib.SMTP). select_documents is scripted via calls["select_ids"] / calls["select_error"]."""
     calls = {
-        "embed": [], "describe": [], "detect": [], "translate": [], "language": "it", "translate_error": None,
+        "embed": [], "embed_roles": [], "describe": [], "detect": [], "translate": [], "language": "it", "translate_error": None,
         "select": [], "select_ids": None, "select_error": None,
     }
 
-    def fake_embed(texts):
+    def fake_embed(texts, role="document"):
         calls["embed"].append(list(texts))
+        calls["embed_roles"].append(role)
         return [[0.1] * 1536 for _ in texts]
 
     def fake_describe(text=None, image_path=None):
