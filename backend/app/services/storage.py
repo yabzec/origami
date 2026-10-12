@@ -165,6 +165,23 @@ class Storage:
     def remove_scan_session_dir(self, session_id: int) -> None:
         shutil.rmtree(self.tmp_scans_dir / str(session_id), ignore_errors=True)
 
+    # --- disc imports ---
+    @property
+    def disc_imports_dir(self) -> Path:
+        return self.tmp_root / "disc_imports"
+
+    def disc_import_dir(self, import_id) -> Path:
+        d = self.disc_imports_dir / str(import_id)
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def disc_import_path(self, import_id) -> Path:
+        """Staging dir of an import without creating it (the worker checks it still exists)."""
+        return self.disc_imports_dir / str(import_id)
+
+    def remove_disc_import_dir(self, import_id) -> None:
+        shutil.rmtree(self.disc_imports_dir / str(import_id), ignore_errors=True)
+
 
 def get_storage() -> Storage:
     settings = get_settings()
