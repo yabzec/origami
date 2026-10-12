@@ -1,9 +1,9 @@
 import uuid
 from datetime import date, datetime, timezone
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import delete, func
 from sqlmodel import Session, select
 
@@ -35,6 +35,11 @@ router = APIRouter(
 )
 
 
+class PropertyRow(BaseModel):
+    key: Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)]
+    value: Annotated[str, StringConstraints(strip_whitespace=True, max_length=2000)]
+
+
 class DocumentPatch(BaseModel):
     title: str | None = None
     description: str | None = None
@@ -42,9 +47,26 @@ class DocumentPatch(BaseModel):
     tag_ids: list[int] | None = None
     document_date: date | None = None
     notes: str | None = None
+    properties: list[PropertyRow] | None = Field(default=None, max_length=100)
 
 
-METADATA_FIELDS = {"title", "description", "notes"}
+METADATA_FIELDS = {"title", "description", "notes", "properties"}
+
+
+def normalize_properties(rows: list[dict]) -> list[dict[str, str]]:
+    """Drop empty rows; every value needs a key; keys are unique ignoring case. Rows arrive stripped."""
+    result: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for row in rows:
+        if not row["key"] and not row["value"]:
+            continue
+        if not row["key"]:
+            raise api_error(422, "validation_error", "Every value needs a key")
+        if row["key"].casefold() in seen:
+            raise api_error(422, "validation_error", f"Duplicate key: {row['key']}")
+        seen.add(row["key"].casefold())
+        result.append({"key": row["key"], "value": row["value"]})
+    return result
 
 
 def queue_metadata_refresh(session: Session, doc: Document) -> None:
@@ -325,6 +347,12 @@ def update_document(
 
     if fields.get("document_date", ...) is None:
         fields.pop("document_date", None)  # column is NOT NULL; an empty date input means "unchanged"
+
+    if "properties" in fields:
+        if fields["properties"] is None:
+            fields.pop("properties")  # column is NOT NULL; null means "unchanged"
+        else:
+            fields["properties"] = normalize_properties(fields["properties"])
 
     if "folder_id" in fields and fields["folder_id"] is not None:
         if session.get(Folder, fields["folder_id"]) is None:
