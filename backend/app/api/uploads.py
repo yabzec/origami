@@ -60,6 +60,8 @@ def create_pending_document(
     original_filename: str | None,
     description: str = "",
     document_date: date | None = None,
+    notes: str = "",
+    extra_metadata: dict | None = None,
 ) -> Document:
     """Insert a pending document with validated folder/tags. Reused by scan compile."""
     if folder_id is not None and session.get(Folder, folder_id) is None:
@@ -78,6 +80,8 @@ def create_pending_document(
         translation_enabled=translation_enabled,
         folder_id=folder_id,
         original_filename=original_filename,
+        notes=notes,
+        extra_metadata=extra_metadata,
     )
     if document_date is not None:
         doc.document_date = document_date
@@ -111,6 +115,7 @@ def upload_document(
     translation_enabled: bool = Form(default=False),
     translation_language: str | None = Form(default=None),
     document_date: date | None = Form(default=None),
+    notes: str = Form(default=""),
     session: Session = Depends(get_session),
     storage: Storage = Depends(get_storage),
 ) -> dict:
@@ -135,6 +140,7 @@ def upload_document(
         tag_ids=parse_tag_ids(tag_ids),
         original_filename=file.filename,
         document_date=document_date,
+        notes=notes,
     )
     with storage_errors():
         try:

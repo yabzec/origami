@@ -4,7 +4,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
-from sqlalchemy import func
+from sqlalchemy import delete, func
 from sqlmodel import Session, select
 
 from app.api.deps import api_error, get_current_user
@@ -40,6 +40,20 @@ class DocumentPatch(BaseModel):
     folder_id: int | None = None
     tag_ids: list[int] | None = None
     document_date: date | None = None
+    notes: str | None = None
+
+
+METADATA_FIELDS = {"title", "description", "notes"}
+
+
+def queue_metadata_refresh(session: Session, doc: Document) -> None:
+    """Drop the metadata chunk and queue its rebuild (no commit), so edits become searchable."""
+    session.exec(
+        delete(Chunk).where(Chunk.document_id == doc.id, Chunk.source == ChunkSource.metadata)
+    )
+    session.add(
+        Job(type="refresh_metadata", payload={"document_id": str(doc.id)}, run_at=datetime.now(timezone.utc))
+    )
 
 
 def doc_tags(session: Session, doc: Document) -> list[Tag]:
@@ -310,6 +324,8 @@ def update_document(
         if "title" in fields or "folder_id" in fields:
             relocate_document(session, storage, moves, doc)
         doc.updated_at = datetime.now(timezone.utc)
+        if METADATA_FIELDS & fields.keys():
+            queue_metadata_refresh(session, doc)
     session.refresh(doc)
     return serialize(session, doc)
 

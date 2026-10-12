@@ -23,6 +23,7 @@ from app.services.llm import embed as llm_embed
 from app.services.llm import TranslationDeferred
 from app.services.llm import translate as llm_translate
 from app.services.ocr import images_to_pdf, images_to_searchable_pdf, ocr_image, pdf_to_searchable_pdf
+from app.services.study_metadata import metadata_text
 from app.services.storage import Storage, companion_name, get_storage, preview_name
 from app.services.tree_sync import write_document_file
 from app.worker.runner import is_final_attempt, register
@@ -463,22 +464,51 @@ def translate_document(session: Session, payload: dict) -> None:
         # superseded: complete the job quietly (no retry, no failure email)
 
 
+def _metadata_content(doc: Document) -> str:
+    parts = [doc.title]
+    if doc.description and doc.description != doc.summary:
+        parts.append(doc.description)  # an AI description is already embedded as the summary chunk
+    if doc.notes.strip():
+        parts.append(doc.notes.strip())
+    if doc.extra_metadata:
+        parts.append(metadata_text(doc.extra_metadata))
+    return "\n\n".join(parts)
+
+
 def _ensure_metadata_chunk(session: Session, doc: Document) -> None:
     if _has_chunks(session, doc, ChunkSource.metadata):
         return
-    if not doc.description or doc.description == doc.summary:
-        content = doc.title  # an AI description is already embedded as the summary chunk
-    else:
-        content = f"{doc.title}\n\n{doc.description}"
     session.add(
         Chunk(
             document_id=doc.id,
             chunk_index=_next_chunk_index(session, doc),
             source=ChunkSource.metadata,
-            content=content,
+            content=_metadata_content(doc),
         )
     )
     session.commit()
+
+
+METADATA_REFRESH_DELAY = timedelta(seconds=60)
+
+
+@register("refresh_metadata")
+def refresh_metadata(session: Session, payload: dict) -> None:
+    """Rebuild and embed the metadata chunk after the user edited title, description or notes."""
+    from app.services.jobs import enqueue
+
+    doc = session.get(Document, payload["document_id"])
+    if doc is None:
+        return
+    if doc.status in (DocStatus.pending, DocStatus.processing):
+        # the running pipeline may already be past its metadata step: look again later
+        enqueue(
+            session, "refresh_metadata", {"document_id": str(doc.id)},
+            run_at=datetime.now(timezone.utc) + METADATA_REFRESH_DELAY,
+        )
+        return
+    _ensure_metadata_chunk(session, doc)
+    _embed_pending_chunks(session, doc)
 
 
 def _next_chunk_index(session: Session, doc: Document) -> int:
