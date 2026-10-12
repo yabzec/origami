@@ -1,4 +1,4 @@
-from app.models import DocType, Document, DocumentAttachment
+from app.models import DocType, Document, DocumentAttachment, DocumentOrigin
 from app.services import rag
 from app.services.auth import create_access_token
 from app.services.search import search
@@ -6,7 +6,7 @@ from tests.helpers import basis_vector, seed_document
 
 
 def make_doc_with_report(session, storage):
-    doc = Document(title="Study", doc_type=DocType.pdf, file_path="Study/Study.pdf", extra_metadata={})
+    doc = Document(title="Study", doc_type=DocType.pdf, file_path="Study/Study.pdf", origin=DocumentOrigin.xray_disc)
     session.add(doc)
     session.commit()
     storage.write_file("Study/Study.pdf", b"%PDF images")

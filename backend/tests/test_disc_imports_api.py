@@ -157,7 +157,9 @@ def test_commit_creates_documents_and_jobs(auth_client, session, storage, tmp_pa
     assert doc_json["notes"] == "Controllo"
     assert doc_json["doc_type"] == "pdf"
     assert doc_json["ocr_enabled"] is False and doc_json["summary_enabled"] is True
-    assert doc_json["extra_metadata"]["patient_name"] == "Mario Rossi"
+    assert doc_json["origin"] == "xray_disc"
+    assert {"key": "Patient", "value": "Mario Rossi"} in doc_json["properties"]
+    assert "extra_metadata" not in doc_json
     assert doc_json["description"] == ""  # the AI summary fills it
     job = session.exec(select(Job)).one()
     assert job.payload["disc_import_id"] == import_id

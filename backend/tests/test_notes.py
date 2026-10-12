@@ -3,16 +3,16 @@ from datetime import date
 from sqlmodel import select
 
 from app.models import Chunk, ChunkSource, DocStatus, DocType, Document, Job, JobStatus
-from app.services.study_metadata import cover_rows, metadata_text
+from app.services.study_metadata import cover_rows, properties_text, study_properties
 from app.worker import pipeline
 
 
-META = {
-    "patient_name": "Mario Rossi",
-    "modality": "DX",
-    "institution": "Ospedale Test",
-    "series": [{"description": "AP", "images": 2}, {"description": "Lateral", "images": 1}],
-}
+META = [
+    {"key": "Patient", "value": "Mario Rossi"},
+    {"key": "Modality", "value": "DX"},
+    {"key": "Institution", "value": "Ospedale Test"},
+    {"key": "Series", "value": "AP (2); Lateral (1)"},
+]
 
 
 def make_ready_doc(session, **kw):
@@ -23,17 +23,25 @@ def make_ready_doc(session, **kw):
     return doc
 
 
-def test_metadata_text_lists_known_fields_in_order():
-    assert metadata_text(META) == (
-        "Patient: Mario Rossi\nModality: DX\nInstitution: Ospedale Test\nSeries: AP (2); Lateral (1)"
-    )
-    assert metadata_text({}) == ""
+def test_study_properties_lists_known_fields_in_order():
+    fields = {"modality": "DX", "patient_name": "Mario Rossi", "sex": "", "institution": "Ospedale Test"}
+    series = [{"description": "AP", "images": 2}, {"description": "Lateral", "images": 1}]
+    assert study_properties(fields, series) == [
+        {"key": "Patient", "value": "Mario Rossi"},
+        {"key": "Modality", "value": "DX"},
+        {"key": "Institution", "value": "Ospedale Test"},
+        {"key": "Series", "value": "AP (2); Lateral (1)"},
+    ]
+    assert study_properties({}, []) == []
 
 
-def test_cover_rows_start_with_study_date():
-    rows = cover_rows(META, date(2026, 8, 28))
-    assert rows[0] == ("Study date", "2026-08-28")
-    assert ("Patient", "Mario Rossi") in rows
+def test_properties_text_and_cover_rows():
+    props = [{"key": "Patient", "value": "Mario Rossi"}, {"key": "Colore", "value": "blu"}]
+    assert properties_text(props) == "Patient: Mario Rossi\nColore: blu"
+    assert properties_text([]) == ""
+    assert cover_rows(props, date(2026, 8, 28)) == [
+        ("Study date", "2026-08-28"), ("Patient", "Mario Rossi"), ("Colore", "blu"),
+    ]
 
 
 def test_patch_notes_queues_metadata_refresh(auth_client, session, storage):
@@ -64,7 +72,7 @@ def test_patch_without_metadata_fields_queues_nothing(auth_client, session, stor
 
 
 def test_refresh_metadata_rebuilds_chunk_with_notes_and_study_data(session, llm_stub):
-    doc = make_ready_doc(session, notes="Controllo a 3 mesi", extra_metadata=META)
+    doc = make_ready_doc(session, notes="Controllo a 3 mesi", properties=META)
     pipeline.refresh_metadata(session, {"document_id": str(doc.id)})
     chunk = session.exec(select(Chunk).where(Chunk.source == ChunkSource.metadata)).one()
     assert chunk.content.startswith("Visita\n\nControllo a 3 mesi\n\nPatient: Mario Rossi")

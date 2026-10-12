@@ -11,6 +11,7 @@ import pydicom
 
 from app.services.dicom_render import is_decodable
 from app.services.extract import extract_pdf_text, pdf_needs_ocr
+from app.services.study_metadata import study_properties
 
 log = logging.getLogger("origami.disc")
 
@@ -215,16 +216,15 @@ def _finish_study(key: str, fields: dict, images: list[dict]) -> dict:
     first_series = images[0]["label"] if images and images[0]["kind"] == "dicom" else ""
     description = clean_title(fields["study_description"])
     base = description or clean_title(first_series) or f"X-ray {fields['modality']}".strip()
-    extra = {k: v for k, v in fields.items() if v and k != "study_date"}
+    shown = {k: v for k, v in fields.items() if k != "study_date"}
     if description:
-        extra["study_description"] = description
-    extra["series"] = _series(images)
+        shown["study_description"] = description
     return {
         "key": key,
         "title": f"{base} — {fields['study_date']}" if fields["study_date"] else base,
         "document_date": fields["study_date"] or None,
         "description_fallback": " · ".join(filter(None, [description, fields["institution"]])),
-        "extra_metadata": extra,
+        "properties": study_properties(shown, _series(images)),
         "images": images,
     }
 

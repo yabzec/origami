@@ -1,7 +1,7 @@
 import pytest
 from sqlmodel import select
 
-from app.models import DocType, Document, DocumentAttachment
+from app.models import DocType, Document, DocumentAttachment, DocumentOrigin
 from app.services.storage_check import check_storage
 from app.services.tree_sync import AttachmentSource, write_bundle
 
@@ -14,7 +14,7 @@ def report_file(tmp_path):
 
 
 def make_bundle(session, storage, report_file, title="Study", folder_id=None, reports=1):
-    doc = Document(title=title, doc_type=DocType.pdf, folder_id=folder_id, extra_metadata={})
+    doc = Document(title=title, doc_type=DocType.pdf, folder_id=folder_id, origin=DocumentOrigin.xray_disc)
     session.add(doc)
     session.commit()
     session.refresh(doc)

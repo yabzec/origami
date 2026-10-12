@@ -4,6 +4,7 @@ from app.models.document import (
     AttachmentRole,
     Document,
     DocumentAttachment,
+    DocumentOrigin,
     DocumentTag,
     DocStatus,
     DocType,
@@ -19,7 +20,7 @@ from app.models.user import User
 
 __all__ = [
     "AttachmentRole", "Chunk", "ChunkSource", "DiscImport", "DiscImportStatus", "Document",
-    "DocumentAttachment", "DocumentTag", "DocStatus", "DocType", "EmbeddingMeta", "Folder", "Job",
+    "DocumentAttachment", "DocumentOrigin", "DocumentTag", "DocStatus", "DocType", "EmbeddingMeta", "Folder", "Job",
     "JobStatus", "ScanPage", "ScanSession", "ScanSessionStatus", "Tag", "TranslationSegment",
     "TranslationStatus", "User",
 ]

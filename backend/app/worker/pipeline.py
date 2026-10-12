@@ -10,7 +10,7 @@ from sqlmodel import Session, select
 
 from app.config import get_settings
 from app.models import (
-    AttachmentRole, Chunk, ChunkSource, DiscImport, DiscImportStatus, DocStatus, DocType, Document, DocumentAttachment, Job,
+    AttachmentRole, Chunk, ChunkSource, DiscImport, DiscImportStatus, DocStatus, DocType, Document, DocumentAttachment, DocumentOrigin, Job,
     JobStatus, TranslationSegment, TranslationStatus,
 )
 from app.services.chunking import chunk_pages, page_texts_from_chunks, segment_pages
@@ -29,7 +29,7 @@ from app.services.llm import translate as llm_translate
 from app.services.ocr import images_to_pdf, images_to_searchable_pdf, ocr_image, pdf_to_searchable_pdf
 from app.services.dicom_parse import REPORT_FILENAME
 from app.services.dicom_render import render
-from app.services.study_metadata import cover_rows, metadata_text
+from app.services.study_metadata import cover_rows, properties_text
 from app.services.study_pdf import PageImage, build_study_pdf
 from app.services.storage import Storage, companion_name, get_storage, preview_name
 from app.services.tree_sync import AttachmentSource, write_bundle, write_document_file
@@ -98,7 +98,7 @@ def _extract_content(
     if doc.doc_type == DocType.video or _has_chunks(session, doc, ChunkSource.content):
         return []
 
-    if doc.extra_metadata is not None or "disc_import_id" in payload:
+    if doc.origin == DocumentOrigin.xray_disc or "disc_import_id" in payload:
         return _extract_study(session, doc, storage, payload)
 
     if (
@@ -171,7 +171,7 @@ def _build_study_files(session: Session, doc: Document, storage: Storage, payloa
         PageImage(image, " · ".join([label, day, f"image {n}/{len(rendered)}"]))
         for n, (image, label) in enumerate(rendered, start=1)
     ]
-    pdf = build_study_pdf(doc.title, cover_rows(doc.extra_metadata or {}, doc.document_date), doc.notes, pages)
+    pdf = build_study_pdf(doc.title, cover_rows(doc.properties, doc.document_date), doc.notes, pages)
     reports = [
         AttachmentSource(
             role=AttachmentRole.report,
@@ -357,9 +357,9 @@ def _ensure_summary(session: Session, doc: Document, storage: Storage) -> None:
     if doc.doc_type == DocType.video or doc.summary is not None or not doc.summary_enabled:
         return
     text = "\n\n".join(c.content for c in _content_chunks(session, doc)).strip()
-    if doc.extra_metadata is not None:
+    if doc.origin == DocumentOrigin.xray_disc:
         # X-ray study: summarize the report and the study data, never the images through vision
-        text = "\n\n".join(filter(None, [metadata_text(doc.extra_metadata), text]))
+        text = "\n\n".join(filter(None, [properties_text(doc.properties), text]))
     if doc.doc_type == DocType.image and len(text) < IMAGE_SUMMARY_TEXT_THRESHOLD:
         # No usable extracted text (a photo, or no-OCR) — send the file to vision.
         summary = llm_describe(image_path=storage.abs_path(doc.file_path))
@@ -582,8 +582,8 @@ def _metadata_content(doc: Document) -> str:
         parts.append(doc.description)  # an AI description is already embedded as the summary chunk
     if doc.notes.strip():
         parts.append(doc.notes.strip())
-    if doc.extra_metadata:
-        parts.append(metadata_text(doc.extra_metadata))
+    if doc.properties:
+        parts.append(properties_text(doc.properties))
     return "\n\n".join(parts)
 
 

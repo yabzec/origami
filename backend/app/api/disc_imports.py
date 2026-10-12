@@ -15,7 +15,7 @@ from app.api.documents import serialize
 from app.api.ocr import check_ocr_languages, check_translation_language, default_ocr_languages
 from app.api.uploads import create_pending_document
 from app.db import get_session
-from app.models import DiscImport, DiscImportStatus, DocType, Folder, Job, Tag, User
+from app.models import DiscImport, DiscImportStatus, DocType, DocumentOrigin, Folder, Job, Tag, User
 from app.services.dicom_parse import build_preview
 from app.services.dicom_render import thumbnail_jpeg
 from app.services.storage import Storage, get_storage
@@ -266,7 +266,8 @@ def commit_import(
             description="" if body.summary_enabled else study["description_fallback"],
             document_date=item.document_date,
             notes=item.notes,
-            extra_metadata=study["extra_metadata"],
+            properties=study["properties"],
+            origin=DocumentOrigin.xray_disc,
             commit=False,
         )
         payload = {

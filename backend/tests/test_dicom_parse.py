@@ -86,10 +86,11 @@ def test_standard_disc_preview(tmp_path):
     assert study["description_fallback"] == "Rx gamba (tibia e perone) Destro/a · Ospedale Test"
     assert [i["label"] for i in study["images"]] == ["AP", "Lateral"]  # series order, not file order
     assert all(i["readable"] and i["kind"] == "dicom" for i in study["images"])
-    meta = study["extra_metadata"]
-    assert meta["patient_id"] == "P-1"  # DICOM wins over the htm value
-    assert meta["birth_date"] == "1980-01-01"
-    assert meta["series"] == [{"description": "AP", "images": 1}, {"description": "Lateral", "images": 1}]
+    props = {p["key"]: p["value"] for p in study["properties"]}
+    assert props["Patient ID"] == "P-1"  # DICOM wins over the htm value
+    assert props["Birth date"] == "1980-01-01"
+    assert props["Series"] == "AP (1); Lateral (1)"
+    assert [p["key"] for p in study["properties"]][-1] == "Series"
     [report] = preview["reports"]  # help.pdf is excluded
     assert report["path"] == "REPORT/8499735.pdf"
     assert report["has_text"] and report["preselected"] and report["page_count"] == 1
@@ -100,7 +101,7 @@ def test_vendor_files_fill_missing_tags(tmp_path):
     preview = build_preview(make_disc(tmp_path, StudyDate=None, PatientID=None, StudyDescription=None))
     [study] = preview["studies"]
     assert study["document_date"] == "2026-08-28"  # from Study000.htm
-    assert study["extra_metadata"]["patient_id"] == "P-77"
+    assert {p["key"]: p["value"] for p in study["properties"]}["Patient ID"] == "P-77"
     assert study["title"].startswith("Rx gamba (tibia e perone) Destro/a")  # from README
 
 

@@ -1,9 +1,8 @@
 import uuid
 from datetime import date, datetime
 from enum import StrEnum
-from typing import Any
 
-from sqlalchemy import Column
+from sqlalchemy import Column, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
@@ -24,6 +23,12 @@ class DocStatus(StrEnum):
     processing = "processing"
     ready = "ready"
     failed = "failed"
+
+
+class DocumentOrigin(StrEnum):
+    file = "file"  # uploaded file
+    scan = "scan"  # compiled from a scan session
+    xray_disc = "xray_disc"  # imported X-ray disc study
 
 
 class TranslationStatus(StrEnum):
@@ -59,8 +64,12 @@ class Document(SQLModel, table=True):
     preview_path: str | None = None  # relative PDF used only for viewing (converted office documents)
     page_count: int | None = None
     file_size: int | None = None
-    # study data of an imported X-ray disc (patient, modality, series, ...); None for other documents
-    extra_metadata: dict[str, Any] | None = Field(default=None, sa_column=Column(JSONB, nullable=True))
+    origin: str = DocumentOrigin.file  # DocumentOrigin
+    # ordered key/value rows ({"key", "value"}), editable on every document; searchable
+    properties: list[dict[str, str]] = Field(
+        default_factory=list,
+        sa_column=Column(JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    )
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

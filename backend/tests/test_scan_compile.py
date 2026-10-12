@@ -30,6 +30,7 @@ def test_compile_creates_document_and_job(auth_client, fake_scanner, storage, se
     assert resp.status_code == 201
     body = resp.json()
     assert body["doc_type"] == DocType.scan
+    assert body["origin"] == "scan"
     assert body["status"] == DocStatus.pending
     assert body["ocr_languages"] == "ita+eng"
 

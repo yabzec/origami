@@ -5,14 +5,15 @@ from pypdf import PdfReader
 from sqlmodel import select
 
 from app.models import (
-    Chunk, ChunkSource, DiscImport, DiscImportStatus, DocStatus, DocType, Document, DocumentAttachment, Job, JobStatus,
+    Chunk, ChunkSource, DiscImport, DiscImportStatus, DocStatus, DocType, Document, DocumentAttachment, DocumentOrigin, Job,
+    JobStatus,
 )
 from app.services.storage import Storage
 from app.worker import pipeline
 from tests.helpers import make_dicom, make_text_pdf
 
 REPORT = ["Referto: frattura pressoche saldata con callo osseo al terzo medio della tibia destra."]
-META = {"patient_name": "Mario Rossi", "modality": "DX", "series": [{"description": "AP", "images": 2}]}
+PROPS = [{"key": "Patient", "value": "Mario Rossi"}, {"key": "Modality", "value": "DX"}, {"key": "Series", "value": "AP (2)"}]
 
 
 @pytest.fixture
@@ -42,7 +43,7 @@ def commit_disc(session, imp):
 
 def make_study_doc(session, **kw):
     doc = Document(
-        title=kw.pop("title", "Rx gamba"), doc_type=DocType.pdf, extra_metadata=META,
+        title=kw.pop("title", "Rx gamba"), doc_type=DocType.pdf, properties=PROPS, origin=DocumentOrigin.xray_disc,
         document_date=date(2026, 8, 28), ocr_enabled=kw.pop("ocr_enabled", False), **kw,
     )
     session.add(doc)
@@ -218,3 +219,23 @@ def test_sweep_keeps_imports_with_jobs_in_flight(session, pipeline_storage, disc
     session.commit()
     pipeline.sweep_scan_sessions(session, {})
     assert session.get(DiscImport, disc.id) is not None
+
+
+def test_properties_on_uploaded_pdf_do_not_route_to_study(session, pipeline_storage, llm_stub):
+    pipeline_storage.abs_path("Plain.pdf").parent.mkdir(parents=True, exist_ok=True)
+    make_text_pdf(pipeline_storage.abs_path("Plain.pdf"), ["Fattura numero 12 del fornitore"])
+    doc = Document(
+        title="Plain", doc_type=DocType.pdf, file_path="Plain.pdf", ocr_enabled=False,
+        properties=[{"key": "Fornitore", "value": "ACME"}],
+    )
+    session.add(doc)
+    session.commit()
+    session.refresh(doc)
+    doc = run(session, doc, {"document_id": str(doc.id)})
+    assert doc.status == DocStatus.ready
+    assert doc.origin == "file"
+    assert session.exec(select(DocumentAttachment)).all() == []
+    content = session.exec(select(Chunk).where(Chunk.source == ChunkSource.content)).all()
+    assert content and all(c.attachment_id is None for c in content)
+    metadata = session.exec(select(Chunk).where(Chunk.source == ChunkSource.metadata)).one()
+    assert "Fornitore: ACME" in metadata.content
