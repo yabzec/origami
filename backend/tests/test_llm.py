@@ -169,7 +169,10 @@ from app.config import Settings
 def pinned_settings(monkeypatch):
     """Default settings without the developer's .env, so a real LLM_API_KEY (e.g. a Groq key)
     can't leak into the fakes. That would break the older tests whose fakes take no **kw."""
-    settings = Settings(_env_file=None, llm_api_key="", llm_api_base="", gemini_api_key="")
+    settings = Settings(
+        _env_file=None, llm_api_key="", llm_api_base="", gemini_api_key="",
+        embedding_model="gemini/gemini-embedding-001",
+    )
     monkeypatch.setattr(llm, "get_settings", lambda: settings)
     return settings
 

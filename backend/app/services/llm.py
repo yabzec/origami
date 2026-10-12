@@ -14,7 +14,7 @@ from typing import Callable
 
 import litellm
 
-from app.config import get_primary_language, get_settings
+from app.config import get_primary_language, get_settings, resolve_embedding
 from app.services.ocr_language_names import iso_language_name
 
 LANGUAGE_NAMES = {"it": "Italian", "en": "English", "de": "German", "fr": "French", "es": "Spanish"}
@@ -70,7 +70,7 @@ def embed(texts: list[str]) -> list[list[float]]:
         settings.embedding_api_base or settings.llm_api_base,
     )
     resp = litellm.embedding(
-        model=settings.embedding_model, input=texts, dimensions=settings.embedding_dim, **kw
+        model=settings.embedding_model, input=texts, dimensions=resolve_embedding(settings).dim, **kw
     )
     data = sorted(resp.data, key=lambda d: d["index"])
     return [d["embedding"] for d in data]

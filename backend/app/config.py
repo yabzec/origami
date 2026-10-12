@@ -1,7 +1,14 @@
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+LOCAL_EMBEDDING_MODEL = "ollama/embeddinggemma"
+LOCAL_EMBEDDING_API_BASE = "http://localhost:11434"
+EMBEDDINGGEMMA_DIM = 768
+DEFAULT_EMBEDDING_DIM = 1536
 
 
 class Settings(BaseSettings):
@@ -15,8 +22,8 @@ class Settings(BaseSettings):
     jwt_expire_days: int = 30
     llm_model: str = "gemini/gemini-2.5-flash"
     vision_model: str = "gemini/gemini-2.5-flash"
-    embedding_model: str = "gemini/gemini-embedding-001"
-    embedding_dim: int = 1536
+    embedding_model: str = ""  # empty → LOCAL_EMBEDDING_MODEL on the Ollama container
+    embedding_dim: int | None = None  # empty → 768 for embeddinggemma, else 1536
     gemini_api_key: str = ""
     llm_api_key: str = ""
     llm_api_base: str = ""
@@ -42,6 +49,11 @@ class Settings(BaseSettings):
     public_url: str = ""  # e.g. https://origami.example.com — public server URL handed to the client scanner agent; empty → request base URL
     agent_dist_dir: Path = Path("../agent/dist")  # built agent binaries served by /api/agent/download
 
+    @field_validator("embedding_dim", mode="before")
+    @classmethod
+    def _empty_dim_means_default(cls, value):
+        return None if isinstance(value, str) and not value.strip() else value
+
 
 @lru_cache
 def get_settings() -> Settings:
@@ -60,3 +72,40 @@ def get_default_translation_language() -> str:
     """Configured default translation target (not checked against installed languages)."""
     settings = get_settings()
     return settings.default_translation_language.strip() or settings.primary_language
+
+
+@dataclass(frozen=True)
+class EmbeddingConfig:
+    model: str
+    dim: int
+    api_key: str
+    api_base: str
+    scheme: str  # query/document prefix style: "none" or "embeddinggemma-v1"
+
+    @property
+    def is_ollama(self) -> bool:
+        return self.model.startswith("ollama/")
+
+    @property
+    def ollama_name(self) -> str:
+        name = self.model.split("/", 1)[1]
+        return name if ":" in name else f"{name}:latest"
+
+
+def embedding_scheme(model: str) -> str:
+    return "embeddinggemma-v1" if "embeddinggemma" in model.lower() else "none"
+
+
+def resolve_embedding(settings: Settings | None = None) -> EmbeddingConfig:
+    """Embedding model, dimension, credentials and prefix scheme after defaults and fallbacks."""
+    settings = settings or get_settings()
+    model = settings.embedding_model.strip() or LOCAL_EMBEDDING_MODEL
+    scheme = embedding_scheme(model)
+    if model.startswith("ollama/"):
+        # LLM_API_BASE may belong to another provider: Ollama gets its own base only.
+        api_key, api_base = "", settings.embedding_api_base or LOCAL_EMBEDDING_API_BASE
+    else:
+        api_key = settings.embedding_api_key or settings.llm_api_key
+        api_base = settings.embedding_api_base or settings.llm_api_base
+    default_dim = EMBEDDINGGEMMA_DIM if scheme == "embeddinggemma-v1" else DEFAULT_EMBEDDING_DIM
+    return EmbeddingConfig(model, settings.embedding_dim or default_dim, api_key, api_base, scheme)

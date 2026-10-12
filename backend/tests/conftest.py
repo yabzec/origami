@@ -17,6 +17,8 @@ from app.config import Settings, get_settings
 Settings.model_config["env_file"] = None
 os.environ.setdefault("LITELLM_MODE", "PRODUCTION")  # litellm loads ../.env into os.environ on import in DEV mode
 os.environ.setdefault("JWT_SECRET", "test-secret-" + "x" * 32)  # >=32 bytes: avoids InsecureKeyLengthWarning
+# Code defaults now mean "local Ollama model, 768 dims"; the test database and the fakes use 1536.
+os.environ.setdefault("EMBEDDING_MODEL", "gemini/gemini-embedding-001")
 import tempfile  # noqa: E402
 
 # Never let a test (or the startup layout check) touch the developer's real STORAGE_PATH.
