@@ -1,0 +1,104 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { createMemoryRouter, RouterProvider } from "react-router";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { api } from "@/lib/api";
+import type { DiscPreview } from "@/lib/types";
+import { DiscImportDialog } from "./DiscImportDialog";
+
+vi.mock("@/hooks/useOcrLanguages", () => ({
+  useOcrLanguages: () => ({
+    data: { languages: [{ code: "ita", name: "Italian" }], default: "ita", translation_languages: [{ code: "it", name: "Italian" }], translation_default: "it" },
+  }),
+}));
+vi.mock("@/hooks/useFolders", () => ({ useFolders: () => ({ data: [] }) }));
+const { createTag } = vi.hoisted(() => ({ createTag: vi.fn() })); // vi.mock factories run before module code
+vi.mock("@/hooks/useTags", () => ({
+  useTags: () => ({ data: [], refetch: vi.fn() }),
+  useCreateTag: () => ({ mutateAsync: createTag }),
+}));
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api")>();
+  return { ...actual, api: { get: vi.fn(), post: vi.fn(), upload: vi.fn(), del: vi.fn(() => Promise.resolve()) } };
+});
+
+const PREVIEW: DiscPreview = {
+  id: "imp",
+  no_study: false,
+  studies: [
+    {
+      key: "s1",
+      title: "Rx gamba — 2026-08-28",
+      document_date: "2026-08-28",
+      description_fallback: "",
+      patient_tag: "Mario Rossi",
+      patient_tag_id: null,
+      extra_metadata: {},
+      images: [{ key: "i1", path: "DICOM/a", kind: "dicom", label: "AP", readable: true, frames: 1 }],
+    },
+  ],
+  reports: [{ key: "r1", path: "REPORT/r.pdf", filename: "r.pdf", page_count: 1, has_text: false, study_key: "s1", preselected: true }],
+  warnings: [],
+};
+
+const picked = [
+  { file: new File(["x"], "README.TXT"), relativePath: "CD/README.TXT" },
+  { file: new File(["x"], "start.exe"), relativePath: "CD/start.exe" },
+  { file: new File(["x"], "a"), relativePath: "CD/DICOM/a" },
+];
+
+function renderDialog() {
+  const router = createMemoryRouter([
+    { path: "/", element: <DiscImportDialog picked={picked} onClose={() => {}} initialFolderId={null} /> },
+  ]);
+  return render(
+    <QueryClientProvider client={new QueryClient()}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  );
+}
+
+describe("DiscImportDialog", () => {
+  beforeEach(() => {
+    vi.mocked(api.post).mockReset();
+    vi.mocked(api.upload).mockReset();
+    createTag.mockReset();
+  });
+
+  it("uploads the useful files and shows the proposed study with import defaults", async () => {
+    vi.mocked(api.post).mockResolvedValueOnce({ id: "imp" });
+    vi.mocked(api.upload).mockResolvedValueOnce(PREVIEW);
+    renderDialog();
+    expect(await screen.findByDisplayValue("Rx gamba — 2026-08-28")).toBeInTheDocument();
+    const form = vi.mocked(api.upload).mock.calls[0][1] as FormData;
+    expect(form.getAll("paths")).toEqual(["README.TXT", "DICOM/a"]);
+    expect(screen.getByLabelText("OCR (extract text)")).not.toBeChecked();
+    expect(screen.getByLabelText("AI summary")).toBeChecked();
+    expect(screen.getByLabelText("Translation")).not.toBeChecked();
+    expect(screen.getByText(/This report has no text/)).toBeInTheDocument();
+  });
+
+  it("asks for manual files when no study is found", async () => {
+    vi.mocked(api.post).mockResolvedValueOnce({ id: "imp" });
+    vi.mocked(api.upload).mockResolvedValueOnce({ ...PREVIEW, no_study: true, studies: [], reports: [] });
+    renderDialog();
+    expect(await screen.findByText(/No X-ray study found on this disc/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Import" })).toBeDisabled();
+  });
+
+  it("creates the patient tag and commits the study", async () => {
+    vi.mocked(api.post)
+      .mockResolvedValueOnce({ id: "imp" })
+      .mockResolvedValueOnce({ documents: [{ id: "d1", title: "Rx gamba — 2026-08-28" }] });
+    vi.mocked(api.upload).mockResolvedValueOnce(PREVIEW);
+    createTag.mockResolvedValueOnce({ id: 9, name: "Mario Rossi", color: "#888888" });
+    renderDialog();
+    await userEvent.click(await screen.findByRole("button", { name: "Import" }));
+    await waitFor(() => expect(screen.getByRole("link", { name: "Rx gamba — 2026-08-28" })).toBeInTheDocument());
+    expect(createTag).toHaveBeenCalledWith(expect.objectContaining({ name: "Mario Rossi" }));
+    const [path, body] = vi.mocked(api.post).mock.calls[1] as [string, { studies: { tag_ids: number[]; image_keys: string[]; report_keys: string[] }[] }];
+    expect(path).toBe("/api/disc-imports/imp/commit");
+    expect(body.studies[0]).toMatchObject({ tag_ids: [9], image_keys: ["i1"], report_keys: ["r1"] });
+  });
+});

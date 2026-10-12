@@ -1,14 +1,17 @@
 import { useEffect, type ReactNode } from "react";
+import { cn } from "@/lib/utils";
 
 export function Dialog({
   open,
   onClose,
   title,
+  className,
   children,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
+  className?: string;
   children: ReactNode;
 }) {
   useEffect(() => {
@@ -24,7 +27,7 @@ export function Dialog({
       <div
         role="dialog"
         aria-label={title}
-        className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl"
+        className={cn("w-full max-w-md rounded-lg bg-white p-6 shadow-xl", className)}
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="mb-4 text-lg font-semibold">{title}</h2>
