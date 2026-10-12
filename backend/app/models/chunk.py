@@ -6,8 +6,6 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import Column
 from sqlmodel import Field, SQLModel
 
-EMBEDDING_DIM = 1536
-
 
 class ChunkSource(StrEnum):
     content = "content"
@@ -25,4 +23,5 @@ class Chunk(SQLModel, table=True):
     page_number: int | None = None
     source: str = ChunkSource.content  # ChunkSource
     content: str
-    embedding: Any = Field(default=None, sa_column=Column(Vector(EMBEDDING_DIM)))
+    # Dimension lives only in the database column (EMBEDDING_DIM / reembed decide it).
+    embedding: Any = Field(default=None, sa_column=Column(Vector()))
