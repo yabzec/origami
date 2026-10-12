@@ -123,3 +123,24 @@ def test_check_storage_ok(monkeypatch, capsys, tmp_path, cli_engine):
         run_cli(monkeypatch, "check-storage")
     assert exc.value.code == 0
     assert "Storage OK" in capsys.readouterr().out
+
+
+def test_check_embeddings_records(session, cli_engine, monkeypatch, capsys):
+    from app.models import EmbeddingMeta
+
+    run_cli(monkeypatch, "check-embeddings")
+    assert "Embeddings OK: recorded" in capsys.readouterr().out
+    assert session.get(EmbeddingMeta, 1).model == "gemini/gemini-embedding-001"
+
+
+def test_check_embeddings_mismatch_exits_78(session, cli_engine, monkeypatch, capsys):
+    from app.models import EmbeddingMeta
+    from tests.helpers import basis_vector, seed_document
+
+    session.add(EmbeddingMeta(id=1, model="ollama/embeddinggemma", dim=1536, scheme="embeddinggemma-v1"))
+    session.commit()
+    seed_document(session, "A", [{"content": "a", "embedding": basis_vector(0)}])
+    with pytest.raises(SystemExit) as exit_info:
+        run_cli(monkeypatch, "check-embeddings")
+    assert exit_info.value.code == 78
+    assert "Embedding model changed." in capsys.readouterr().err

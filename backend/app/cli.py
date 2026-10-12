@@ -1,5 +1,6 @@
 import argparse
 import getpass
+import sys
 
 from sqlmodel import Session, select
 
@@ -88,6 +89,22 @@ def check_storage_cmd(fix: bool) -> None:
     raise SystemExit(0 if report.ok or fix else 1)
 
 
+def check_embeddings_cmd() -> None:
+    import logging
+
+    from app.config import resolve_embedding
+    from app.services.embedding_check import EX_CONFIG, EmbeddingCheckError, check
+
+    logging.basicConfig(level=logging.INFO)  # Ollama pull progress
+    try:
+        with Session(engine) as session:
+            result = check(session, resolve_embedding(), pull=True)
+    except EmbeddingCheckError as exc:
+        print(exc, file=sys.stderr)
+        raise SystemExit(EX_CONFIG)
+    print(f"Embeddings OK: {result}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="origami")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -100,6 +117,7 @@ def main() -> None:
     sub.add_parser("list-models", help="list the models offered by the LLM_MODEL provider")
     p_check = sub.add_parser("check-storage", help="report database/disk drift")
     p_check.add_argument("--fix", action="store_true", help="remove partial writes")
+    sub.add_parser("check-embeddings", help="verify stored vectors match EMBEDDING_MODEL (pulls the Ollama model)")
     args = parser.parse_args()
     if args.command == "create-user":
         create_user(args.username)
@@ -111,6 +129,8 @@ def main() -> None:
         print_models()
     elif args.command == "check-storage":
         check_storage_cmd(args.fix)
+    elif args.command == "check-embeddings":
+        check_embeddings_cmd()
 
 
 if __name__ == "__main__":

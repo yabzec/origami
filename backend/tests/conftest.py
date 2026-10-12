@@ -218,6 +218,13 @@ def smtp_stub(monkeypatch):
     return FakeSMTP.instances
 
 
+@pytest.fixture(autouse=True)
+def no_embedding_guard(monkeypatch):
+    """The API lifespan checks embeddings on app.db.engine (the real database): skip it in tests.
+    tests/test_embedding_startup.py re-patches it to test the wiring."""
+    monkeypatch.setattr("app.main.embedding_startup_guard", lambda: None)
+
+
 @pytest.fixture
 def smtp_settings(monkeypatch):
     """Point app.services.notify at explicit settings instead of the real .env."""
