@@ -10,6 +10,7 @@ import { FolderPicker } from "@/components/FolderPicker";
 import { Textarea } from "@/components/ui/textarea";
 import { STATUS_VARIANTS } from "@/components/DocumentCard";
 import { ProcessingOptions } from "@/components/ProcessingOptions";
+import { PropertiesPanel } from "@/components/PropertiesPanel";
 import { TagInput } from "@/components/TagInput";
 import { useNow } from "@/hooks/useNow";
 import { useOcrLanguages } from "@/hooks/useOcrLanguages";
@@ -199,7 +200,6 @@ export function DocumentPage() {
   const retryMessage = processingRetryMessage(doc, now);
   const tabs = viewTabs(doc);
   const view = activeViewTab(tabs, searchParams.get("tab"));
-  const details: [string, string][] = doc.properties.map((p) => [p.key, p.value]);
 
   return (
     <div className="flex gap-6 p-6">
@@ -289,16 +289,7 @@ export function DocumentPage() {
           <Label htmlFor="d-tags">Tags</Label>
           <TagInput id="d-tags" value={tagIds} onChange={setTagIds} />
         </div>
-        {details.length > 0 && (
-          <dl className="space-y-1 rounded border border-zinc-200 bg-zinc-50 p-3 text-xs">
-            {details.map(([label, value]) => (
-              <div key={label} className="flex gap-2">
-                <dt className="w-24 shrink-0 font-medium text-zinc-500">{label}</dt>
-                <dd className="break-words">{value}</dd>
-              </div>
-            ))}
-          </dl>
-        )}
+        <PropertiesPanel doc={doc} />
         <Button className="w-full" onClick={() => save.mutate()} disabled={save.isPending}>
           {save.isPending ? "Saving…" : "Save"}
         </Button>

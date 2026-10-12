@@ -21,6 +21,7 @@ Self-hosted document management system: scan, upload, OCR, semantic search, and 
 - **Chat:** multi-turn conversation with Markdown answers and `[n]` citations that link to the documents. Origami shortlists candidate documents locally and asks the LLM which ones you mean. Passages come only from those documents and from files you pin. The files in context show as chips: remove one to keep it out of the conversation, or add one with **+ Add file**. The conversation is kept in the browser tab (session storage) until you press **New chat**.
 - Import an X-ray disc from the hospital (IHE PDI): pick the disc folder in the browser; each study becomes one document with an image PDF built from the DICOM files and the radiology report attached.
 - **Notes:** every document has a free-text Notes field; it is searchable and shown on the document page.
+- **Properties:** a free key/value table on every document (searchable). Edit it on the document page with **Edit**; rows keep their order.
 
 ## Installation
 
@@ -148,6 +149,7 @@ Edit what you need. The default processing is: OCR off, translation off, AI summ
 - Each study becomes a PDF with a cover page and one page per image, built at full resolution from the DICOM files. The JPEG copies on the disc are reduced and are used only when the DICOM files cannot be decoded. The PDF is for reference, not for diagnosis.
 - When the study has a report, the document is stored as a directory named after the document, holding the image PDF and `Report.pdf`, byte-identical to the disc copy.
 - The document page shows the two as **Images** and **Report** tabs.
+- The study data read from the disc (patient, modality, series, …) is stored as the document's **Properties**, which you can edit like on any other document.
 - The report text is searchable and feeds the AI summary. The images are never sent to a vision model.
 
 **No DICOM study on the disc.** The dialog asks for the files instead: images (DICOM, JPEG or PNG) and an optional report PDF.
