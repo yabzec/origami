@@ -83,7 +83,6 @@ def test_standard_disc_preview(tmp_path):
     [study] = preview["studies"]
     assert study["title"] == "Rx gamba (tibia e perone) Destro/a — 2026-08-28"
     assert study["document_date"] == "2026-08-28"
-    assert study["patient_tag"] == "Mario Rossi"
     assert study["description_fallback"] == "Rx gamba (tibia e perone) Destro/a · Ospedale Test"
     assert [i["label"] for i in study["images"]] == ["AP", "Lateral"]  # series order, not file order
     assert all(i["readable"] and i["kind"] == "dicom" for i in study["images"])

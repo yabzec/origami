@@ -86,11 +86,7 @@ def get_import(session: Session, import_id: uuid.UUID, user: User, *, staging: b
 
 def preview_response(session: Session, imp: DiscImport) -> dict:
     preview = imp.preview or EMPTY_PREVIEW
-    tags = {t.name.casefold(): t.id for t in session.exec(select(Tag))}
-    studies = [
-        {**s, "patient_tag_id": tags.get((s.get("patient_tag") or "").casefold())} for s in preview["studies"]
-    ]
-    return {**preview, "id": str(imp.id), "studies": studies}
+    return {**preview, "id": str(imp.id)}
 
 
 def _find_image(imp: DiscImport, key: str) -> dict:

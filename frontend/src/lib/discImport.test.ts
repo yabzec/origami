@@ -24,8 +24,6 @@ const study = (over: Partial<DiscStudy> = {}): DiscStudy => ({
   title: "Rx gamba — 2026-08-28",
   document_date: "2026-08-28",
   description_fallback: "Rx gamba · Ospedale",
-  patient_tag: "Mario Rossi",
-  patient_tag_id: null,
   extra_metadata: {},
   images: [
     { key: "i1", path: "DICOM/a", kind: "dicom", label: "AP", readable: true, frames: 1 },
@@ -120,10 +118,8 @@ describe("drafts", () => {
     const d = draftFromStudy(study(), preview().reports, 7);
     expect(d).toMatchObject({
       key: "s1", include: true, title: "Rx gamba — 2026-08-28", documentDate: "2026-08-28",
-      folderId: 7, tagIds: [], addPatientTag: true, imageKeys: ["i1", "i2"], reportKeys: ["r1"],
+      folderId: 7, tagIds: [], imageKeys: ["i1", "i2"], reportKeys: ["r1"],
     });
-    const tagged = draftFromStudy(study({ patient_tag_id: 4 }), [], null);
-    expect([tagged.tagIds, tagged.addPatientTag]).toEqual([[4], false]);
   });
 
   it("does not include a study without a readable image", () => {
@@ -158,12 +154,12 @@ describe("drafts", () => {
     expect(canImport([{ ...d, include: false }])).toBe(false);
   });
 
-  it("builds the commit body in study image order with the patient tag", () => {
+  it("builds the commit body in study image order", () => {
     const d = { ...draftFromStudy(study(), preview().reports, 3), imageKeys: ["i2", "i1"], notes: "n" };
-    const body = commitBody([d], preview(), { s1: 9 }, discProcessing());
+    const body = commitBody([d], preview(), discProcessing());
     expect(body.studies[0]).toEqual({
       study_key: "s1", title: "Rx gamba — 2026-08-28", document_date: "2026-08-28", notes: "n",
-      folder_id: 3, tag_ids: [9], image_keys: ["i1", "i2"], report_keys: ["r1"],
+      folder_id: 3, tag_ids: [], image_keys: ["i1", "i2"], report_keys: ["r1"],
     });
     expect(body.ocr_enabled).toBe(false);
     expect(body.summary_enabled).toBe(true);

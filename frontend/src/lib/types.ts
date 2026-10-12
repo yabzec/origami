@@ -184,8 +184,6 @@ export interface DiscStudy {
   title: string;
   document_date: string | null;
   description_fallback: string;
-  patient_tag: string | null;
-  patient_tag_id: number | null;
   extra_metadata: Record<string, unknown>;
   images: DiscImage[];
 }

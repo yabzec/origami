@@ -224,7 +224,6 @@ def _finish_study(key: str, fields: dict, images: list[dict]) -> dict:
         "title": f"{base} — {fields['study_date']}" if fields["study_date"] else base,
         "document_date": fields["study_date"] or None,
         "description_fallback": " · ".join(filter(None, [description, fields["institution"]])),
-        "patient_tag": fields["patient_name"] or None,
         "extra_metadata": extra,
         "images": images,
     }

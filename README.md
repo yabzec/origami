@@ -138,7 +138,7 @@ Upload → **X-ray disc…** opens a folder picker. Select the root of the disc 
 **Upload.** The browser uploads only the files that matter: `DICOM/`, `DICOMDIR`, `README.TXT`, the IHE PDI study page and its small JPEG copies, and PDFs. The Windows viewer and its libraries are skipped.
 
 **Preview.** Origami shows one card per study:
-- The title, date, patient tag and series come from the DICOM tags. `README.TXT` and `IHE_PDI/Study000.htm` fill gaps.
+- The title, date and series come from the DICOM tags. `README.TXT` and `IHE_PDI/Study000.htm` fill gaps.
 - Thumbnails of the images.
 - The report PDFs found on the disc.
 

@@ -6,7 +6,6 @@ import { ProcessingOptions } from "@/components/ProcessingOptions";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { useCreateTag, useTags } from "@/hooks/useTags";
 import { api, ApiError } from "@/lib/api";
 import type { PickedFile } from "@/lib/batchUpload";
 import {
@@ -23,7 +22,6 @@ import {
   type StudyDraft,
 } from "@/lib/discImport";
 import type { ProcessingValues } from "@/lib/processing";
-import { nextTagColor } from "@/lib/tagInput";
 import type { DiscPreview, Document } from "@/lib/types";
 
 type Phase =
@@ -79,8 +77,6 @@ export function DiscImportDialog({
   initialFolderId: number | null;
 }) {
   const qc = useQueryClient();
-  const { data: tags } = useTags();
-  const createTag = useCreateTag();
   const [importId, setImportId] = useState<string | null>(null);
   const [preview, setPreview] = useState<DiscPreview | null>(null);
   const previewRef = useRef<DiscPreview | null>(null);
@@ -172,21 +168,9 @@ export function DiscImportDialog({
     importing.current = true;
     setPhase({ kind: "importing" });
     try {
-      const patientTagIds: Record<string, number> = {};
-      const byName = new Map((tags ?? []).map((t) => [t.name.toLowerCase(), t.id]));
-      for (const d of drafts.filter((x) => x.include && x.addPatientTag)) {
-        const name = preview.studies.find((s) => s.key === d.key)?.patient_tag;
-        if (!name) continue;
-        let tagId = byName.get(name.toLowerCase());
-        if (tagId === undefined) {
-          tagId = (await createTag.mutateAsync({ name, color: nextTagColor(tags ?? []) })).id;
-          byName.set(name.toLowerCase(), tagId);
-        }
-        patientTagIds[d.key] = tagId;
-      }
       const result = await api.post<{ documents: Document[] }>(
         `/api/disc-imports/${importId}/commit`,
-        commitBody(drafts, preview, patientTagIds, processing),
+        commitBody(drafts, preview, processing),
       );
       committed.current = true;
       importing.current = false; // the staging now belongs to the jobs; the done view can be closed

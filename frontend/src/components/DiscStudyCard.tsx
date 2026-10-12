@@ -53,16 +53,6 @@ export function DiscStudyCard({
         <div className="sm:col-span-2">
           <Label htmlFor={id("tags")}>Tags</Label>
           <TagInput id={id("tags")} value={draft.tagIds} onChange={(tagIds) => set({ tagIds })} />
-          {study.patient_tag && study.patient_tag_id === null && (
-            <label className="mt-1 flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={draft.addPatientTag}
-                onChange={(e) => set({ addPatientTag: e.target.checked })}
-              />
-              Tag “{study.patient_tag}”
-            </label>
-          )}
         </div>
         <div className="sm:col-span-2">
           <Label htmlFor={id("notes")}>Notes</Label>

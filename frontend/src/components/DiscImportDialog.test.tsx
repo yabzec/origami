@@ -13,10 +13,9 @@ vi.mock("@/hooks/useOcrLanguages", () => ({
   }),
 }));
 vi.mock("@/hooks/useFolders", () => ({ useFolders: () => ({ data: [] }) }));
-const { createTag } = vi.hoisted(() => ({ createTag: vi.fn() })); // vi.mock factories run before module code
 vi.mock("@/hooks/useTags", () => ({
   useTags: () => ({ data: [], refetch: vi.fn() }),
-  useCreateTag: () => ({ mutateAsync: createTag }),
+  useCreateTag: () => ({ mutateAsync: vi.fn() }),
 }));
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
@@ -32,8 +31,6 @@ const PREVIEW: DiscPreview = {
       title: "Rx gamba — 2026-08-28",
       document_date: "2026-08-28",
       description_fallback: "",
-      patient_tag: "Mario Rossi",
-      patient_tag_id: null,
       extra_metadata: {},
       images: [{ key: "i1", path: "DICOM/a", kind: "dicom", label: "AP", readable: true, frames: 1 }],
     },
@@ -63,7 +60,6 @@ describe("DiscImportDialog", () => {
   beforeEach(() => {
     vi.mocked(api.post).mockReset();
     vi.mocked(api.upload).mockReset();
-    createTag.mockReset();
   });
 
   it("uploads the useful files and shows the proposed study with import defaults", async () => {
@@ -87,19 +83,17 @@ describe("DiscImportDialog", () => {
     expect(screen.getByRole("button", { name: "Import" })).toBeDisabled();
   });
 
-  it("creates the patient tag and commits the study", async () => {
+  it("commits the study without tags", async () => {
     vi.mocked(api.post)
       .mockResolvedValueOnce({ id: "imp" })
       .mockResolvedValueOnce({ documents: [{ id: "d1", title: "Rx gamba — 2026-08-28" }] });
     vi.mocked(api.upload).mockResolvedValueOnce(PREVIEW);
-    createTag.mockResolvedValueOnce({ id: 9, name: "Mario Rossi", color: "#888888" });
     renderDialog();
     await userEvent.click(await screen.findByRole("button", { name: "Import" }));
     await waitFor(() => expect(screen.getByRole("link", { name: "Rx gamba — 2026-08-28" })).toBeInTheDocument());
-    expect(createTag).toHaveBeenCalledWith(expect.objectContaining({ name: "Mario Rossi" }));
     const [path, body] = vi.mocked(api.post).mock.calls[1] as [string, { studies: { tag_ids: number[]; image_keys: string[]; report_keys: string[] }[] }];
     expect(path).toBe("/api/disc-imports/imp/commit");
-    expect(body.studies[0]).toMatchObject({ tag_ids: [9], image_keys: ["i1"], report_keys: ["r1"] });
+    expect(body.studies[0]).toMatchObject({ tag_ids: [], image_keys: ["i1"], report_keys: ["r1"] });
   });
 
   it("does not delete the staging when closed during the commit", async () => {
@@ -108,7 +102,6 @@ describe("DiscImportDialog", () => {
       .mockResolvedValueOnce({ id: "imp" })
       .mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
     vi.mocked(api.upload).mockResolvedValueOnce(PREVIEW);
-    createTag.mockResolvedValueOnce({ id: 9, name: "Mario Rossi", color: "#888888" });
     const onClose = vi.fn();
     renderDialog(onClose);
     await userEvent.click(await screen.findByRole("button", { name: "Import" }));
@@ -125,7 +118,6 @@ describe("DiscImportDialog", () => {
       .mockResolvedValueOnce({ documents: [{ id: "d1", title: "Rx gamba — 2026-08-28" }] });
     vi.mocked(api.upload).mockResolvedValueOnce(PREVIEW);
     vi.mocked(api.del).mockClear();
-    createTag.mockResolvedValueOnce({ id: 9, name: "Mario Rossi", color: "#888888" });
     const onClose = vi.fn();
     renderDialog(onClose);
     await userEvent.click(await screen.findByRole("button", { name: "Import" }));

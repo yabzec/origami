@@ -101,7 +101,6 @@ export interface StudyDraft {
   notes: string;
   folderId: number | null;
   tagIds: number[];
-  addPatientTag: boolean; // create the suggested patient tag on import
   imageKeys: string[];
   reportKeys: string[];
 }
@@ -118,8 +117,7 @@ export function draftFromStudy(study: DiscStudy, reports: DiscReport[], folderId
     documentDate: study.document_date ?? "",
     notes: "",
     folderId,
-    tagIds: study.patient_tag_id !== null ? [study.patient_tag_id] : [],
-    addPatientTag: study.patient_tag !== null && study.patient_tag_id === null,
+    tagIds: [],
     imageKeys: study.images.filter((i) => i.readable).map((i) => i.key),
     reportKeys: reports.filter((r) => r.study_key === study.key && r.preselected).map((r) => r.key),
   };
@@ -155,7 +153,6 @@ export function canImport(drafts: StudyDraft[]): boolean {
 export function commitBody(
   drafts: StudyDraft[],
   preview: DiscPreview,
-  patientTagIds: Record<string, number>,
   processing: ProcessingValues,
 ) {
   return {
@@ -164,14 +161,13 @@ export function commitBody(
       .map((d) => {
         const study = preview.studies.find((s) => s.key === d.key);
         const order = study ? study.images.map((i) => i.key) : d.imageKeys;
-        const extra = patientTagIds[d.key];
         return {
           study_key: d.key,
           title: d.title.trim(),
           document_date: d.documentDate || null,
           notes: d.notes,
           folder_id: d.folderId,
-          tag_ids: extra !== undefined && !d.tagIds.includes(extra) ? [...d.tagIds, extra] : d.tagIds,
+          tag_ids: d.tagIds,
           image_keys: order.filter((k) => d.imageKeys.includes(k)),
           report_keys: d.reportKeys,
         };

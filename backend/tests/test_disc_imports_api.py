@@ -44,20 +44,10 @@ def test_stage_files_returns_preview(auth_client, session, storage, tmp_path):
     import_id, preview = staged(auth_client, tmp_path)
     assert preview["id"] == import_id
     [study] = preview["studies"]
-    assert study["patient_tag"] == "Mario Rossi"
-    assert study["patient_tag_id"] is None
     assert len(study["images"]) == 2
     assert preview["reports"][0]["preselected"] is True
     assert storage.disc_import_path(import_id).joinpath("DICOM/1/a").is_file()
     assert auth_client.get(f"/api/disc-imports/{import_id}").json()["studies"][0]["key"] == study["key"]
-
-
-def test_preview_finds_existing_patient_tag(auth_client, session, storage, tmp_path):
-    tag = Tag(name="mario rossi")
-    session.add(tag)
-    session.commit()
-    _, preview = staged(auth_client, tmp_path)
-    assert preview["studies"][0]["patient_tag_id"] == tag.id
 
 
 def test_files_in_several_batches_accumulate(auth_client, session, storage, tmp_path):

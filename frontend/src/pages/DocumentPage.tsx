@@ -264,16 +264,6 @@ export function DocumentPage() {
         {tab === "preview" ? <Viewer doc={doc} view={view} /> : <TextView doc={doc} />}
       </div>
       <aside className="w-72 space-y-3">
-        {details.length > 0 && (
-          <dl className="space-y-1 rounded border border-zinc-200 bg-zinc-50 p-3 text-xs">
-            {details.map(([label, value]) => (
-              <div key={label} className="flex gap-2">
-                <dt className="w-24 shrink-0 font-medium text-zinc-500">{label}</dt>
-                <dd className="break-words">{value}</dd>
-              </div>
-            ))}
-          </dl>
-        )}
         <div>
           <Label htmlFor="d-title">Title</Label>
           <Input id="d-title" value={title} onChange={(e) => setTitle(e.target.value)} />
@@ -299,6 +289,16 @@ export function DocumentPage() {
           <Label htmlFor="d-tags">Tags</Label>
           <TagInput id="d-tags" value={tagIds} onChange={setTagIds} />
         </div>
+        {details.length > 0 && (
+          <dl className="space-y-1 rounded border border-zinc-200 bg-zinc-50 p-3 text-xs">
+            {details.map(([label, value]) => (
+              <div key={label} className="flex gap-2">
+                <dt className="w-24 shrink-0 font-medium text-zinc-500">{label}</dt>
+                <dd className="break-words">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
         <Button className="w-full" onClick={() => save.mutate()} disabled={save.isPending}>
           {save.isPending ? "Saving…" : "Save"}
         </Button>
