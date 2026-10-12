@@ -1,5 +1,6 @@
 from datetime import date
 
+import pydicom
 import pytest
 from PIL import Image
 
@@ -190,3 +191,27 @@ def test_broken_dicom_is_a_warning(tmp_path):
     preview = build_preview(tmp_path)
     assert preview["no_study"] is True
     assert preview["warnings"] == ["DICOM/bad: not a readable DICOM file"]
+
+
+def test_missing_transfer_syntax_is_unreadable(tmp_path):
+    path = tmp_path / "DICOM/a"
+    make_dicom(path)
+    ds = pydicom.dcmread(path)
+    del ds.file_meta.TransferSyntaxUID
+    ds.save_as(path, enforce_file_format=False)
+    [study] = build_preview(tmp_path)["studies"]
+    assert study["images"][0]["readable"] is False
+
+
+def test_failure_on_one_dicom_is_a_warning(tmp_path, monkeypatch):
+    make_dicom(tmp_path / "DICOM/a")
+    make_dicom(tmp_path / "DICOM/r", SOPClassUID="1.2.840.10008.5.1.4.1.1.104.1")
+
+    def boom(*args):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(dicom_parse, "_extract_encapsulated", boom)
+    preview = build_preview(tmp_path)
+    assert preview["warnings"] == ["DICOM/r: not a readable DICOM file"]
+    assert len(preview["studies"][0]["images"]) == 1
+

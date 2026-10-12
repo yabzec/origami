@@ -250,27 +250,29 @@ def build_preview(root: Path) -> dict:
         if is_dicom(path):
             try:
                 ds = pydicom.dcmread(path, stop_before_pixels=True)
+                uid = _text(ds, "StudyInstanceUID") or "unknown"
+                if _text(ds, "SOPClassUID") == ENCAPSULATED_PDF:
+                    pdf_rel = _extract_encapsulated(root, path, rel)
+                    report = pdf_rel and _report(root, pdf_rel, study_key=file_key(uid), preselected=True)
+                    if report:
+                        reports.append(report)
+                    continue
+                if "Rows" not in ds:
+                    continue  # structured report, presentation state, ...: no pixels
+                syntax = getattr(ds.file_meta, "TransferSyntaxUID", None)
+                image = {
+                    "key": file_key(rel),
+                    "path": rel,
+                    "kind": "dicom",
+                    "label": _image_label(ds, rel),
+                    "readable": bool(syntax) and is_decodable(str(syntax)),
+                    "frames": int(ds.get("NumberOfFrames") or 1),
+                }
+                order = (int(ds.get("SeriesNumber") or 0), int(ds.get("InstanceNumber") or 0), rel)
             except Exception:
+                log.warning("Unreadable DICOM %s", rel, exc_info=True)
                 warnings.append(f"{rel}: not a readable DICOM file")
                 continue
-            uid = _text(ds, "StudyInstanceUID") or "unknown"
-            if _text(ds, "SOPClassUID") == ENCAPSULATED_PDF:
-                pdf_rel = _extract_encapsulated(root, path, rel)
-                report = pdf_rel and _report(root, pdf_rel, study_key=file_key(uid), preselected=True)
-                if report:
-                    reports.append(report)
-                continue
-            if "Rows" not in ds:
-                continue  # structured report, presentation state, ...: no pixels
-            image = {
-                "key": file_key(rel),
-                "path": rel,
-                "kind": "dicom",
-                "label": _image_label(ds, rel),
-                "readable": is_decodable(str(ds.file_meta.TransferSyntaxUID)),
-                "frames": int(ds.get("NumberOfFrames") or 1),
-            }
-            order = (int(ds.get("SeriesNumber") or 0), int(ds.get("InstanceNumber") or 0), rel)
             groups.setdefault(uid, []).append((order, image, ds))
         elif parts == ("readme.txt",):
             readme = parse_readme(path.read_text(errors="replace"))
