@@ -196,6 +196,7 @@ def search(
                 {
                     "chunk_id": chunk_id,
                     "page_number": chunk.page_number,
+                    "attachment_id": chunk.attachment_id,
                     "source": chunk.source,
                     "text": snippets.get(chunk_id) or chunk.content[:250],
                     "similarity": similarities.get(chunk_id),

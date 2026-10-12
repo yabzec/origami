@@ -38,6 +38,7 @@ class RetrievedChunk:
     title: str
     page_number: int | None
     content: str
+    attachment_id: int | None = None
 
 
 def retrieve(
@@ -73,6 +74,7 @@ def retrieve(
                 title=titles[chunk.document_id],
                 page_number=chunk.page_number,
                 content=chunk.content,
+                attachment_id=chunk.attachment_id,
             )
         )
     best_similarity = max((h.similarity for h in semantic_hits), default=0.0)
@@ -166,6 +168,7 @@ def stream_chat(
                     "document_id": str(s.document_id),
                     "title": s.title,
                     "page_number": s.page_number,
+                    "attachment_id": s.attachment_id,
                 }
                 for s in sources
             ],

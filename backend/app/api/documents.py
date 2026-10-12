@@ -114,16 +114,36 @@ def docs_with_content(session: Session, doc_ids: list[uuid.UUID]) -> set[uuid.UU
     )
 
 
+def attachments_for(session: Session, doc_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[dict]]:
+    """Attachments of the given documents, fetched in one query."""
+    out: dict[uuid.UUID, list[dict]] = {}
+    if not doc_ids:
+        return out
+    for att in session.exec(
+        select(DocumentAttachment)
+        .where(DocumentAttachment.document_id.in_(doc_ids))
+        .order_by(DocumentAttachment.id)
+    ):
+        out.setdefault(att.document_id, []).append(
+            {"id": att.id, "role": att.role, "filename": att.filename,
+             "file_size": att.file_size, "page_count": att.page_count}
+        )
+    return out
+
+
 def serialize(
     session: Session,
     doc: Document,
     active_jobs: dict[str, dict] | None = None,
     with_content: set[uuid.UUID] | None = None,
+    attachments: dict[uuid.UUID, list[dict]] | None = None,
 ) -> dict:
     if active_jobs is None:
         active_jobs = active_jobs_for(session, [doc.id])
     if with_content is None:
         with_content = docs_with_content(session, [doc.id])
+    if attachments is None:
+        attachments = attachments_for(session, [doc.id])
     has_text = doc.id in with_content
     language_differs = bool(doc.detected_language) and doc.detected_language != doc.translation_language
     return {
@@ -132,6 +152,7 @@ def serialize(
         "translatable": language_differs and has_text,
         "tags": [t.model_dump() for t in doc_tags(session, doc)],
         "active_job": active_jobs.get(str(doc.id)),
+        "attachments": attachments.get(doc.id, []),
     }
 
 
@@ -189,7 +210,8 @@ def list_documents(
     ids = [d.id for d in docs]
     active_jobs = active_jobs_for(session, ids)
     with_content = docs_with_content(session, ids)
-    return [serialize(session, d, active_jobs, with_content) for d in docs]
+    attachments = attachments_for(session, ids)
+    return [serialize(session, d, active_jobs, with_content, attachments) for d in docs]
 
 
 BULK_MAX = 500

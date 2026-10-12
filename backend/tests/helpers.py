@@ -44,6 +44,7 @@ def seed_document(session, title: str, chunk_specs: list[dict], **doc_kwargs):
                 document_id=doc.id,
                 chunk_index=index,
                 page_number=spec.get("page_number"),
+                attachment_id=spec.get("attachment_id"),
                 source=spec.get("source", ChunkSource.content),
                 content=spec["content"],
                 embedding=spec.get("embedding"),
