@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -46,20 +46,21 @@ describe("PropertiesPanel", () => {
     vi.mocked(api.patch).mockResolvedValueOnce({});
     const { invalidate } = renderPanel();
     await userEvent.click(screen.getByRole("button", { name: "Edit" }));
-    expect(screen.getByTestId("properties-frame")).toHaveClass("max-h-64", "overflow-y-auto");
+    expect(screen.getByRole("dialog", { name: "Edit properties" })).toBeInTheDocument();
+    expect(screen.getByTestId("properties-edit-frame")).toHaveClass("max-h-[60vh]", "overflow-y-auto");
     await userEvent.click(screen.getByRole("button", { name: "Delete row Modality" }));
     await userEvent.click(screen.getByRole("button", { name: "Add row" }));
     const keys = screen.getAllByRole("textbox", { name: "Key" });
     const values = screen.getAllByRole("textbox", { name: "Value" });
     await userEvent.type(keys[1], " Colore ");
     await userEvent.type(values[1], "blu");
-    await userEvent.click(screen.getByRole("button", { name: "Save properties" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(api.patch).toHaveBeenCalledWith("/api/documents/d1", {
       properties: [{ key: "Patient", value: "Mario Rossi" }, { key: "Colore", value: "blu" }],
     });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["document", "d1"] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["documents"] });
-    expect(await screen.findByRole("button", { name: "Edit" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
   it("blocks save with an inline validation error", async () => {
@@ -67,7 +68,7 @@ describe("PropertiesPanel", () => {
     await userEvent.click(screen.getByRole("button", { name: "Edit" }));
     await userEvent.click(screen.getByRole("button", { name: "Add row" }));
     await userEvent.type(screen.getAllByRole("textbox", { name: "Key" })[2], "patient");
-    await userEvent.click(screen.getByRole("button", { name: "Save properties" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(screen.getByText("Duplicate key: patient")).toBeInTheDocument();
     expect(api.patch).not.toHaveBeenCalled();
   });
@@ -76,7 +77,7 @@ describe("PropertiesPanel", () => {
     vi.mocked(api.patch).mockRejectedValueOnce(new ApiError(422, "validation_error", "Request validation failed"));
     renderPanel();
     await userEvent.click(screen.getByRole("button", { name: "Edit" }));
-    await userEvent.click(screen.getByRole("button", { name: "Save properties" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(await screen.findByText("Request validation failed")).toBeInTheDocument();
   });
 
@@ -87,10 +88,19 @@ describe("PropertiesPanel", () => {
     await userEvent.click(screen.getByRole("button", { name: "Delete row Modality" }));
     await userEvent.click(screen.getByRole("button", { name: "Add row" }));
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByText("Mario Rossi")).toBeInTheDocument();
     expect(screen.getByText("DX")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(screen.getAllByRole("textbox", { name: "Key" })).toHaveLength(2);
+  });
+
+  it("Escape closes the editor without saving", async () => {
+    renderPanel();
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(api.patch).not.toHaveBeenCalled();
   });
 
   it("resets edit mode when the document changes (key={doc.id} as in DocumentPage)", async () => {
@@ -104,9 +114,9 @@ describe("PropertiesPanel", () => {
     );
     const { rerender } = render(ui(docA));
     await userEvent.click(screen.getByRole("button", { name: "Edit" }));
-    expect(screen.getByRole("button", { name: "Save properties" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
     rerender(ui(docB));
-    expect(screen.queryByRole("button", { name: "Save properties" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
     expect(screen.getByText("B-key")).toBeInTheDocument();
     expect(screen.queryByText("A-key")).not.toBeInTheDocument();
   });

@@ -21,7 +21,7 @@ Self-hosted document management system: scan, upload, OCR, semantic search, and 
 - **Chat:** multi-turn conversation with Markdown answers and `[n]` citations that link to the documents. Origami shortlists candidate documents locally and asks the LLM which ones you mean. Passages come only from those documents and from files you pin. The files in context show as chips: remove one to keep it out of the conversation, or add one with **+ Add file**. The conversation is kept in the browser tab (session storage) until you press **New chat**.
 - Import an X-ray disc from the hospital (IHE PDI): pick the disc folder in the browser; each study becomes one document with an image PDF built from the DICOM files and the radiology report attached.
 - **Notes:** every document has a free-text Notes field; it is searchable and shown on the document page.
-- **Properties:** a free key/value table on every document (searchable). Edit it on the document page with **Edit**; rows keep their order.
+- **Properties:** a free key/value table on every document (searchable). **Edit** on the document page opens an editor; its **Save** stores the properties at once, without the page's main Save. Rows keep their order.
 
 ## Installation
 
