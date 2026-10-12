@@ -144,3 +144,46 @@ def test_check_embeddings_mismatch_exits_78(session, cli_engine, monkeypatch, ca
         run_cli(monkeypatch, "check-embeddings")
     assert exit_info.value.code == 78
     assert "Embedding model changed." in capsys.readouterr().err
+
+
+@pytest.fixture
+def restore_column(session):
+    from app.services.embedding_check import column_dim, create_index, set_column_dim
+
+    yield
+    session.rollback()
+    if column_dim(session) != 1536:
+        set_column_dim(session, 1536)
+        create_index(session)
+        session.commit()
+
+
+def test_reembed_cli(session, cli_engine, monkeypatch, capsys, restore_column):
+    from app.config import get_settings
+    from app.models import EmbeddingMeta
+    from app.services import llm
+    from app.services.embedding_check import column_dim
+    from tests.helpers import basis_vector, seed_document
+
+    seed_document(session, "A", [{"content": "a", "embedding": basis_vector(0)}])
+    monkeypatch.setenv("EMBEDDING_DIM", "768")
+    get_settings.cache_clear()
+    monkeypatch.setattr(llm, "embed", lambda texts, role="document": [[0.5] * 768 for _ in texts])
+    try:
+        run_cli(monkeypatch, "reembed", "--yes")
+    finally:
+        get_settings.cache_clear()
+    out = capsys.readouterr().out
+    assert "embedded 1/1" in out
+    assert "Done. Start origami: sudo systemctl start origami" in out
+    assert column_dim(session) == 768
+    assert session.get(EmbeddingMeta, 1).dim == 768
+
+
+def test_reembed_cli_needs_confirmation(session, cli_engine, monkeypatch, restore_column):
+    from app.services.embedding_check import column_dim
+
+    monkeypatch.setattr("builtins.input", lambda prompt: "n")
+    with pytest.raises(SystemExit, match="Aborted"):
+        run_cli(monkeypatch, "reembed")
+    assert column_dim(session) == 1536

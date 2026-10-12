@@ -105,6 +105,27 @@ def check_embeddings_cmd() -> None:
     print(f"Embeddings OK: {result}")
 
 
+def reembed_cmd(yes: bool) -> None:
+    from app.config import resolve_embedding
+    from app.services import llm
+    from app.services.embedding_check import EX_CONFIG, EmbeddingCheckError
+    from app.services.reembed import reembed_all
+
+    cfg = resolve_embedding()
+    print(f"Re-embedding every chunk with {cfg.model} ({cfg.dim} dims, scheme {cfg.scheme}).")
+    if not yes and input("Stop origami first (sudo systemctl stop origami). Continue? [y/N] ").strip().lower() != "y":
+        raise SystemExit("Aborted")
+    try:
+        with Session(engine) as session:
+            # looked up at call time so tests can replace llm.embed
+            count = reembed_all(session, cfg, lambda texts, role: llm.embed(texts, role=role))
+    except EmbeddingCheckError as exc:
+        print(exc, file=sys.stderr)
+        raise SystemExit(EX_CONFIG)
+    print(f"Re-embedded {count} chunks.")
+    print("Done. Start origami: sudo systemctl start origami")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="origami")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -118,6 +139,8 @@ def main() -> None:
     p_check = sub.add_parser("check-storage", help="report database/disk drift")
     p_check.add_argument("--fix", action="store_true", help="remove partial writes")
     sub.add_parser("check-embeddings", help="verify stored vectors match EMBEDDING_MODEL (pulls the Ollama model)")
+    p_reembed = sub.add_parser("reembed", help="rebuild every vector with EMBEDDING_MODEL (stop origami first)")
+    p_reembed.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
     args = parser.parse_args()
     if args.command == "create-user":
         create_user(args.username)
@@ -131,6 +154,8 @@ def main() -> None:
         check_storage_cmd(args.fix)
     elif args.command == "check-embeddings":
         check_embeddings_cmd()
+    elif args.command == "reembed":
+        reembed_cmd(args.yes)
 
 
 if __name__ == "__main__":
