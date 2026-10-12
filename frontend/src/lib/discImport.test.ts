@@ -24,7 +24,7 @@ const study = (over: Partial<DiscStudy> = {}): DiscStudy => ({
   title: "Rx gamba — 2026-08-28",
   document_date: "2026-08-28",
   description_fallback: "Rx gamba · Ospedale",
-  extra_metadata: {},
+  properties: [],
   images: [
     { key: "i1", path: "DICOM/a", kind: "dicom", label: "AP", readable: true, frames: 1 },
     { key: "i2", path: "DICOM/b", kind: "dicom", label: "Lateral", readable: true, frames: 1 },

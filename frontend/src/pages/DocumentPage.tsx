@@ -15,7 +15,7 @@ import { useNow } from "@/hooks/useNow";
 import { useOcrLanguages } from "@/hooks/useOcrLanguages";
 import { api, ApiError, attachmentUrl, fileUrl } from "@/lib/api";
 import { browseQuery, DEFAULT_BROWSE } from "@/lib/browseParams";
-import { activeViewTab, studyRows, viewTabs, type ViewTab } from "@/lib/documentView";
+import { activeViewTab, viewTabs, type ViewTab } from "@/lib/documentView";
 import { isAiDescription, nextDescription } from "@/lib/description";
 import { defaultProcessing, processingFromDocument, processingPayload, type ProcessingValues } from "@/lib/processing";
 import { processingRetryMessage, shouldPollDocument } from "@/lib/retry";
@@ -189,7 +189,7 @@ export function DocumentPage() {
   const confirmReprocess = () => {
     const base = "Re-run OCR and AI processing? Extracted text, summary and translation will be replaced.";
     const pdfNote =
-      doc && (doc.doc_type === "pdf" || doc.doc_type === "scan") && !doc.extra_metadata && processing.ocrEnabled && doc.ocr_applied !== false
+      doc && (doc.doc_type === "pdf" || doc.doc_type === "scan") && doc.origin !== "xray_disc" && processing.ocrEnabled && doc.ocr_applied !== false
         ? " The PDF is rebuilt from page images."
         : "";
     if (window.confirm(base + pdfNote)) reprocess.mutate();
@@ -199,7 +199,7 @@ export function DocumentPage() {
   const retryMessage = processingRetryMessage(doc, now);
   const tabs = viewTabs(doc);
   const view = activeViewTab(tabs, searchParams.get("tab"));
-  const details = studyRows(doc.extra_metadata);
+  const details: [string, string][] = doc.properties.map((p) => [p.key, p.value]);
 
   return (
     <div className="flex gap-6 p-6">

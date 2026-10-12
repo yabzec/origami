@@ -8,8 +8,10 @@ export interface ViewTab {
 
 const ROLE_LABELS: Record<string, string> = { report: "Report" };
 
-export function viewTabs(doc: Pick<Document, "attachments" | "extra_metadata">): ViewTab[] {
-  const tabs: ViewTab[] = [{ key: "main", label: doc.extra_metadata ? "Images" : "Document", attachment: null }];
+export function viewTabs(doc: Pick<Document, "attachments" | "origin">): ViewTab[] {
+  const tabs: ViewTab[] = [
+    { key: "main", label: doc.origin === "xray_disc" ? "Images" : "Document", attachment: null },
+  ];
   const seen: Record<string, number> = {};
   for (const attachment of doc.attachments) {
     const total = doc.attachments.filter((a) => a.role === attachment.role).length;
@@ -30,28 +32,4 @@ export function activeViewTab(tabs: ViewTab[], param: string | null): ViewTab {
 
 export function documentLink(documentId: string, attachmentId?: number | null): string {
   return `/documents/${documentId}${attachmentId != null ? `?tab=${attachmentId}` : ""}`;
-}
-
-/** Same keys and labels as FIELDS in backend/app/services/study_metadata.py. */
-export const STUDY_FIELDS: [string, string][] = [
-  ["patient_name", "Patient"],
-  ["birth_date", "Birth date"],
-  ["sex", "Sex"],
-  ["patient_id", "Patient ID"],
-  ["study_description", "Study"],
-  ["modality", "Modality"],
-  ["body_part", "Body part"],
-  ["institution", "Institution"],
-  ["accession_number", "Accession number"],
-  ["device", "Device"],
-];
-
-export function studyRows(meta: Record<string, unknown> | null): [string, string][] {
-  if (!meta) return [];
-  const rows: [string, string][] = STUDY_FIELDS.filter(([key]) => typeof meta[key] === "string" && meta[key]).map(
-    ([key, label]) => [label, meta[key] as string],
-  );
-  const series = Array.isArray(meta.series) ? (meta.series as { description: string; images: number }[]) : [];
-  if (series.length > 0) rows.push(["Series", series.map((s) => `${s.description} (${s.images})`).join("; ")]);
-  return rows;
 }

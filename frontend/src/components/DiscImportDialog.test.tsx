@@ -31,7 +31,7 @@ const PREVIEW: DiscPreview = {
       title: "Rx gamba — 2026-08-28",
       document_date: "2026-08-28",
       description_fallback: "",
-      extra_metadata: {},
+      properties: [],
       images: [{ key: "i1", path: "DICOM/a", kind: "dicom", label: "AP", readable: true, frames: 1 }],
     },
   ],

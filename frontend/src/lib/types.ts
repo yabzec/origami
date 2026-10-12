@@ -26,6 +26,13 @@ export interface ActiveJob {
   last_error: string | null;
 }
 
+export interface Property {
+  key: string;
+  value: string;
+}
+
+export type DocumentOrigin = "file" | "scan" | "xray_disc";
+
 export interface Attachment {
   id: number;
   role: string;
@@ -60,7 +67,8 @@ export interface Document {
   preview_path: string | null;
   page_count: number | null;
   file_size: number | null;
-  extra_metadata: Record<string, unknown> | null; // study data of an imported X-ray disc
+  origin: DocumentOrigin; // file = upload, scan = scan compile, xray_disc = disc import
+  properties: Property[];
   attachments: Attachment[];
   created_at: string;
   updated_at: string;
@@ -184,7 +192,7 @@ export interface DiscStudy {
   title: string;
   document_date: string | null;
   description_fallback: string;
-  extra_metadata: Record<string, unknown>;
+  properties: Property[];
   images: DiscImage[];
 }
 
