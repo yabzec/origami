@@ -26,10 +26,19 @@ export interface ActiveJob {
   last_error: string | null;
 }
 
+export interface Attachment {
+  id: number;
+  role: string;
+  filename: string;
+  file_size: number;
+  page_count: number | null;
+}
+
 export interface Document {
   id: string;
   title: string;
   description: string;
+  notes: string;
   summary: string | null;
   folder_id: number | null;
   doc_type: DocType;
@@ -51,6 +60,8 @@ export interface Document {
   preview_path: string | null;
   page_count: number | null;
   file_size: number | null;
+  extra_metadata: Record<string, unknown> | null; // study data of an imported X-ray disc
+  attachments: Attachment[];
   created_at: string;
   updated_at: string;
   tags: Tag[];
@@ -93,6 +104,7 @@ export interface SearchSnippet {
   source: string;
   text: string;
   similarity: number | null;
+  attachment_id: number | null;
 }
 
 export interface SearchResult {
@@ -112,6 +124,7 @@ export interface ChatSource {
   document_id: string;
   title: string;
   page_number: number | null;
+  attachment_id?: number | null;
 }
 
 export interface DocRef {
@@ -145,4 +158,42 @@ export interface BulkItemsResult {
   deleted_documents?: number;
   missing_folders: number[];
   missing_documents: string[];
+}
+
+export interface DiscImage {
+  key: string;
+  path: string;
+  kind: "dicom" | "image";
+  label: string;
+  readable: boolean;
+  frames: number;
+}
+
+export interface DiscReport {
+  key: string;
+  path: string;
+  filename: string;
+  page_count: number;
+  has_text: boolean;
+  study_key: string | null;
+  preselected: boolean;
+}
+
+export interface DiscStudy {
+  key: string;
+  title: string;
+  document_date: string | null;
+  description_fallback: string;
+  patient_tag: string | null;
+  patient_tag_id: number | null;
+  extra_metadata: Record<string, unknown>;
+  images: DiscImage[];
+}
+
+export interface DiscPreview {
+  id: string;
+  no_study: boolean;
+  studies: DiscStudy[];
+  reports: DiscReport[];
+  warnings: string[];
 }
