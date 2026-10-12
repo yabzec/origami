@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from PIL import Image
 from sqlmodel import select
 
-from app.models import DiscImport, DiscImportStatus, Document, Job, Tag, User
+from app.models import DiscImport, DiscImportStatus, Document, Job, JobStatus, Tag, User
 from app.services.auth import create_access_token, hash_password
 from tests.helpers import make_dicom, make_text_pdf
 
@@ -200,3 +200,44 @@ def test_commit_rejects_unknown_folder(auth_client, session, storage, tmp_path):
     body["studies"][0]["folder_id"] = 999
     assert auth_client.post(f"/api/disc-imports/{import_id}/commit", json=body).status_code == 404
     assert session.exec(select(Document)).all() == []
+
+
+def two_study_disc(tmp_path):
+    files = disc_files(tmp_path)
+    c = make_dicom(tmp_path / "src/c", study_uid="1.2.826.0.1.2").read_bytes()
+    return files + [("DICOM/2/c", c)]
+
+
+def test_commit_two_studies_queues_all_jobs_together(auth_client, session, storage, tmp_path):
+    import_id = create(auth_client)
+    resp = send(auth_client, import_id, two_study_disc(tmp_path))
+    preview = resp.json()
+    assert len(preview["studies"]) == 2
+    body = commit_body(preview)
+    second = preview["studies"][1]
+    body["studies"].append({
+        "study_key": second["key"], "title": "Secondo", "image_keys": [i["key"] for i in second["images"]],
+    })
+    resp = auth_client.post(f"/api/disc-imports/{import_id}/commit", json=body)
+    assert resp.status_code == 200
+    jobs = session.exec(select(Job)).all()
+    assert len(jobs) == 2 and all(j.status == JobStatus.queued for j in jobs)
+    assert session.get(DiscImport, import_id).status == DiscImportStatus.committed
+    assert auth_client.post(f"/api/disc-imports/{import_id}/commit", json=body).status_code == 409
+
+
+def test_commit_rejects_blank_title(auth_client, session, storage, tmp_path):
+    import_id, preview = staged(auth_client, tmp_path)
+    body = commit_body(preview)
+    body["studies"][0]["title"] = "   "
+    resp = auth_client.post(f"/api/disc-imports/{import_id}/commit", json=body)
+    assert resp.status_code == 422
+    assert session.exec(select(Document)).all() == []
+
+
+def test_report_file_missing_is_404(auth_client, session, storage, tmp_path):
+    import_id, preview = staged(auth_client, tmp_path)
+    storage.disc_import_path(import_id).joinpath("REPORT/r.pdf").unlink()
+    key = preview["reports"][0]["key"]
+    resp = auth_client.get(f"/api/disc-imports/{import_id}/reports/{key}/file")
+    assert resp.status_code == 404

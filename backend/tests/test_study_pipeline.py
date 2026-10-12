@@ -5,7 +5,7 @@ from pypdf import PdfReader
 from sqlmodel import select
 
 from app.models import (
-    Chunk, ChunkSource, DiscImport, DocStatus, DocType, Document, DocumentAttachment, Job, JobStatus,
+    Chunk, ChunkSource, DiscImport, DiscImportStatus, DocStatus, DocType, Document, DocumentAttachment, Job, JobStatus,
 )
 from app.services.storage import Storage
 from app.worker import pipeline
@@ -33,6 +33,11 @@ def disc(session, user, pipeline_storage):
     make_text_pdf(root / "REPORT/r.pdf", REPORT)
     make_text_pdf(root / "REPORT/scan.pdf", [])
     return imp
+
+
+def commit_disc(session, imp):
+    imp.status = DiscImportStatus.committed
+    session.commit()
 
 
 def make_study_doc(session, **kw):
@@ -65,6 +70,7 @@ def run(session, doc, data):
 
 
 def test_bundle_pdf_chunks_summary_and_cleanup(session, pipeline_storage, disc, llm_stub):
+    commit_disc(session, disc)
     doc = make_study_doc(session)
     doc = run(session, doc, payload(doc, disc))
     assert doc.status == DocStatus.ready
@@ -80,6 +86,7 @@ def test_bundle_pdf_chunks_summary_and_cleanup(session, pipeline_storage, disc, 
     [call] = llm_stub["describe"]
     assert call["image_path"] is None
     assert "tibia destra" in call["text"] and "Patient: Mario Rossi" in call["text"]
+    assert call["text"].index("Patient: Mario Rossi") < call["text"].index("tibia destra")
     assert not pipeline_storage.disc_import_path(disc.id).exists()
 
 
@@ -145,7 +152,26 @@ def test_retry_does_not_rebuild_bundle(session, pipeline_storage, disc, llm_stub
     assert not pipeline_storage.abs_path("Rx gamba (2)").exists()
 
 
+def test_staging_kept_until_import_committed(session, pipeline_storage, disc, llm_stub):
+    doc = make_study_doc(session)
+    run(session, doc, payload(doc, disc))
+    assert pipeline_storage.disc_import_path(disc.id).exists()  # still staging: no release
+
+
+def test_unreadable_image_names_the_label(session, pipeline_storage, disc, llm_stub, monkeypatch):
+    def boom(path, kind):
+        raise ValueError("bad pixel data")
+
+    monkeypatch.setattr(pipeline, "render", boom)
+    doc = make_study_doc(session)
+    with pytest.raises(RuntimeError, match="AP: image cannot be decoded"):
+        pipeline.process_document(session, payload(doc, disc))
+    session.refresh(doc)
+    assert "AP: image cannot be decoded" in doc.error_message
+
+
 def test_other_pending_job_keeps_staging(session, pipeline_storage, disc, llm_stub):
+    commit_disc(session, disc)
     first, second = make_study_doc(session), make_study_doc(session, title="Second")
     session.add(Job(type="process_document", payload=payload(second, disc), run_at=datetime.now(timezone.utc)))
     session.commit()

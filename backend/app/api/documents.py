@@ -334,6 +334,9 @@ def update_document(
         if "title" in fields or "folder_id" in fields:
             lock_tree(session)  # before the row lock: same order as write_document_file
         [doc] = lock_documents(session, [document_id])
+        metadata_changed = any(
+            getattr(doc, key) != value for key, value in fields.items() if key in METADATA_FIELDS
+        )
         for key, value in fields.items():
             setattr(doc, key, value)
 
@@ -350,7 +353,7 @@ def update_document(
         if "title" in fields or "folder_id" in fields:
             relocate_document(session, storage, moves, doc)
         doc.updated_at = datetime.now(timezone.utc)
-        if METADATA_FIELDS & fields.keys():
+        if metadata_changed:
             queue_metadata_refresh(session, doc)
     session.refresh(doc)
     return serialize(session, doc)

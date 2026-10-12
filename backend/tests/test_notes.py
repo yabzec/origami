@@ -49,6 +49,13 @@ def test_patch_notes_queues_metadata_refresh(auth_client, session, storage):
     assert job.payload == {"document_id": str(doc.id)}
 
 
+def test_patch_same_metadata_values_queues_nothing(auth_client, session, storage):
+    doc = make_ready_doc(session, notes="Controllo")
+    resp = auth_client.patch(f"/api/documents/{doc.id}", json={"title": doc.title, "notes": "Controllo"})
+    assert resp.status_code == 200
+    assert session.exec(select(Job).where(Job.type == "refresh_metadata")).all() == []
+
+
 def test_patch_without_metadata_fields_queues_nothing(auth_client, session, storage):
     doc = make_ready_doc(session)
     resp = auth_client.patch(f"/api/documents/{doc.id}", json={"document_date": "2026-01-02"})

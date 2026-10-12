@@ -7,7 +7,7 @@ from pathlib import Path, PurePosixPath
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session, select
 
 from app.api.deps import api_error, get_current_user, get_current_user_flexible
@@ -15,10 +15,9 @@ from app.api.documents import serialize
 from app.api.ocr import check_ocr_languages, check_translation_language, default_ocr_languages
 from app.api.uploads import create_pending_document
 from app.db import get_session
-from app.models import DiscImport, DiscImportStatus, DocType, Folder, Tag, User
+from app.models import DiscImport, DiscImportStatus, DocType, Folder, Job, Tag, User
 from app.services.dicom_parse import build_preview
 from app.services.dicom_render import thumbnail_jpeg
-from app.services.jobs import enqueue
 from app.services.storage import Storage, get_storage
 
 router = APIRouter(prefix="/api/disc-imports", tags=["disc-imports"])
@@ -37,6 +36,14 @@ class StudyCommit(BaseModel):
     tag_ids: list[int] = []
     image_keys: list[str] = Field(min_length=1)
     report_keys: list[str] = []
+
+    @field_validator("title")
+    @classmethod
+    def title_not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Title must not be blank")
+        return value
 
 
 class CommitRequest(BaseModel):
@@ -188,8 +195,11 @@ def report_file(
 ) -> FileResponse:
     imp = get_import(session, import_id, user, staging=False)
     report = _find_report(imp, key)
+    path = storage.disc_import_path(imp.id) / report["path"]
+    if not path.is_file():
+        raise api_error(404, "not_found", "Report not found")
     return FileResponse(
-        storage.disc_import_path(imp.id) / report["path"],
+        path,
         media_type="application/pdf",
         filename=report["filename"],
         content_disposition_type="inline",
@@ -214,6 +224,10 @@ def commit_import(
     session: Session = Depends(get_session),
 ) -> dict:
     imp = get_import(session, import_id, user)
+    # lock the row for the whole commit: a double submit waits, then sees the import closed
+    session.refresh(imp, with_for_update=True)
+    if imp.status != DiscImportStatus.staging:
+        raise api_error(409, "import_closed", "This import is already committed or cancelled")
     if body.ocr_enabled:
         check_ocr_languages(body.ocr_languages)
     check_translation_language(body.translation_language)
@@ -243,7 +257,7 @@ def commit_import(
         images = {i["key"]: i for i in study["images"]}
         doc = create_pending_document(
             session,
-            title=item.title.strip(),
+            title=item.title,
             doc_type=DocType.pdf,
             ocr_languages=body.ocr_languages or default_ocr_languages(),
             ocr_enabled=body.ocr_enabled,
@@ -257,6 +271,7 @@ def commit_import(
             document_date=item.document_date,
             notes=item.notes,
             extra_metadata=study["extra_metadata"],
+            commit=False,
         )
         payload = {
             "document_id": str(doc.id),
@@ -267,8 +282,9 @@ def commit_import(
             ],
             "reports": [{"path": reports[k]["path"]} for k in item.report_keys],
         }
-        enqueue(session, "process_document", payload)
+        session.add(Job(type="process_document", payload=payload))
         documents.append(doc)
+    # all jobs and the committed status land together: the worker never sees a partial import
     imp.status = DiscImportStatus.committed
     session.commit()
     return {"documents": [serialize(session, d) for d in documents]}

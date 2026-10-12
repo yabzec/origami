@@ -44,6 +44,7 @@ def upgrade() -> None:
             nullable=True,
         ),
     )
+    op.create_index("ix_chunks_attachment_id", "chunks", ["attachment_id"])
     op.create_table(
         "disc_imports",
         sa.Column("id", sa.Uuid(), primary_key=True),
@@ -56,6 +57,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("disc_imports")
+    op.drop_index("ix_chunks_attachment_id", table_name="chunks")
     op.drop_column("chunks", "attachment_id")
     op.drop_index("ix_document_attachments_document_id", table_name="document_attachments")
     op.drop_table("document_attachments")

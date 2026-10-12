@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -9,7 +10,7 @@ from sqlmodel import Session, select
 
 from app.config import get_settings
 from app.models import (
-    AttachmentRole, Chunk, ChunkSource, DiscImport, DocStatus, DocType, Document, DocumentAttachment, Job,
+    AttachmentRole, Chunk, ChunkSource, DiscImport, DiscImportStatus, DocStatus, DocType, Document, DocumentAttachment, Job,
     JobStatus, TranslationSegment, TranslationStatus,
 )
 from app.services.chunking import chunk_pages, page_texts_from_chunks, segment_pages
@@ -158,11 +159,13 @@ def _build_study_files(session: Session, doc: Document, storage: Storage, payloa
     root = storage.disc_import_path(payload.get("disc_import_id", "-"))
     if "disc_import_id" not in payload or not root.is_dir():
         raise RuntimeError("The staged disc files are no longer available; import the disc again")
-    rendered = [
-        (image, spec["label"])
-        for spec in payload["images"]
-        for image in render(root / spec["path"], spec["kind"])
-    ]
+    rendered = []
+    for spec in payload["images"]:
+        try:
+            images = render(root / spec["path"], spec["kind"])
+        except Exception as exc:
+            raise RuntimeError(f"{spec['label']}: image cannot be decoded") from exc
+        rendered.extend((image, spec["label"]) for image in images)
     day = doc.document_date.isoformat()
     pages = [
         PageImage(image, " · ".join([label, day, f"image {n}/{len(rendered)}"]))
@@ -192,6 +195,9 @@ def _release_disc_import(session: Session, storage: Storage, payload: dict) -> N
     import_id = payload.get("disc_import_id")
     if not import_id:
         return
+    imp = session.get(DiscImport, uuid.UUID(import_id))
+    if imp is None or imp.status != DiscImportStatus.committed:
+        return  # still staging (or gone): the sweep handles it
     other = session.exec(
         select(Job.id).where(
             Job.type == "process_document",
@@ -353,7 +359,7 @@ def _ensure_summary(session: Session, doc: Document, storage: Storage) -> None:
     text = "\n\n".join(c.content for c in _content_chunks(session, doc)).strip()
     if doc.extra_metadata is not None:
         # X-ray study: summarize the report and the study data, never the images through vision
-        text = "\n\n".join(filter(None, [text, metadata_text(doc.extra_metadata)]))
+        text = "\n\n".join(filter(None, [metadata_text(doc.extra_metadata), text]))
     if doc.doc_type == DocType.image and len(text) < IMAGE_SUMMARY_TEXT_THRESHOLD:
         # No usable extracted text (a photo, or no-OCR) — send the file to vision.
         summary = llm_describe(image_path=storage.abs_path(doc.file_path))

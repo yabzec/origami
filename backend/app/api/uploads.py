@@ -62,8 +62,11 @@ def create_pending_document(
     document_date: date | None = None,
     notes: str = "",
     extra_metadata: dict | None = None,
+    commit: bool = True,
 ) -> Document:
-    """Insert a pending document with validated folder/tags. Reused by scan compile."""
+    """Insert a pending document with validated folder/tags. Reused by scan compile.
+
+    commit=False only flushes, so the caller can add its jobs and commit everything at once."""
     if folder_id is not None and session.get(Folder, folder_id) is None:
         raise api_error(404, "not_found", "Folder not found")
     for tag_id in tag_ids:
@@ -86,11 +89,14 @@ def create_pending_document(
     if document_date is not None:
         doc.document_date = document_date
     session.add(doc)
-    session.commit()
-    session.refresh(doc)
+    session.flush()
     for tag_id in tag_ids:
         session.add(DocumentTag(document_id=doc.id, tag_id=tag_id))
-    session.commit()
+    if commit:
+        session.commit()
+        session.refresh(doc)
+    else:
+        session.flush()
     return doc
 
 
