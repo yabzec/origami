@@ -91,6 +91,9 @@ export function DiscImportDialog({
   const [adding, setAdding] = useState(false);
   const started = useRef(false);
   const committed = useRef(false);
+  const importIdRef = useRef<string | null>(null);
+  const closed = useRef(false);
+  const importing = useRef(false);
 
   const send = async (id: string, files: StagedFile[]): Promise<DiscPreview> => {
     const total = files.reduce((n, f) => n + f.file.size, 0) || 1;
@@ -117,6 +120,11 @@ export function DiscImportDialog({
   const start = async () => {
     try {
       const { id } = await api.post<{ id: string }>("/api/disc-imports");
+      importIdRef.current = id;
+      if (closed.current) {
+        api.del(`/api/disc-imports/${id}`).catch(() => {});
+        return;
+      }
       setImportId(id);
       apply(await send(id, discFiles(picked)));
     } catch (err) {
@@ -142,12 +150,15 @@ export function DiscImportDialog({
   };
 
   const close = () => {
-    if (importId && !committed.current) api.del(`/api/disc-imports/${importId}`).catch(() => {});
+    if (importing.current) return; // the commit is using the staged files
+    closed.current = true;
+    if (importIdRef.current && !committed.current) api.del(`/api/disc-imports/${importIdRef.current}`).catch(() => {});
     onClose();
   };
 
   const retry = () => {
-    if (importId) api.del(`/api/disc-imports/${importId}`).catch(() => {});
+    if (importIdRef.current) api.del(`/api/disc-imports/${importIdRef.current}`).catch(() => {});
+    importIdRef.current = null;
     setImportId(null);
     setPreview(null);
     previewRef.current = null;
@@ -158,6 +169,7 @@ export function DiscImportDialog({
   const runImport = async () => {
     if (!importId || !preview) return;
     setError(null);
+    importing.current = true;
     setPhase({ kind: "importing" });
     try {
       const patientTagIds: Record<string, number> = {};
@@ -181,13 +193,14 @@ export function DiscImportDialog({
       qc.invalidateQueries({ queryKey: ["folders"] });
       setPhase({ kind: "done", documents: result.documents });
     } catch (err) {
+      importing.current = false;
       setPhase({ kind: "preview" });
       setError(message(err, "Import failed"));
     }
   };
 
   return (
-    <Dialog open onClose={close} title="Import X-ray disc" className="max-h-[90vh] max-w-3xl overflow-y-auto">
+    <Dialog open onClose={close} title="Import X-ray disc" className="max-h-[90vh] !max-w-3xl overflow-y-auto">
       {phase.kind === "uploading" && (
         <div className="space-y-2">
           <p className="text-sm text-zinc-600">Uploading the disc files…</p>
@@ -263,7 +276,7 @@ export function DiscImportDialog({
           <ProcessingOptions idPrefix="disc" value={processing} onChange={setProcessing} />
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={close}>
+            <Button variant="outline" onClick={close} disabled={phase.kind === "importing"}>
               Cancel
             </Button>
             <Button onClick={runImport} disabled={phase.kind === "importing" || !canImport(drafts)}>

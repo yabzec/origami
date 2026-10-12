@@ -48,9 +48,9 @@ const picked = [
   { file: new File(["x"], "a"), relativePath: "CD/DICOM/a" },
 ];
 
-function renderDialog() {
+function renderDialog(onClose: () => void = () => {}) {
   const router = createMemoryRouter([
-    { path: "/", element: <DiscImportDialog picked={picked} onClose={() => {}} initialFolderId={null} /> },
+    { path: "/", element: <DiscImportDialog picked={picked} onClose={onClose} initialFolderId={null} /> },
   ]);
   return render(
     <QueryClientProvider client={new QueryClient()}>
@@ -100,5 +100,36 @@ describe("DiscImportDialog", () => {
     const [path, body] = vi.mocked(api.post).mock.calls[1] as [string, { studies: { tag_ids: number[]; image_keys: string[]; report_keys: string[] }[] }];
     expect(path).toBe("/api/disc-imports/imp/commit");
     expect(body.studies[0]).toMatchObject({ tag_ids: [9], image_keys: ["i1"], report_keys: ["r1"] });
+  });
+
+  it("does not delete the staging when closed during the commit", async () => {
+    let finish: (v: unknown) => void = () => {};
+    vi.mocked(api.post)
+      .mockResolvedValueOnce({ id: "imp" })
+      .mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+    vi.mocked(api.upload).mockResolvedValueOnce(PREVIEW);
+    createTag.mockResolvedValueOnce({ id: 9, name: "Mario Rossi", color: "#888888" });
+    const onClose = vi.fn();
+    renderDialog(onClose);
+    await userEvent.click(await screen.findByRole("button", { name: "Import" }));
+    expect(await screen.findByRole("button", { name: "Cancel" })).toBeDisabled();
+    await userEvent.keyboard("{Escape}");
+    expect(api.del).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    finish({ documents: [] });
+  });
+
+  it("deletes the import and skips the upload when closed before it was created", async () => {
+    let created: (v: { id: string }) => void = () => {};
+    vi.mocked(api.post).mockReturnValueOnce(new Promise((resolve) => (created = resolve)));
+    vi.mocked(api.del).mockClear();
+    const onClose = vi.fn();
+    renderDialog(onClose);
+    await userEvent.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalled();
+    created({ id: "imp" });
+    await waitFor(() => expect(api.del).toHaveBeenCalledWith("/api/disc-imports/imp"));
+    expect(api.del).toHaveBeenCalledTimes(1);
+    expect(api.upload).not.toHaveBeenCalled();
   });
 });
