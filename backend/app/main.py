@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -8,7 +9,21 @@ from app.api.error_handlers import register_error_handlers
 from app.api.spa import register_spa
 from app.config import get_settings
 
-app = FastAPI(title="Origami")
+def embedding_startup_guard() -> None:
+    """Refuse to serve when stored vectors don't match EMBEDDING_MODEL (replaced in tests)."""
+    from app.db import engine
+    from app.services.embedding_check import startup_guard
+
+    startup_guard(engine)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    embedding_startup_guard()
+    yield
+
+
+app = FastAPI(title="Origami", lifespan=lifespan)
 
 _origins = [o.strip() for o in get_settings().cors_origins.split(",") if o.strip()]
 app.add_middleware(

@@ -7,7 +7,7 @@ from tests.helpers import basis_vector, seed_document
 @pytest.fixture
 def embed_stub(monkeypatch):
     """Query embedding = basis_vector(0): matches the 'alpha' chunk exactly."""
-    monkeypatch.setattr(search_module, "llm_embed", lambda texts: [basis_vector(0)])
+    monkeypatch.setattr(search_module, "llm_embed", lambda texts, role="document": [basis_vector(0)])
 
 
 def seed_corpus(session):
@@ -46,7 +46,7 @@ def test_semantic_mode(auth_client, session, embed_stub):
 def test_keyword_mode_no_llm_call(auth_client, session, monkeypatch):
     seed_corpus(session)
 
-    def boom(texts):
+    def boom(texts, role="document"):
         raise AssertionError("keyword mode must not embed")
 
     monkeypatch.setattr(search_module, "llm_embed", boom)
@@ -114,3 +114,15 @@ def test_search_fetches_content_flags_in_one_query(auth_client, session, embed_s
     assert len(resp.json()["results"]) == 2
     assert len(calls) == 1 and len(calls[0]) == 2
     assert all(r["document"]["has_text"] for r in resp.json()["results"])
+
+
+def test_search_embeds_query_role(auth_client, session, monkeypatch):
+    roles = []
+
+    def fake_embed(texts, role="document"):
+        roles.append(role)
+        return [basis_vector(0)]
+
+    monkeypatch.setattr(search_module, "llm_embed", fake_embed)
+    auth_client.post("/api/search", json={"query": "bolletta", "mode": "semantic"})
+    assert roles == ["query"]

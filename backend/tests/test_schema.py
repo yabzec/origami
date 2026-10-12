@@ -69,3 +69,19 @@ def test_translation_segments_table(engine):
     fks = inspector.get_foreign_keys("translation_segments")
     assert fks[0]["referred_table"] == "documents"
     assert fks[0]["options"].get("ondelete") == "CASCADE"
+
+
+def test_embedding_meta_table(engine):
+    from sqlalchemy import inspect
+
+    cols = {c["name"] for c in inspect(engine).get_columns("embedding_meta")}
+    assert cols == {"id", "model", "dim", "scheme", "updated_at"}
+
+
+def test_embedding_column_keeps_1536_dims(engine):
+    with engine.connect() as conn:
+        dim = conn.execute(text(
+            "SELECT atttypmod FROM pg_attribute "
+            "WHERE attrelid = 'chunks'::regclass AND attname = 'embedding'"
+        )).scalar_one()
+    assert dim == 1536

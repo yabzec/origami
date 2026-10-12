@@ -496,7 +496,7 @@ def _embed_pending_chunks(session: Session, doc: Document) -> None:
         return
     for start in range(0, len(pending), EMBED_BATCH_SIZE):
         batch = pending[start : start + EMBED_BATCH_SIZE]
-        vectors = llm_embed([c.content for c in batch])
+        vectors = llm_embed([c.content for c in batch], role="document")
         if len(vectors) != len(batch):
             raise ValueError(
                 f"Expected {len(batch)} embeddings from llm_embed, got {len(vectors)}"

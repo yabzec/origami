@@ -13,7 +13,7 @@ def chat_llm(monkeypatch, llm_stub):
     """Query embedding = basis_vector(0) for shortlist and retrieval; scripted answer stream."""
     calls = {"embed": [], "complete": []}
 
-    def fake_embed(texts):
+    def fake_embed(texts, role="document"):
         calls["embed"].append(list(texts))
         return [basis_vector(0) for _ in texts]
 
@@ -104,7 +104,7 @@ def test_chat_requires_auth(client):
 
 
 def test_chat_emits_error_event_on_failure(auth_client, monkeypatch, chat_llm):
-    def boom(texts):
+    def boom(texts, role="document"):
         raise RuntimeError("embedding down")
 
     monkeypatch.setattr(chat_context, "llm_embed", boom)

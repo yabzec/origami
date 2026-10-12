@@ -154,7 +154,7 @@ def search(
     semantic_hits: list[SemanticHit] = []
     keyword_hits: list[KeywordHit] = []
     if mode in ("semantic", "hybrid"):
-        query_vector = llm_embed([query])[0]
+        query_vector = llm_embed([query], role="query")[0]
         semantic_hits = semantic_search(session, query_vector, fetch, doc_ids)
     if mode in ("keyword", "hybrid"):
         keyword_hits = keyword_search(session, query, fetch, doc_ids)

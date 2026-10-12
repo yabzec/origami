@@ -17,5 +17,17 @@ services:
       timeout: 3s
       retries: 10
 
+  ollama:
+    container_name: origami-ollama
+    image: ollama/ollama:0.20.4
+    restart: unless-stopped
+    environment:
+      OLLAMA_KEEP_ALIVE: 5m  # unload the model after 5 idle minutes
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+
 volumes:
   pgdata:
+  ollama:

@@ -12,7 +12,7 @@ from tests.helpers import basis_vector, seed_document
 def rag_llm(monkeypatch):
     calls = {"embed": [], "complete": []}
 
-    def fake_embed(texts):
+    def fake_embed(texts, role="document"):
         calls["embed"].append(list(texts))
         return [basis_vector(0)]
 

@@ -53,7 +53,7 @@ cp ../.env.example ../.env   # edit STORAGE_PATH, GEMINI_API_KEY, JWT_SECRET
 # optional: DEFAULT_TRANSLATION_LANGUAGE (ISO 639-1, default PRIMARY_LANGUAGE) - default translation target for scan and upload
 # note: DEFAULT_OCR_LANGUAGES uses Tesseract codes (ita, eng), the two language settings above use 2-letter codes (it, en)
 uv sync
-docker compose up -d db
+docker compose up -d db ollama
 uv run alembic upgrade head
 uv run python -m app.cli create-user <username>
 ```
@@ -131,8 +131,8 @@ If a new start replaces the agent's current Origami session, it shows the notice
 
 ## Run as a systemd service
 
-One command starts everything (db container, migrations, API on
-`127.0.0.1:8124`, worker). Prerequisites, once:
+One command starts everything (db and ollama containers, migrations, embedding
+check, API on `127.0.0.1:8124`, worker). Prerequisites, once:
 
 - `.env` configured (copy from `.env.example`)
 - `cd backend && uv sync`
@@ -156,13 +156,20 @@ in `/etc/systemd/system/origami.service` to reach it from the LAN, then run
 `sudo systemctl daemon-reload && sudo systemctl restart origami`. Run directly,
 `deploy/origami.sh` defaults to `0.0.0.0:8124`.
 
+At start the service runs `python -m app.cli check-embeddings`. When the stored
+vectors don't match `EMBEDDING_MODEL`, it exits with code 78 and the unit stays
+failed (`RestartPreventExitStatus=78`) instead of restarting; `journalctl -u origami`
+shows what to do. When Ollama or the embedding provider does not answer, it exits
+with code 69 and systemd retries after 5 s. An existing install must re-install the unit (the `sed … | sudo tee`
+command above, then `sudo systemctl daemon-reload`) to get this setting.
+
 Operate:
 
 ```bash
 systemctl status origami
 journalctl -u origami -f      # logs (api + worker + launcher)
 sudo systemctl restart origami
-sudo systemctl stop origami   # stops api+worker; the db container stays up
+sudo systemctl stop origami   # stops api+worker; the db and ollama containers stay up
 docker compose stop db        # stop the db too, when you really want to
 ```
 
@@ -184,7 +191,7 @@ You'll be prompted for the password twice.
 
 ## AI providers
 
-Text, vision and embeddings can use different providers (model names follow [litellm](https://docs.litellm.ai/docs/providers)). Example `.env` with text on Groq and vision plus embeddings on Gemini:
+Text, vision and embeddings can use different providers (model names follow [litellm](https://docs.litellm.ai/docs/providers)). Example `.env` with text on Groq, vision and embeddings on Gemini:
 
 ```bash
 LLM_MODEL=groq/openai/gpt-oss-120b
@@ -192,6 +199,7 @@ LLM_API_KEY=<groq key>
 VISION_MODEL=gemini/gemini-2.5-flash
 VISION_API_KEY=<google key>
 EMBEDDING_MODEL=gemini/gemini-embedding-001
+EMBEDDING_DIM=1536
 EMBEDDING_API_KEY=<google key>
 ```
 
@@ -207,6 +215,49 @@ List the models offered by the `LLM_MODEL` provider (Groq, OpenAI, Gemini or an 
 cd backend
 uv run python -m app.cli list-models
 ```
+
+## Embeddings
+
+Search and chat compare vectors ("embeddings") of your documents. With
+`EMBEDDING_MODEL` empty, Origami uses **EmbeddingGemma** (multilingual,
+768 dimensions) on the `origami-ollama` container, with no API key and no
+data leaving the machine. Set `EMBEDDING_MODEL` (and `EMBEDDING_DIM`) to use a
+remote provider instead; see "AI providers".
+
+- The container starts with the service (`docker compose up -d ollama` by hand).
+  The first start downloads the model (about 600 MB) into the `ollama` volume.
+- The model stays in memory (about 1 GB) for 5 minutes after the last use, then
+  unloads. The first search after a pause waits 1–3 s while it loads. Change
+  `OLLAMA_KEEP_ALIVE` in `docker-compose.yml` to keep it longer.
+- Other Ollama embedding models work too, e.g. `EMBEDDING_MODEL=ollama/qwen3-embedding:0.6b`
+  with `EMBEDDING_DIM=1024`. `EMBEDDING_DIM` smaller than the model's size keeps
+  the first values (Matryoshka models only). The maximum is 2000.
+
+Origami records which model and dimension built the stored vectors. If `.env`
+no longer matches, the API, the worker and the systemd service refuse to start
+and print the command to run.
+
+### Changing the embedding model
+
+Vectors from different models can't be compared, so every chunk is embedded again
+(no OCR, summary or translation runs again):
+
+```bash
+sudo systemctl stop origami
+# edit EMBEDDING_MODEL / EMBEDDING_DIM in .env
+cd backend
+uv run python -m app.cli reembed
+sudo systemctl start origami
+```
+
+`reembed` runs in one transaction: if it fails or you press Ctrl-C, the old
+vectors stay. Fix the cause and run it again, or restore `.env`.
+
+Upgrade Origami first and change the model after: on the first start after the
+upgrade, Origami records the model in `.env` as the one that built the existing
+vectors.
+
+Check without starting the service: `uv run python -m app.cli check-embeddings`.
 
 ## Email notifications
 

@@ -13,7 +13,7 @@ def embed_calls(monkeypatch):
     """Query embedding = basis_vector(0)."""
     calls = []
 
-    def fake_embed(texts):
+    def fake_embed(texts, role="document"):
         calls.append(list(texts))
         return [basis_vector(0) for _ in texts]
 

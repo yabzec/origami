@@ -1,3 +1,4 @@
+import math
 from types import SimpleNamespace
 
 import litellm
@@ -9,12 +10,13 @@ def test_embed_returns_vectors_in_input_order(monkeypatch):
     def fake_embedding(model, input, dimensions):
         assert model == "gemini/gemini-embedding-001"
         assert dimensions == 1536
-        data = [{"index": i, "embedding": [float(i)] * 3} for i in range(len(input))]
+        data = [{"index": i, "embedding": [float(i)] * dimensions} for i in range(len(input))]
         return SimpleNamespace(data=list(reversed(data)))  # out of order on purpose
 
     monkeypatch.setattr(litellm, "embedding", fake_embedding)
     vectors = llm.embed(["a", "b"])
-    assert vectors == [[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]]
+    assert [v[0] for v in vectors] == [0.0, 1.0]
+    assert all(len(v) == 1536 for v in vectors)
 
 
 def _completion_returning(content, captured):
@@ -169,7 +171,10 @@ from app.config import Settings
 def pinned_settings(monkeypatch):
     """Default settings without the developer's .env, so a real LLM_API_KEY (e.g. a Groq key)
     can't leak into the fakes. That would break the older tests whose fakes take no **kw."""
-    settings = Settings(_env_file=None, llm_api_key="", llm_api_base="", gemini_api_key="")
+    settings = Settings(
+        _env_file=None, llm_api_key="", llm_api_base="", gemini_api_key="",
+        embedding_model="gemini/gemini-embedding-001",
+    )
     monkeypatch.setattr(llm, "get_settings", lambda: settings)
     return settings
 
@@ -406,3 +411,67 @@ def test_select_documents_prompt_lists_candidates_and_last_four_messages(monkeyp
     assert "user: storico-2" in prompt and "assistant: storico-5" in prompt
     assert '{"document_ids": [' in prompt
     assert prompt.rstrip().endswith("Question: quale bolletta?")
+
+
+def _local_settings(monkeypatch, **values):
+    base = {"embedding_model": "", "embedding_dim": None, "llm_api_key": "", "llm_api_base": "",
+            "gemini_api_key": ""}
+    settings = Settings(_env_file=None, **{**base, **values})
+    monkeypatch.setattr(llm, "get_settings", lambda: settings)
+    return settings
+
+
+def _capture_embedding(monkeypatch, length):
+    captured = {}
+
+    def fake_embedding(model, input, **kw):
+        captured.update(model=model, input=list(input), kw=kw)
+        return SimpleNamespace(data=[{"index": i, "embedding": [1.0] * length} for i in range(len(input))])
+
+    monkeypatch.setattr(litellm, "embedding", fake_embedding)
+    return captured
+
+
+def test_embed_local_default_document_prefix(monkeypatch):
+    _local_settings(monkeypatch)
+    captured = _capture_embedding(monkeypatch, 768)
+    llm.embed(["Fattura 42"])
+    assert captured["model"] == "ollama/embeddinggemma"
+    assert captured["input"] == ["title: none | text: Fattura 42"]
+    assert captured["kw"] == {"api_base": "http://localhost:11434"}  # no dimensions, no key
+
+
+def test_embed_local_default_query_prefix(monkeypatch):
+    _local_settings(monkeypatch)
+    captured = _capture_embedding(monkeypatch, 768)
+    llm.embed(["bolletta luce"], role="query")
+    assert captured["input"] == ["task: search result | query: bolletta luce"]
+
+
+def test_embed_scheme_none_has_no_prefix(monkeypatch):
+    captured = _capture_embedding(monkeypatch, 1536)  # pinned settings: Gemini
+    llm.embed(["ciao"], role="query")
+    assert captured["input"] == ["ciao"]
+    assert captured["kw"]["dimensions"] == 1536
+
+
+def test_embed_rejects_unknown_role(monkeypatch):
+    with pytest.raises(ValueError, match="role"):
+        llm.embed(["x"], role="passage")
+
+
+def test_embed_truncates_and_normalizes(monkeypatch):
+    _local_settings(monkeypatch, embedding_dim=256)
+    _capture_embedding(monkeypatch, 768)
+    [vector] = llm.embed(["x"])
+    assert len(vector) == 256
+    assert math.isclose(sum(x * x for x in vector), 1.0)
+
+
+def test_fit_dimension_keeps_exact_length():
+    assert llm.fit_dimension([3.0, 4.0], 2) == [3.0, 4.0]
+
+
+def test_fit_dimension_rejects_short_vector():
+    with pytest.raises(ValueError, match="EMBEDDING_DIM"):
+        llm.fit_dimension([1.0] * 384, 768)

@@ -14,7 +14,7 @@ from typing import Callable
 
 import litellm
 
-from app.config import get_primary_language, get_settings
+from app.config import get_primary_language, get_settings, resolve_embedding
 from app.services.ocr_language_names import iso_language_name
 
 LANGUAGE_NAMES = {"it": "Italian", "en": "English", "de": "German", "fr": "French", "es": "Spanish"}
@@ -63,17 +63,38 @@ def _kw(key: str, base: str) -> dict:
     return kw
 
 
-def embed(texts: list[str]) -> list[list[float]]:
-    settings = get_settings()
-    kw = _kw(
-        settings.embedding_api_key or settings.llm_api_key,
-        settings.embedding_api_base or settings.llm_api_base,
-    )
-    resp = litellm.embedding(
-        model=settings.embedding_model, input=texts, dimensions=settings.embedding_dim, **kw
-    )
+EMBEDDING_PREFIXES = {
+    "none": {"query": "", "document": ""},
+    "embeddinggemma-v1": {"query": "task: search result | query: ", "document": "title: none | text: "},
+}
+
+
+def fit_dimension(vector: list[float], dim: int) -> list[float]:
+    """Matryoshka truncation: keep the first `dim` values and re-normalize."""
+    if len(vector) < dim:
+        raise ValueError(
+            f"The embedding model returned {len(vector)} values but EMBEDDING_DIM is {dim}: "
+            f"set EMBEDDING_DIM to {len(vector)} or less"
+        )
+    if len(vector) == dim:
+        return list(vector)
+    head = list(vector[:dim])
+    norm = math.sqrt(sum(x * x for x in head))
+    return [x / norm for x in head] if norm else head
+
+
+def embed(texts: list[str], role: str = "document") -> list[list[float]]:
+    """Vectors for `texts`; role "query" for search input, "document" for stored chunks."""
+    if role not in ("document", "query"):
+        raise ValueError(f"Unknown embedding role {role!r}")
+    cfg = resolve_embedding(get_settings())
+    prefix = EMBEDDING_PREFIXES[cfg.scheme][role]
+    kw = _kw(cfg.api_key, cfg.api_base)
+    if not cfg.is_ollama:
+        kw["dimensions"] = cfg.dim  # Ollama does not take it: fit_dimension truncates instead
+    resp = litellm.embedding(model=cfg.model, input=[prefix + t for t in texts], **kw)
     data = sorted(resp.data, key=lambda d: d["index"])
-    return [d["embedding"] for d in data]
+    return [fit_dimension(d["embedding"], cfg.dim) for d in data]
 
 
 def describe(text: str | None = None, image_path: Path | None = None) -> str:

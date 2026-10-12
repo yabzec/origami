@@ -40,7 +40,7 @@ def shortlist_documents(
 ) -> list[Candidate]:
     """Up to `limit` documents whose summary/metadata chunks match `query`, best first."""
     query = query[:QUERY_MAX_CHARS]
-    query_vector = llm_embed([query])[0]
+    query_vector = llm_embed([query], role="query")[0]
     # The source filter is applied after the HNSW index returns ef_search neighbours, so on a large
     # archive it can leave too few summary/metadata hits; iterative scan keeps pulling until filled.
     session.exec(  # transaction-local
