@@ -16,6 +16,8 @@ def test_upload_pdf_creates_pending_document_and_job(auth_client, session, stora
     assert resp.status_code == 201
     body = resp.json()
     assert body["doc_type"] == DocType.pdf
+    assert body["origin"] == "file"
+    assert body["properties"] == []
     assert body["status"] == DocStatus.pending
     assert body["title"] == "bolletta"
     assert body["original_filename"] == "bolletta.pdf"

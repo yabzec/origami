@@ -4,7 +4,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import agent, auth, bulk, chat, documents, files, folders, ocr, scan, search, tags, uploads
+from app.api import agent, auth, bulk, chat, disc_imports, documents, files, folders, ocr, scan, search, tags, uploads
 from app.api.error_handlers import register_error_handlers
 from app.api.spa import register_spa
 from app.config import get_settings
@@ -39,6 +39,7 @@ app.include_router(agent.router)
 app.include_router(auth.router)
 app.include_router(bulk.router)
 app.include_router(chat.router)
+app.include_router(disc_imports.router)
 app.include_router(documents.router)
 app.include_router(files.router)
 app.include_router(folders.router)

@@ -140,3 +140,54 @@ def test_translation_language_backfilled(engine):
         command.upgrade(cfg, "head")
         with engine.begin() as conn:
             conn.execute(text("DELETE FROM documents WHERE title = 'Backfill'"))
+
+
+BEFORE_PROPERTIES = "a3f9c2d71b48"
+
+
+def test_properties_and_origin_backfilled(engine):
+    cfg = _cfg()
+    command.downgrade(cfg, BEFORE_PROPERTIES)
+    try:
+        with engine.begin() as conn:
+            insert = text(
+                "INSERT INTO documents (id, title, description, notes, doc_type, ocr_languages, ocr_enabled, "
+                "summary_enabled, translation_enabled, translation_language, document_date, status, "
+                "extra_metadata, created_at, updated_at) VALUES (gen_random_uuid(), :title, '', '', :doc_type, "
+                "'ita', true, true, false, 'it', '2026-01-01', 'ready', CAST(:meta AS jsonb), now(), now())"
+            )
+            meta = (
+                '{"modality": "DX", "patient_name": "Mario Rossi", "sex": "", "custom": "x", '
+                '"series": [{"description": "AP", "images": 2}, {"description": "Lateral", "images": 2}]}'
+            )
+            conn.execute(insert, {"title": "PropStudy", "doc_type": "pdf", "meta": meta})
+            conn.execute(insert, {"title": "PropScan", "doc_type": "scan", "meta": None})
+            conn.execute(insert, {"title": "PropFile", "doc_type": "pdf", "meta": None})
+            # the old ORM stored Python None as JSON null
+            conn.execute(insert, {"title": "PropJsonNullFile", "doc_type": "pdf", "meta": "null"})
+            conn.execute(insert, {"title": "PropJsonNullScan", "doc_type": "scan", "meta": "null"})
+        command.upgrade(cfg, "head")
+        with engine.begin() as conn:
+            rows = {
+                title: (origin, props)
+                for title, origin, props in conn.execute(
+                    text("SELECT title, origin, properties FROM documents WHERE title LIKE 'Prop%'")
+                ).all()
+            }
+        assert rows["PropStudy"] == (
+            "xray_disc",
+            [
+                {"key": "Patient", "value": "Mario Rossi"},
+                {"key": "Modality", "value": "DX"},
+                {"key": "Series", "value": "AP (2); Lateral (2)"},
+                {"key": "custom", "value": "x"},
+            ],
+        )
+        assert rows["PropScan"] == ("scan", [])
+        assert rows["PropFile"] == ("file", [])
+        assert rows["PropJsonNullFile"] == ("file", [])
+        assert rows["PropJsonNullScan"] == ("scan", [])
+    finally:
+        command.upgrade(cfg, "head")
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM documents WHERE title LIKE 'Prop%'"))

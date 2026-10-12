@@ -13,6 +13,10 @@ const doc = {
   document_date: "2026-01-01",
   page_count: null,
   file_size: null,
+  notes: "",
+  origin: "file",
+  properties: [],
+  attachments: [],
   tags: [],
   active_job: null,
 } as unknown as Document;

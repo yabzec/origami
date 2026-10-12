@@ -96,3 +96,13 @@ export const api = {
 export const fileUrl = (documentId: string, opts: { download?: boolean; preview?: boolean } = {}): string =>
   `/api/documents/${documentId}/file?token=${getToken() ?? ""}` +
   `${opts.download ? "&download=1" : ""}${opts.preview ? "&preview=1" : ""}`;
+
+export const attachmentUrl = (documentId: string, attachmentId: number, opts: { download?: boolean } = {}): string =>
+  `/api/documents/${documentId}/attachments/${attachmentId}/file?token=${getToken() ?? ""}` +
+  `${opts.download ? "&download=1" : ""}`;
+
+export const discThumbUrl = (importId: string, key: string): string =>
+  `/api/disc-imports/${importId}/images/${key}/thumb?token=${getToken() ?? ""}`;
+
+export const discReportUrl = (importId: string, key: string): string =>
+  `/api/disc-imports/${importId}/reports/${key}/file?token=${getToken() ?? ""}`;

@@ -4,7 +4,8 @@ import os
 import shutil
 import time
 import uuid
-from pathlib import Path
+from collections.abc import Sequence
+from pathlib import Path, PurePosixPath
 from typing import BinaryIO
 
 from app.config import get_settings
@@ -119,9 +120,17 @@ class Storage:
             self.derived_abs(name).unlink(missing_ok=True)
 
     def delete_document_files(
-        self, file_rel: str | None, preview: str | None, document_id: uuid.UUID
+        self,
+        file_rel: str | None,
+        preview: str | None,
+        document_id: uuid.UUID,
+        attachments: Sequence[str] = (),
     ) -> None:
         self.delete_file(file_rel)
+        for rel in attachments:
+            self.delete_file(rel)
+        if attachments and file_rel:
+            self.remove_dir(str(PurePosixPath(file_rel).parent))  # the bundle directory
         self.delete_derived(preview)
         self.delete_derived(companion_name(document_id))
 
@@ -155,6 +164,23 @@ class Storage:
 
     def remove_scan_session_dir(self, session_id: int) -> None:
         shutil.rmtree(self.tmp_scans_dir / str(session_id), ignore_errors=True)
+
+    # --- disc imports ---
+    @property
+    def disc_imports_dir(self) -> Path:
+        return self.tmp_root / "disc_imports"
+
+    def disc_import_dir(self, import_id) -> Path:
+        d = self.disc_imports_dir / str(import_id)
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def disc_import_path(self, import_id) -> Path:
+        """Staging dir of an import without creating it (the worker checks it still exists)."""
+        return self.disc_imports_dir / str(import_id)
+
+    def remove_disc_import_dir(self, import_id) -> None:
+        shutil.rmtree(self.disc_imports_dir / str(import_id), ignore_errors=True)
 
 
 def get_storage() -> Storage:

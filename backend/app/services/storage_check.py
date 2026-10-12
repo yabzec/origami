@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 from sqlmodel import Session, select
 
-from app.models import Document
+from app.models import Document, DocumentAttachment
 from app.services.storage import PART_SUFFIX, Storage
 
 
@@ -23,6 +23,7 @@ def check_storage(session: Session, storage: Storage, fix: bool = False) -> Chec
     """Compare the database with the tree; `fix` removes `*.part` leftovers."""
     report = CheckReport()
     paths = {p for p in session.exec(select(Document.file_path).where(Document.file_path.is_not(None)))}
+    paths |= set(session.exec(select(DocumentAttachment.file_path)))
     report.missing = sorted(p for p in paths if not storage.abs_path(p).is_file())
     if storage.root.is_dir():
         for path in sorted(storage.root.rglob("*")):

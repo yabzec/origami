@@ -11,7 +11,7 @@ from app.api.documents import serialize
 from app.api.ocr import check_ocr_languages, check_translation_language, default_ocr_languages
 from app.api.uploads import create_pending_document
 from app.db import get_session
-from app.models import User, DocType, ScanPage, ScanSession, ScanSessionStatus
+from app.models import User, DocType, DocumentOrigin, ScanPage, ScanSession, ScanSessionStatus
 from app.services.agent_hub import AgentHub, get_agent_hub
 from app.services.escl import EsclRemoteBackend
 from app.services.jobs import enqueue
@@ -249,6 +249,7 @@ def compile_session(
         description=body.description,
         document_date=body.document_date,
         doc_type=DocType.scan,
+        origin=DocumentOrigin.scan,
         ocr_languages=body.ocr_languages or scan_session.ocr_languages,
         ocr_enabled=ocr_enabled,
         summary_enabled=body.summary_enabled,

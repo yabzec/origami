@@ -10,6 +10,7 @@ import { STATUS_VARIANTS } from "@/components/DocumentCard";
 import { useFolders } from "@/hooks/useFolders";
 import { useTags } from "@/hooks/useTags";
 import { api, ApiError } from "@/lib/api";
+import { documentLink } from "@/lib/documentView";
 import { splitHighlights } from "@/lib/snippets";
 import type { SearchResponse } from "@/lib/types";
 
@@ -108,7 +109,7 @@ export function SearchPage() {
         {search.data?.results.map((result) => (
           <div key={result.document.id} className="rounded-lg border border-zinc-200 bg-white p-4">
             <div className="mb-1 flex items-center gap-2">
-              <Link to={`/documents/${result.document.id}`} className="font-medium underline">
+              <Link to={documentLink(result.document.id, result.snippets.find((s) => s.attachment_id != null)?.attachment_id)} className="font-medium underline">
                 {result.document.title}
               </Link>
               <Badge variant={STATUS_VARIANTS[result.document.status]}>{result.document.doc_type}</Badge>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,11 +10,13 @@ import { FolderPicker } from "@/components/FolderPicker";
 import { Textarea } from "@/components/ui/textarea";
 import { STATUS_VARIANTS } from "@/components/DocumentCard";
 import { ProcessingOptions } from "@/components/ProcessingOptions";
+import { PropertiesPanel } from "@/components/PropertiesPanel";
 import { TagInput } from "@/components/TagInput";
 import { useNow } from "@/hooks/useNow";
 import { useOcrLanguages } from "@/hooks/useOcrLanguages";
-import { api, ApiError, fileUrl } from "@/lib/api";
+import { api, ApiError, attachmentUrl, fileUrl } from "@/lib/api";
 import { browseQuery, DEFAULT_BROWSE } from "@/lib/browseParams";
+import { activeViewTab, viewTabs, type ViewTab } from "@/lib/documentView";
 import { isAiDescription, nextDescription } from "@/lib/description";
 import { defaultProcessing, processingFromDocument, processingPayload, type ProcessingValues } from "@/lib/processing";
 import { processingRetryMessage, shouldPollDocument } from "@/lib/retry";
@@ -22,7 +24,9 @@ import { canRetranslate, languageLabel, textVariants, translationNote, type Text
 import type { Document, DocumentText } from "@/lib/types";
 import { viewerKind } from "@/lib/viewer";
 
-function Viewer({ doc }: { doc: Document }) {
+function Viewer({ doc, view }: { doc: Document; view: ViewTab }) {
+  if (view.attachment)
+    return <iframe title={view.label} src={attachmentUrl(doc.id, view.attachment.id)} className="h-[75vh] w-full rounded border" />;
   const kind = viewerKind(doc);
   if (doc.status !== "ready" && kind !== "video")
     return <div className="flex h-96 items-center justify-center text-zinc-400">Processing…</div>;
@@ -92,6 +96,8 @@ export function DocumentPage() {
     refetchInterval: (q) => (q.state.data && shouldPollDocument(q.state.data) ? 4000 : false),
   });
 
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [notes, setNotes] = useState("");
   const [tab, setTab] = useState<"preview" | "text">("preview");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -115,6 +121,7 @@ export function DocumentPage() {
     if (hydratedForDocId.current !== doc.id) {
       setTitle(doc.title);
       setDescription(doc.description);
+      setNotes(doc.notes);
       setFolderId(doc.folder_id);
       setTagIds(doc.tags.map((t) => t.id));
       setDocumentDate(doc.document_date);
@@ -142,6 +149,7 @@ export function DocumentPage() {
     mutationFn: () =>
       api.patch<Document>(`/api/documents/${id}`, {
         title,
+        notes,
         // only send the description if the user changed it, so a just-arrived AI text is not erased
         ...(description !== serverDescription.current ? { description } : {}),
         folder_id: folderId,
@@ -182,7 +190,7 @@ export function DocumentPage() {
   const confirmReprocess = () => {
     const base = "Re-run OCR and AI processing? Extracted text, summary and translation will be replaced.";
     const pdfNote =
-      doc && (doc.doc_type === "pdf" || doc.doc_type === "scan") && processing.ocrEnabled && doc.ocr_applied !== false
+      doc && (doc.doc_type === "pdf" || doc.doc_type === "scan") && doc.origin !== "xray_disc" && processing.ocrEnabled && doc.ocr_applied !== false
         ? " The PDF is rebuilt from page images."
         : "";
     if (window.confirm(base + pdfNote)) reprocess.mutate();
@@ -190,6 +198,8 @@ export function DocumentPage() {
 
   if (!doc) return <div className="p-8 text-zinc-400">Loading…</div>;
   const retryMessage = processingRetryMessage(doc, now);
+  const tabs = viewTabs(doc);
+  const view = activeViewTab(tabs, searchParams.get("tab"));
 
   return (
     <div className="flex gap-6 p-6">
@@ -207,7 +217,7 @@ export function DocumentPage() {
           <h2 className="flex-1 truncate text-lg font-semibold">{doc.title}</h2>
           {doc.file_path && (
             <a
-              href={fileUrl(doc.id, { download: true })}
+              href={view.attachment ? attachmentUrl(doc.id, view.attachment.id, { download: true }) : fileUrl(doc.id, { download: true })}
               className="inline-flex h-8 items-center rounded-md border border-zinc-300 px-3 text-sm hover:bg-zinc-100"
             >
               Download
@@ -238,7 +248,20 @@ export function DocumentPage() {
             </button>
           ))}
         </div>
-        {tab === "preview" ? <Viewer doc={doc} /> : <TextView doc={doc} />}
+        {tab === "preview" && tabs.length > 1 && (
+          <div className="mb-3 inline-flex overflow-hidden rounded-md border border-zinc-300 text-sm">
+            {tabs.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setSearchParams(t.key === "main" ? {} : { tab: t.key }, { replace: true })}
+                className={view.key === t.key ? "bg-zinc-900 px-3 py-1 text-white" : "px-3 py-1 hover:bg-zinc-100"}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
+        {tab === "preview" ? <Viewer doc={doc} view={view} /> : <TextView doc={doc} />}
       </div>
       <aside className="w-72 space-y-3">
         <div>
@@ -249,6 +272,10 @@ export function DocumentPage() {
           <Label htmlFor="d-desc">Description</Label>
           <Textarea id="d-desc" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
           {isAiDescription(description, doc.summary) && <p className="mt-1 text-xs text-zinc-400">AI generated</p>}
+        </div>
+        <div>
+          <Label htmlFor="d-notes">Notes</Label>
+          <Textarea id="d-notes" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </div>
         <div>
           <Label htmlFor="d-date">Document date</Label>
@@ -262,6 +289,7 @@ export function DocumentPage() {
           <Label htmlFor="d-tags">Tags</Label>
           <TagInput id="d-tags" value={tagIds} onChange={setTagIds} />
         </div>
+        <PropertiesPanel key={doc.id} doc={doc} />
         <Button className="w-full" onClick={() => save.mutate()} disabled={save.isPending}>
           {save.isPending ? "Saving…" : "Save"}
         </Button>

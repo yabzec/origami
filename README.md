@@ -12,13 +12,17 @@ Self-hosted document management system: scan, upload, OCR, semantic search, and 
 - **Tags:** type in the tag field to pick an existing tag or press Enter to create a new one.
 - **Browse:** folders work like a file manager: a breadcrumb, subfolder tiles, then the documents in that folder. A tile's count includes the documents in all its subfolders. **Root** shows top-level folders and documents without a folder; **All documents** shows everything. Filter by tag, type and document date (from/to); every filter and the order-by menu are kept in the URL. The **×** on a document page goes back to that document's folder. **📁 New folder**, next to Upload, creates a folder in the open folder.
 - **Select, move and delete:** select folder tiles and documents together (checkbox, Shift-click for a range), then move or delete them. A move is refused as a whole when a name is already taken at the destination or a folder would go inside itself; nothing changes. Deleting a folder deletes its subfolders and their documents permanently; the confirm shows the totals. A directory that still holds files Origami does not track stays on disk.
-- **Sidebar:** shows the top-level folders. Opening a folder expands its path and collapses the other branches; the arrow expands or collapses a folder without opening it.
+- **Sidebar:** shows the top-level folders. Opening a folder expands its path and collapses the other branches; the arrow expands or collapses a folder without opening it. Below the folders, each tag opens **All documents** filtered by that tag.
 - **Storage tree:** `STORAGE_PATH` mirrors the explorer: `Folder/Subfolder/Title.ext`. Renaming or moving a document or folder in the app moves the file on disk. Characters not allowed in file names become `_`; documents with the same title in one folder get `Title (2).ext`. Office previews and OCR companion PDFs live in `DERIVED_PATH`, scan pages in `TMP_PATH`. Changes made directly on disk are not picked up.
 - **Search:** hybrid, semantic or keyword search, with the same filter row as Browse plus mode and folder.
 - **Translation:** documents whose detected language differs from their translation target are translated page by page. Progress is saved per page, so a failed or throttled translation resumes where it stopped. **Re-translate** on the document page redoes only the translation, without OCR or summary. Re-translate can switch the target language.
 - **Dark mode:** follows the operating system setting.
 - **Background jobs with retries:** every job is retried after 30 s, 2 min, 10 min and 30 min (5 attempts). Between attempts the document stays `pending` and the UI shows the next attempt. After the last failure every user with an email address gets a notification. Translation runs as its own retried job.
 - **Chat:** multi-turn conversation with Markdown answers and `[n]` citations that link to the documents. Origami shortlists candidate documents locally and asks the LLM which ones you mean. Passages come only from those documents and from files you pin. The files in context show as chips: remove one to keep it out of the conversation, or add one with **+ Add file**. The conversation is kept in the browser tab (session storage) until you press **New chat**.
+- **X-ray disc import:** import an X-ray disc from the hospital (IHE PDI). Pick the disc folder in the browser; each study becomes one document with an image PDF built from the DICOM files and the radiology report attached. See [X-ray disc import](#x-ray-disc-import).
+- **Attachments:** a document with attachments shows one tab per file on its page. A search or chat hit in an attachment opens that tab.
+- **Notes:** every document has a free-text Notes field; it is searchable and shown on the document page.
+- **Properties:** a free key/value table on every document (searchable). **Edit** on the document page opens an editor; its **Save** stores the properties at once, without the page's main Save. Rows keep their order.
 
 ## Installation
 
@@ -128,6 +132,30 @@ If a new start replaces the agent's current Origami session, it shows the notice
 - **Agent not responding:** the browser prompt may have been dismissed, or the agent was moved after the first run. Run it again once, then search again.
 - **"port 47811 is in use by another program or user":** another program or another user on this computer is using port 47811. Close it, or sign the other user out, then start the agent again.
 - **Browser prompt for `origami-agent://` links:** any website can ask the browser to open an `origami-agent://` link. After you confirm the browser prompt, such a link can stop a running agent (it cannot connect it to another server). Only allow the prompt for your Origami site.
+
+## X-ray disc import
+
+Upload → **X-ray disc…** opens a folder picker. Select the root of the disc (for example `D:\` or `/media/<user>/<label>`).
+
+**Upload.** The browser uploads only the files that matter: `DICOM/`, `DICOMDIR`, `README.TXT`, the IHE PDI study page and its small JPEG copies, and PDFs. The Windows viewer and its libraries are skipped.
+
+**Preview.** Origami shows one card per study:
+- The title, date and series come from the DICOM tags. `README.TXT` and `IHE_PDI/Study000.htm` fill gaps.
+- Thumbnails of the images.
+- The report PDFs found on the disc.
+
+Edit what you need. The default processing is: OCR off, translation off, AI summary on.
+
+**Result.**
+- Each study becomes a PDF with a cover page and one page per image, built at full resolution from the DICOM files. The JPEG copies on the disc are reduced and are used only when the DICOM files cannot be decoded. The PDF is for reference, not for diagnosis.
+- When the study has a report, the document is stored as a directory named after the document, holding the image PDF and `Report.pdf`, byte-identical to the disc copy.
+- The document page shows the two as **Images** and **Report** tabs.
+- The study data read from the disc (patient, modality, series, …) is stored as the document's **Properties**, which you can edit like on any other document.
+- The report text is searchable and feeds the AI summary. The images are never sent to a vision model.
+
+**No DICOM study on the disc.** The dialog asks for the files instead: images (DICOM, JPEG or PNG) and an optional report PDF.
+
+**Expiry.** Staged files are kept for 24 hours if an import is abandoned.
 
 ## Run as a systemd service
 

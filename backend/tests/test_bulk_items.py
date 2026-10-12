@@ -212,11 +212,11 @@ def test_delete_cleanup_continues_after_disk_error(auth_client, session, storage
     real = storage.delete_document_files
     calls = []
 
-    def flaky(file_rel, preview, document_id):
+    def flaky(file_rel, preview, document_id, attachments=()):
         calls.append(document_id)
         if len(calls) == 1:
             raise OSError("disk gone")
-        real(file_rel, preview, document_id)
+        real(file_rel, preview, document_id, attachments)
 
     monkeypatch.setattr(storage, "delete_document_files", flaky)
     resp = delete(auth_client, docs=[first.id, second.id])

@@ -14,7 +14,7 @@ from app.api.ocr import (
     default_translation_language,
 )
 from app.db import get_session
-from app.models import DocType, Document, DocumentTag, Folder, Tag
+from app.models import DocType, Document, DocumentOrigin, DocumentTag, Folder, Tag
 from app.services.jobs import enqueue
 from app.services.storage import Storage, get_storage
 from app.services.tree_sync import write_document_file
@@ -60,8 +60,14 @@ def create_pending_document(
     original_filename: str | None,
     description: str = "",
     document_date: date | None = None,
+    notes: str = "",
+    properties: list[dict[str, str]] | None = None,
+    origin: str = DocumentOrigin.file,
+    commit: bool = True,
 ) -> Document:
-    """Insert a pending document with validated folder/tags. Reused by scan compile."""
+    """Insert a pending document with validated folder/tags. Reused by scan compile.
+
+    commit=False only flushes, so the caller can add its jobs and commit everything at once."""
     if folder_id is not None and session.get(Folder, folder_id) is None:
         raise api_error(404, "not_found", "Folder not found")
     for tag_id in tag_ids:
@@ -78,15 +84,21 @@ def create_pending_document(
         translation_enabled=translation_enabled,
         folder_id=folder_id,
         original_filename=original_filename,
+        notes=notes,
+        properties=properties or [],
+        origin=origin,
     )
     if document_date is not None:
         doc.document_date = document_date
     session.add(doc)
-    session.commit()
-    session.refresh(doc)
+    session.flush()
     for tag_id in tag_ids:
         session.add(DocumentTag(document_id=doc.id, tag_id=tag_id))
-    session.commit()
+    if commit:
+        session.commit()
+        session.refresh(doc)
+    else:
+        session.flush()
     return doc
 
 
@@ -111,6 +123,7 @@ def upload_document(
     translation_enabled: bool = Form(default=False),
     translation_language: str | None = Form(default=None),
     document_date: date | None = Form(default=None),
+    notes: str = Form(default=""),
     session: Session = Depends(get_session),
     storage: Storage = Depends(get_storage),
 ) -> dict:
@@ -135,6 +148,7 @@ def upload_document(
         tag_ids=parse_tag_ids(tag_ids),
         original_filename=file.filename,
         document_date=document_date,
+        notes=notes,
     )
     with storage_errors():
         try:

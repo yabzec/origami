@@ -1,10 +1,10 @@
 import uuid
 from datetime import date, datetime, timezone
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
-from sqlalchemy import func
+from pydantic import BaseModel, Field, StringConstraints
+from sqlalchemy import delete, func
 from sqlmodel import Session, select
 
 from app.api.deps import api_error, get_current_user
@@ -17,6 +17,7 @@ from app.models import (
     DocStatus,
     DocType,
     Document,
+    DocumentAttachment,
     DocumentTag,
     Folder,
     Job,
@@ -34,12 +35,48 @@ router = APIRouter(
 )
 
 
+class PropertyRow(BaseModel):
+    key: Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)]
+    value: Annotated[str, StringConstraints(strip_whitespace=True, max_length=2000)]
+
+
 class DocumentPatch(BaseModel):
     title: str | None = None
     description: str | None = None
     folder_id: int | None = None
     tag_ids: list[int] | None = None
     document_date: date | None = None
+    notes: str | None = None
+    properties: list[PropertyRow] | None = Field(default=None, max_length=100)
+
+
+METADATA_FIELDS = {"title", "description", "notes", "properties"}
+
+
+def normalize_properties(rows: list[dict]) -> list[dict[str, str]]:
+    """Drop empty rows; every value needs a key; keys are unique ignoring case. Rows arrive stripped."""
+    result: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for row in rows:
+        if not row["key"] and not row["value"]:
+            continue
+        if not row["key"]:
+            raise api_error(422, "validation_error", "Every value needs a key")
+        if row["key"].casefold() in seen:
+            raise api_error(422, "validation_error", f"Duplicate key: {row['key']}")
+        seen.add(row["key"].casefold())
+        result.append({"key": row["key"], "value": row["value"]})
+    return result
+
+
+def queue_metadata_refresh(session: Session, doc: Document) -> None:
+    """Drop the metadata chunk and queue its rebuild (no commit), so edits become searchable."""
+    session.exec(
+        delete(Chunk).where(Chunk.document_id == doc.id, Chunk.source == ChunkSource.metadata)
+    )
+    session.add(
+        Job(type="refresh_metadata", payload={"document_id": str(doc.id)}, run_at=datetime.now(timezone.utc))
+    )
 
 
 def doc_tags(session: Session, doc: Document) -> list[Tag]:
@@ -99,16 +136,36 @@ def docs_with_content(session: Session, doc_ids: list[uuid.UUID]) -> set[uuid.UU
     )
 
 
+def attachments_for(session: Session, doc_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[dict]]:
+    """Attachments of the given documents, fetched in one query."""
+    out: dict[uuid.UUID, list[dict]] = {}
+    if not doc_ids:
+        return out
+    for att in session.exec(
+        select(DocumentAttachment)
+        .where(DocumentAttachment.document_id.in_(doc_ids))
+        .order_by(DocumentAttachment.id)
+    ):
+        out.setdefault(att.document_id, []).append(
+            {"id": att.id, "role": att.role, "filename": att.filename,
+             "file_size": att.file_size, "page_count": att.page_count}
+        )
+    return out
+
+
 def serialize(
     session: Session,
     doc: Document,
     active_jobs: dict[str, dict] | None = None,
     with_content: set[uuid.UUID] | None = None,
+    attachments: dict[uuid.UUID, list[dict]] | None = None,
 ) -> dict:
     if active_jobs is None:
         active_jobs = active_jobs_for(session, [doc.id])
     if with_content is None:
         with_content = docs_with_content(session, [doc.id])
+    if attachments is None:
+        attachments = attachments_for(session, [doc.id])
     has_text = doc.id in with_content
     language_differs = bool(doc.detected_language) and doc.detected_language != doc.translation_language
     return {
@@ -117,6 +174,7 @@ def serialize(
         "translatable": language_differs and has_text,
         "tags": [t.model_dump() for t in doc_tags(session, doc)],
         "active_job": active_jobs.get(str(doc.id)),
+        "attachments": attachments.get(doc.id, []),
     }
 
 
@@ -174,7 +232,8 @@ def list_documents(
     ids = [d.id for d in docs]
     active_jobs = active_jobs_for(session, ids)
     with_content = docs_with_content(session, ids)
-    return [serialize(session, d, active_jobs, with_content) for d in docs]
+    attachments = attachments_for(session, ids)
+    return [serialize(session, d, active_jobs, with_content, attachments) for d in docs]
 
 
 BULK_MAX = 500
@@ -188,13 +247,16 @@ class BulkMove(BulkIds):
     folder_id: int | None
 
 
-def delete_documents(session: Session, docs: list[Document]) -> list[tuple]:
+def delete_documents(session: Session, docs: list[Document]) -> list[tuple[str | None, str | None, uuid.UUID, list[str]]]:
     """Cancel queued jobs and delete rows (no commit); returns the files to remove after commit."""
-    files: list[tuple] = []
+    files: list[tuple[str | None, str | None, uuid.UUID, list[str]]] = []
     for doc in docs:
-        files.append((doc.file_path, doc.preview_path, doc.id))
+        attachments = list(
+            session.exec(select(DocumentAttachment.file_path).where(DocumentAttachment.document_id == doc.id))
+        )
+        files.append((doc.file_path, doc.preview_path, doc.id, attachments))
         _cancel_queued_jobs(session, doc)
-        session.delete(doc)  # chunks, document_tags and translation segments cascade via FK
+        session.delete(doc)  # chunks, attachments, document_tags and translation segments cascade via FK
     return files
 
 
@@ -236,8 +298,8 @@ def bulk_delete(
     missing = [str(i) for i in body.ids if i not in found]
     files = delete_documents(session, docs)
     session.commit()
-    for file_rel, preview, doc_id in files:
-        storage.delete_document_files(file_rel, preview, doc_id)
+    for file_rel, preview, doc_id, attachments in files:
+        storage.delete_document_files(file_rel, preview, doc_id, attachments)
     return {"deleted": len(docs), "missing": missing}
 
 
@@ -286,6 +348,12 @@ def update_document(
     if fields.get("document_date", ...) is None:
         fields.pop("document_date", None)  # column is NOT NULL; an empty date input means "unchanged"
 
+    if "properties" in fields:
+        if fields["properties"] is None:
+            fields.pop("properties")  # column is NOT NULL; null means "unchanged"
+        else:
+            fields["properties"] = normalize_properties(fields["properties"])
+
     if "folder_id" in fields and fields["folder_id"] is not None:
         if session.get(Folder, fields["folder_id"]) is None:
             raise api_error(404, "not_found", "Folder not found")
@@ -294,6 +362,9 @@ def update_document(
         if "title" in fields or "folder_id" in fields:
             lock_tree(session)  # before the row lock: same order as write_document_file
         [doc] = lock_documents(session, [document_id])
+        metadata_changed = any(
+            getattr(doc, key) != value for key, value in fields.items() if key in METADATA_FIELDS
+        )
         for key, value in fields.items():
             setattr(doc, key, value)
 
@@ -310,6 +381,8 @@ def update_document(
         if "title" in fields or "folder_id" in fields:
             relocate_document(session, storage, moves, doc)
         doc.updated_at = datetime.now(timezone.utc)
+        if metadata_changed:
+            queue_metadata_refresh(session, doc)
     session.refresh(doc)
     return serialize(session, doc)
 
@@ -324,8 +397,8 @@ def delete_document(
     docs = lock_documents(session, [document_id])  # file path as of the lock, not a stale read
     files = delete_documents(session, docs)
     session.commit()
-    for file_rel, preview, doc_id in files:
-        storage.delete_document_files(file_rel, preview, doc_id)
+    for file_rel, preview, doc_id, attachments in files:
+        storage.delete_document_files(file_rel, preview, doc_id, attachments)
 
 
 class ReprocessRequest(BaseModel):

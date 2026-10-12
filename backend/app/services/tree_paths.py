@@ -5,7 +5,7 @@ from pathlib import Path, PurePosixPath
 
 from sqlmodel import Session, select
 
-from app.models import Document, Folder
+from app.models import Document, DocumentAttachment, Folder
 
 UNSAFE = re.compile(r'[/\\:*?"<>|\x00-\x1f\x7f]')
 MAX_NAME_BYTES = 200
@@ -66,4 +66,39 @@ def document_rel_path(session: Session, storage, doc: Document, ext: str) -> str
     if doc.file_path and str(PurePosixPath(doc.file_path).parent) == (dir_rel or "."):
         own = PurePosixPath(doc.file_path).name
     name = unique_name(storage.abs_path(dir_rel), safe_name(doc.title), ext.lower(), taken, own)
+    return join_rel(dir_rel, name)
+
+
+def has_attachments(session: Session, document_id) -> bool:
+    return (
+        session.exec(select(DocumentAttachment.id).where(DocumentAttachment.document_id == document_id)).first()
+        is not None
+    )
+
+
+def bundle_dir_names(session: Session, folder_id: int | None, exclude_id=None) -> set[str]:
+    """Disk names of the bundle directories (documents with attachments) directly inside a folder."""
+    same_folder = Document.folder_id.is_(None) if folder_id is None else Document.folder_id == folder_id
+    query = select(Document.file_path).where(
+        same_folder,
+        Document.file_path.is_not(None),
+        Document.id.in_(select(DocumentAttachment.document_id)),
+    )
+    if exclude_id is not None:
+        query = query.where(Document.id != exclude_id)
+    return {PurePosixPath(p).parent.name for p in session.exec(query)}
+
+
+def bundle_rel_dir(session: Session, storage, doc: Document) -> str:
+    """Target bundle directory of a document with attachments, for its current title and folder."""
+    dir_rel = folder_rel_dir(session, doc.folder_id)
+    same_parent = Folder.parent_id.is_(None) if doc.folder_id is None else Folder.parent_id == doc.folder_id
+    taken = bundle_dir_names(session, doc.folder_id, exclude_id=doc.id)
+    taken |= {safe_name(f.name) for f in session.exec(select(Folder).where(same_parent))}
+    own = None
+    if doc.file_path and has_attachments(session, doc.id):
+        current = PurePosixPath(doc.file_path).parent
+        if str(current.parent) == (dir_rel or "."):
+            own = current.name
+    name = unique_name(storage.abs_path(dir_rel), safe_name(doc.title), "", taken, own)
     return join_rel(dir_rel, name)

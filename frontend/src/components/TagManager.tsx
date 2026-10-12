@@ -1,10 +1,16 @@
 import { useState } from "react";
+import { Link, useLocation } from "react-router";
+import { browseQuery, DEFAULT_BROWSE, parseBrowseParams } from "@/lib/browseParams";
+import { cn } from "@/lib/utils";
 import { useCreateTag, useDeleteTag, useTags } from "@/hooks/useTags";
 
 export function TagManager() {
   const { data: tags } = useTags();
   const create = useCreateTag();
   const remove = useDeleteTag();
+  const location = useLocation();
+  const activeTagId =
+    location.pathname === "/" ? parseBrowseParams(new URLSearchParams(location.search)).tagId : null;
   const [name, setName] = useState("");
   const [color, setColor] = useState("#888888");
 
@@ -13,9 +19,21 @@ export function TagManager() {
       <span className="px-2 text-xs font-semibold uppercase text-zinc-400">Tags</span>
       <ul className="mt-1">
         {(tags ?? []).map((tag) => (
-          <li key={tag.id} className="group flex items-center gap-2 px-2 py-1 text-sm">
-            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: tag.color }} />
-            <span className="flex-1 truncate">{tag.name}</span>
+          <li
+            key={tag.id}
+            className={cn(
+              "group flex items-center gap-2 rounded px-2 py-1 text-sm hover:bg-zinc-100",
+              activeTagId === tag.id && "bg-zinc-200 font-medium",
+            )}
+          >
+            <Link
+              to={`/${browseQuery({ ...DEFAULT_BROWSE, all: true, tagId: tag.id })}`}
+              aria-current={activeTagId === tag.id ? "page" : undefined}
+              className="flex min-w-0 flex-1 items-center gap-2"
+            >
+              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: tag.color }} />
+              <span className="flex-1 truncate">{tag.name}</span>
+            </Link>
             <button
               className="hidden text-zinc-400 hover:text-red-600 group-hover:block"
               onClick={() => window.confirm(`Delete tag "${tag.name}"?`) && remove.mutate(tag.id)}

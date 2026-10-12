@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { DocFilters, FilterField } from "@/components/DocFilters";
 import { DocumentCard } from "@/components/DocumentCard";
+import { DiscImportDialog } from "@/components/DiscImportDialog";
 import { BatchUploadDialog } from "@/components/BatchUploadDialog";
 import { NewFolderDialog } from "@/components/NewFolderDialog";
 import { UploadDialog } from "@/components/UploadDialog";
@@ -79,12 +80,15 @@ export function BrowsePage() {
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
   const folderInput = useRef<HTMLInputElement>(null);
+  const discInput = useRef<HTMLInputElement>(null);
+  const [discPicked, setDiscPicked] = useState<PickedFile[] | null>(null);
   const [picked, setPicked] = useState<PickedFile[] | null>(null);
   const [uploadMenu, setUploadMenu] = useState(false);
   const [newFolder, setNewFolder] = useState(false);
 
   useEffect(() => {
     folderInput.current?.setAttribute("webkitdirectory", ""); // not in React's input typings
+    discInput.current?.setAttribute("webkitdirectory", "");
   }, []);
 
   useEffect(() => {
@@ -148,7 +152,7 @@ export function BrowsePage() {
             Upload
           </Button>
           {uploadMenu && (
-            <div role="menu" className="absolute right-0 z-20 mt-1 w-36 rounded-md border border-zinc-200 bg-white p-1 shadow">
+            <div role="menu" className="absolute right-0 z-20 mt-1 w-44 rounded-md border border-zinc-200 bg-white p-1 shadow">
               <button
                 role="menuitem"
                 className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-zinc-100"
@@ -169,6 +173,16 @@ export function BrowsePage() {
               >
                 Folder…
               </button>
+              <button
+                role="menuitem"
+                className="block w-full rounded px-2 py-1 text-left text-sm hover:bg-zinc-100"
+                onClick={() => {
+                  setUploadMenu(false);
+                  discInput.current?.click();
+                }}
+              >
+                X-ray disc…
+              </button>
             </div>
           )}
         </div>
@@ -188,6 +202,16 @@ export function BrowsePage() {
           hidden
           onChange={(e) => {
             receive(pickedFromInput(e.target.files ?? []));
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={discInput}
+          type="file"
+          hidden
+          onChange={(e) => {
+            const files = pickedFromInput(e.target.files ?? []);
+            if (files.length > 0) setDiscPicked(files);
             e.target.value = "";
           }}
         />
@@ -299,6 +323,13 @@ export function BrowsePage() {
           picked={picked}
           open
           onClose={() => setPicked(null)}
+          initialFolderId={params.all ? null : params.folderId}
+        />
+      )}
+      {discPicked && (
+        <DiscImportDialog
+          picked={discPicked}
+          onClose={() => setDiscPicked(null)}
           initialFolderId={params.all ? null : params.folderId}
         />
       )}

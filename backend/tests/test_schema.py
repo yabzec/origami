@@ -85,3 +85,37 @@ def test_embedding_column_keeps_1536_dims(engine):
             "WHERE attrelid = 'chunks'::regclass AND attname = 'embedding'"
         )).scalar_one()
     assert dim == 1536
+
+
+def test_disc_import_schema(engine):
+    inspector = inspect(engine)
+    assert {"document_attachments", "disc_imports"} <= set(inspector.get_table_names())
+    doc_cols = {c["name"] for c in inspector.get_columns("documents")}
+    assert {"notes", "properties", "origin"} <= doc_cols
+    assert "attachment_id" in {c["name"] for c in inspector.get_columns("chunks")}
+
+
+def test_attachments_and_their_chunks_cascade_with_document(session):
+    from sqlmodel import select
+
+    from app.models import Chunk, ChunkSource, DocType, Document, DocumentAttachment
+
+    doc = Document(title="Study", doc_type=DocType.pdf, properties=[{"key": "Modality", "value": "DX"}])
+    session.add(doc)
+    session.commit()
+    att = DocumentAttachment(
+        document_id=doc.id, role="report", filename="Report.pdf", file_path="Study/Report.pdf", file_size=1
+    )
+    session.add(att)
+    session.commit()
+    session.add(Chunk(document_id=doc.id, chunk_index=0, source=ChunkSource.content, content="x", attachment_id=att.id))
+    session.commit()
+    session.refresh(doc)
+    assert doc.notes == ""
+    assert doc.properties == [{"key": "Modality", "value": "DX"}]
+    assert doc.origin == "file"
+
+    session.delete(doc)
+    session.commit()
+    assert session.exec(select(DocumentAttachment)).all() == []
+    assert session.exec(select(Chunk)).all() == []
