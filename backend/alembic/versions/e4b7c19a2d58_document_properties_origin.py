@@ -60,15 +60,19 @@ def _to_rows(meta: dict) -> list[dict]:
 def upgrade() -> None:
     op.add_column("documents", sa.Column("origin", sa.String(), nullable=False, server_default="file"))
     op.execute("UPDATE documents SET origin = 'scan' WHERE doc_type = 'scan'")
-    op.execute("UPDATE documents SET origin = 'xray_disc' WHERE extra_metadata IS NOT NULL")
+    op.execute("UPDATE documents SET origin = 'xray_disc' WHERE jsonb_typeof(extra_metadata) = 'object'")
     op.alter_column("documents", "extra_metadata", new_column_name="properties")
     conn = op.get_bind()
     for doc_id, meta in conn.execute(
-        sa.select(documents.c.id, documents.c.properties).where(documents.c.properties.is_not(None))
+        sa.select(documents.c.id, documents.c.properties).where(
+            sa.func.jsonb_typeof(documents.c.properties) == "object"
+        )
     ).all():
-        rows = _to_rows(meta) if isinstance(meta, dict) else []
-        conn.execute(documents.update().where(documents.c.id == doc_id).values(properties=rows))
-    op.execute("UPDATE documents SET properties = '[]'::jsonb WHERE properties IS NULL")
+        conn.execute(documents.update().where(documents.c.id == doc_id).values(properties=_to_rows(meta)))
+    # SQL NULL and JSON null (what the old ORM stored for None) both become an empty list
+    op.execute(
+        "UPDATE documents SET properties = '[]'::jsonb WHERE properties IS NULL OR jsonb_typeof(properties) <> 'array'"
+    )
     op.alter_column(
         "documents", "properties", nullable=False, server_default=sa.text("'[]'::jsonb")
     )

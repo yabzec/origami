@@ -163,6 +163,9 @@ def test_properties_and_origin_backfilled(engine):
             conn.execute(insert, {"title": "PropStudy", "doc_type": "pdf", "meta": meta})
             conn.execute(insert, {"title": "PropScan", "doc_type": "scan", "meta": None})
             conn.execute(insert, {"title": "PropFile", "doc_type": "pdf", "meta": None})
+            # the old ORM stored Python None as JSON null
+            conn.execute(insert, {"title": "PropJsonNullFile", "doc_type": "pdf", "meta": "null"})
+            conn.execute(insert, {"title": "PropJsonNullScan", "doc_type": "scan", "meta": "null"})
         command.upgrade(cfg, "head")
         with engine.begin() as conn:
             rows = {
@@ -182,6 +185,8 @@ def test_properties_and_origin_backfilled(engine):
         )
         assert rows["PropScan"] == ("scan", [])
         assert rows["PropFile"] == ("file", [])
+        assert rows["PropJsonNullFile"] == ("file", [])
+        assert rows["PropJsonNullScan"] == ("scan", [])
     finally:
         command.upgrade(cfg, "head")
         with engine.begin() as conn:

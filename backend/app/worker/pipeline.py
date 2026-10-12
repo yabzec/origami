@@ -10,8 +10,8 @@ from sqlmodel import Session, select
 
 from app.config import get_settings
 from app.models import (
-    AttachmentRole, Chunk, ChunkSource, DiscImport, DiscImportStatus, DocStatus, DocType, Document, DocumentAttachment, DocumentOrigin, Job,
-    JobStatus, TranslationSegment, TranslationStatus,
+    AttachmentRole, Chunk, ChunkSource, DiscImport, DiscImportStatus, DocStatus, DocType, Document,
+    DocumentAttachment, DocumentOrigin, Job, JobStatus, TranslationSegment, TranslationStatus,
 )
 from app.services.chunking import chunk_pages, page_texts_from_chunks, segment_pages
 from app.services.convert import OFFICE_EXTENSIONS, ConversionError, office_to_pdf
