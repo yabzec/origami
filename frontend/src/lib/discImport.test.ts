@@ -83,6 +83,13 @@ describe("disc file selection", () => {
   it("puts manual picks under manual/", () => {
     expect(manualFiles([file("a.jpg")]).map((f) => f.path)).toEqual(["manual/a.jpg"]);
   });
+
+  it("prefixes repeated names with an index and drops oversized files", () => {
+    const paths = manualFiles([file("a.jpg"), file("b.jpg"), file("a.jpg"), file("big.jpg", DISC_MAX_FILE_BYTES + 1)]).map(
+      (f) => f.path,
+    );
+    expect(paths).toEqual(["manual/1-a.jpg", "manual/b.jpg", "manual/3-a.jpg"]);
+  });
 });
 
 describe("upload batches", () => {
@@ -117,6 +124,12 @@ describe("drafts", () => {
     });
     const tagged = draftFromStudy(study({ patient_tag_id: 4 }), [], null);
     expect([tagged.tagIds, tagged.addPatientTag]).toEqual([[4], false]);
+  });
+
+  it("does not include a study without a readable image", () => {
+    const s = study({ images: study().images.map((i) => ({ ...i, readable: false })) });
+    const d = draftFromStudy(s, [], null);
+    expect([d.include, d.imageKeys]).toEqual([false, []]);
   });
 
   it("offers own and unassigned reports", () => {

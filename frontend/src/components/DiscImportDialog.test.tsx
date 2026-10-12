@@ -119,6 +119,22 @@ describe("DiscImportDialog", () => {
     finish({ documents: [] });
   });
 
+  it("closes with Escape after a successful import without deleting the committed import", async () => {
+    vi.mocked(api.post)
+      .mockResolvedValueOnce({ id: "imp" })
+      .mockResolvedValueOnce({ documents: [{ id: "d1", title: "Rx gamba — 2026-08-28" }] });
+    vi.mocked(api.upload).mockResolvedValueOnce(PREVIEW);
+    vi.mocked(api.del).mockClear();
+    createTag.mockResolvedValueOnce({ id: 9, name: "Mario Rossi", color: "#888888" });
+    const onClose = vi.fn();
+    renderDialog(onClose);
+    await userEvent.click(await screen.findByRole("button", { name: "Import" }));
+    await screen.findByRole("link", { name: "Rx gamba — 2026-08-28" });
+    await userEvent.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalled();
+    expect(api.del).not.toHaveBeenCalled();
+  });
+
   it("deletes the import and skips the upload when closed before it was created", async () => {
     let created: (v: { id: string }) => void = () => {};
     vi.mocked(api.post).mockReturnValueOnce(new Promise((resolve) => (created = resolve)));

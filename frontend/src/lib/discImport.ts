@@ -47,8 +47,15 @@ export function discFiles(picked: PickedFile[]): StagedFile[] {
     .filter((f) => keepDiscFile(f.path, f.file.size));
 }
 
+/** Manually added images; repeated names within the batch get an index prefix so none overwrites another. */
 export function manualFiles(files: File[]): StagedFile[] {
-  return files.map((file) => ({ file, path: `manual/${file.name}` }));
+  const kept = files.filter((f) => f.size <= DISC_MAX_FILE_BYTES);
+  const counts = new Map<string, number>();
+  for (const f of kept) counts.set(f.name, (counts.get(f.name) ?? 0) + 1);
+  return kept.map((file, i) => ({
+    file,
+    path: `manual/${(counts.get(file.name) ?? 0) > 1 ? `${i + 1}-` : ""}${file.name}`,
+  }));
 }
 
 export function uploadBatches(
@@ -106,7 +113,7 @@ export function reportsFor(study: DiscStudy, reports: DiscReport[]): DiscReport[
 export function draftFromStudy(study: DiscStudy, reports: DiscReport[], folderId: number | null): StudyDraft {
   return {
     key: study.key,
-    include: true,
+    include: study.images.some((i) => i.readable),
     title: study.title,
     documentDate: study.document_date ?? "",
     notes: "",

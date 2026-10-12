@@ -189,6 +189,7 @@ export function DiscImportDialog({
         commitBody(drafts, preview, patientTagIds, processing),
       );
       committed.current = true;
+      importing.current = false; // the staging now belongs to the jobs; the done view can be closed
       qc.invalidateQueries({ queryKey: ["documents"] });
       qc.invalidateQueries({ queryKey: ["folders"] });
       setPhase({ kind: "done", documents: result.documents });

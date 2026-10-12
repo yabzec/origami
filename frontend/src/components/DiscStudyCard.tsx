@@ -71,6 +71,9 @@ export function DiscStudyCard({
       </div>
       <fieldset>
         <legend className="mb-1 text-sm font-medium">Images</legend>
+        {!study.images.some((i) => i.readable) && (
+          <p className="mb-1 text-xs text-amber-700">No image can be decoded; add the images with Add files.</p>
+        )}
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
           {study.images.map((image) => (
             <label key={image.key} className={image.readable ? "text-xs" : "text-xs opacity-50"}>

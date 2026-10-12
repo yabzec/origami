@@ -20,6 +20,7 @@ Self-hosted document management system: scan, upload, OCR, semantic search, and 
 - **Background jobs with retries:** every job is retried after 30 s, 2 min, 10 min and 30 min (5 attempts). Between attempts the document stays `pending` and the UI shows the next attempt. After the last failure every user with an email address gets a notification. Translation runs as its own retried job.
 - **Chat:** multi-turn conversation with Markdown answers and `[n]` citations that link to the documents. Origami shortlists candidate documents locally and asks the LLM which ones you mean. Passages come only from those documents and from files you pin. The files in context show as chips: remove one to keep it out of the conversation, or add one with **+ Add file**. The conversation is kept in the browser tab (session storage) until you press **New chat**.
 - Import an X-ray disc from the hospital (IHE PDI): pick the disc folder in the browser; each study becomes one document with an image PDF built from the DICOM files and the radiology report attached.
+- **Notes:** every document has a free-text Notes field; it is searchable and shown on the document page.
 
 ## Installation
 
